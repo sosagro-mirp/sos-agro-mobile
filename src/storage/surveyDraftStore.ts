@@ -1,0 +1,173 @@
+import { eq } from 'drizzle-orm';
+import { db } from './db/db';
+import { surveys, responses } from './db/schema';
+import type { InstrumentDraftAnswer } from '../types';
+
+export interface SurveyDraft {
+  surveyId: string;
+  instrumentId: string;
+  campaignSessionId?: string;
+  answers: Record<string, InstrumentDraftAnswer>;
+  updatedAt: Date;
+}
+
+export const surveyDraftStore = {
+  async createDraft(params: {
+    surveyId: string;
+    instrumentId: string;
+    campaignSessionId?: string;
+  }): Promise<void> {
+    const now = new Date();
+    await db.insert(surveys).values({
+      id: params.surveyId,
+      instrumentId: params.instrumentId,
+      campaignSessionId: params.campaignSessionId ?? null,
+      status: 'draft',
+      createdAt: now,
+      updatedAt: now,
+    });
+  },
+
+  async saveAnswer(
+    surveyId: string,
+    questionId: string,
+    answer: InstrumentDraftAnswer
+  ): Promise<void> {
+    const id = `${surveyId}:${questionId}`;
+
+    await db
+      .insert(responses)
+      .values({
+        id,
+        surveyId,
+        questionId,
+        optionId: answer.optionId ?? null,
+        optionIds: answer.optionIds ? JSON.stringify(answer.optionIds) : null,
+        textValue: answer.textValue ?? null,
+        numericValue: answer.numericValue ?? null,
+        booleanValue: answer.booleanValue ?? null,
+        otherText: answer.otherText ?? null,
+      })
+      .onConflictDoUpdate({
+        target: responses.id,
+        set: {
+          optionId: answer.optionId ?? null,
+          optionIds: answer.optionIds ? JSON.stringify(answer.optionIds) : null,
+          textValue: answer.textValue ?? null,
+          numericValue: answer.numericValue ?? null,
+          booleanValue: answer.booleanValue ?? null,
+          otherText: answer.otherText ?? null,
+        },
+      });
+
+    await db
+      .update(surveys)
+      .set({ updatedAt: new Date() })
+      .where(eq(surveys.id, surveyId));
+  },
+
+  async saveMultipleAnswers(
+    surveyId: string,
+    answers: Record<string, InstrumentDraftAnswer>
+  ): Promise<void> {
+    await db.transaction(async (tx) => {
+      for (const [questionId, answer] of Object.entries(answers)) {
+        const id = `${surveyId}:${questionId}`;
+        await tx
+          .insert(responses)
+          .values({
+            id,
+            surveyId,
+            questionId,
+            optionId: answer.optionId ?? null,
+            optionIds: answer.optionIds ? JSON.stringify(answer.optionIds) : null,
+            textValue: answer.textValue ?? null,
+            numericValue: answer.numericValue ?? null,
+            booleanValue: answer.booleanValue ?? null,
+            otherText: answer.otherText ?? null,
+          })
+          .onConflictDoUpdate({
+            target: responses.id,
+            set: {
+              optionId: answer.optionId ?? null,
+              optionIds: answer.optionIds ? JSON.stringify(answer.optionIds) : null,
+              textValue: answer.textValue ?? null,
+              numericValue: answer.numericValue ?? null,
+              booleanValue: answer.booleanValue ?? null,
+              otherText: answer.otherText ?? null,
+            },
+          });
+      }
+      await tx
+        .update(surveys)
+        .set({ updatedAt: new Date() })
+        .where(eq(surveys.id, surveyId));
+    });
+  },
+
+  async loadDraft(surveyId: string): Promise<SurveyDraft | null> {
+    const survey = await db
+      .select()
+      .from(surveys)
+      .where(eq(surveys.id, surveyId))
+      .get();
+
+    if (!survey) return null;
+
+    const rows = await db
+      .select()
+      .from(responses)
+      .where(eq(responses.surveyId, surveyId))
+      .all();
+
+    const answers: Record<string, InstrumentDraftAnswer> = {};
+    for (const row of rows) {
+      answers[row.questionId] = {
+        questionId: row.questionId,
+        optionId: row.optionId ?? undefined,
+        optionIds: row.optionIds ? (JSON.parse(row.optionIds) as string[]) : undefined,
+        textValue: row.textValue ?? undefined,
+        numericValue: row.numericValue ?? undefined,
+        booleanValue: row.booleanValue ?? undefined,
+        otherText: row.otherText ?? undefined,
+      };
+    }
+
+    return {
+      surveyId: survey.id,
+      instrumentId: survey.instrumentId,
+      campaignSessionId: survey.campaignSessionId ?? undefined,
+      answers,
+      updatedAt: survey.updatedAt,
+    };
+  },
+
+  async listDrafts(): Promise<SurveyDraft[]> {
+    const rows = await db
+      .select()
+      .from(surveys)
+      .where(eq(surveys.status, 'draft'))
+      .all();
+
+    return Promise.all(rows.map((r) => this.loadDraft(r.id) as Promise<SurveyDraft>));
+  },
+
+  async markCompleted(surveyId: string): Promise<void> {
+    await db
+      .update(surveys)
+      .set({ status: 'completed', updatedAt: new Date() })
+      .where(eq(surveys.id, surveyId));
+  },
+
+  async markSynced(surveyId: string): Promise<void> {
+    await db
+      .update(surveys)
+      .set({ status: 'synced', updatedAt: new Date() })
+      .where(eq(surveys.id, surveyId));
+  },
+
+  async deleteDraft(surveyId: string): Promise<void> {
+    // responses se borran en cascada por FK
+    await db.delete(surveys).where(eq(surveys.id, surveyId));
+  },
+};

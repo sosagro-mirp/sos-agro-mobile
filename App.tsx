@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { ActivityIndicator, StyleSheet, View } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import {
@@ -11,6 +11,7 @@ import {
 } from "@expo-google-fonts/jetbrains-mono";
 import * as SplashScreen from "expo-splash-screen";
 import { useAuthStore } from "./src/store/useAuthStore";
+import { runMigrations } from "./src/storage/db/db";
 import LoginScreen from "./app/login";
 import HomeScreen from "./app/index";
 
@@ -18,6 +19,7 @@ SplashScreen.preventAutoHideAsync();
 
 export default function App() {
   const { user, isRestoring, restoreSession } = useAuthStore();
+  const [dbReady, setDbReady] = useState(false);
 
   const [fontsLoaded] = useFonts({
     JetBrainsMono_400Regular,
@@ -28,16 +30,21 @@ export default function App() {
   });
 
   useEffect(() => {
-    restoreSession();
+    runMigrations()
+      .then(() => {
+        setDbReady(true);
+        restoreSession();
+      })
+      .catch(console.error);
   }, []);
 
   useEffect(() => {
-    if (fontsLoaded && !isRestoring) {
+    if (fontsLoaded && !isRestoring && dbReady) {
       SplashScreen.hideAsync();
     }
-  }, [fontsLoaded, isRestoring]);
+  }, [fontsLoaded, isRestoring, dbReady]);
 
-  if (!fontsLoaded || isRestoring) {
+  if (!fontsLoaded || isRestoring || !dbReady) {
     return (
       <View style={styles.loading}>
         <ActivityIndicator size="large" color="#1B6B3A" />

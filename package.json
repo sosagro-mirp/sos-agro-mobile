@@ -1,27 +1,52 @@
 {
   "name": "mobile",
   "version": "1.0.0",
-  "main": "index.ts",
+  "main": "expo-router/entry",
   "dependencies": {
     "@expo-google-fonts/jetbrains-mono": "^0.4.1",
+    "@react-native-community/netinfo": "11.4.1",
+    "@sentry/react-native": "^6.5.0",
+    "@tanstack/react-query": "^5.101.0",
+    "drizzle-orm": "^0.45.2",
     "expo": "~54.0.0",
+    "expo-background-fetch": "~14.0.9",
+    "expo-file-system": "~19.0.23",
     "expo-font": "^14.0.12",
+    "expo-router": "~6.0.24",
     "expo-secure-store": "^15.0.8",
     "expo-splash-screen": "^31.0.13",
+    "expo-sqlite": "~16.0.10",
     "expo-status-bar": "~3.0.9",
+    "expo-task-manager": "~14.0.9",
     "react": "19.1.0",
     "react-native": "0.81.5",
+    "react-native-safe-area-context": "~5.6.2",
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@types/jest": "^29.5.12",
     "@types/react": "~19.1.17",
+    "drizzle-kit": "^0.31.10",
+    "jest-expo": "^54.0.0",
+    "msw": "^2.4.9",
     "typescript": "~5.9.3"
   },
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "test": "jest"
+  },
+  "jest": {
+    "preset": "jest-expo",
+    "transformIgnorePatterns": [
+      "node_modules/(?!((jest-)?react-native|@react-native(-community)?)|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|drizzle-orm)"
+    ],
+    "setupFilesAfterEnv": ["./src/__tests__/setup.ts"],
+    "moduleNameMapper": {
+      "^expo-sqlite$": "<rootDir>/src/__tests__/__mocks__/expo-sqlite.ts"
+    }
   },
   "private": true
 }

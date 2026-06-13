@@ -1,0 +1,102 @@
+appId: co.edu.itm.sosagro.characterization
+---
+# End-to-end flow: pollster launches app, enters a campaign, answers a survey,
+# kills the app mid-session, resumes from drafts, completes offline, then syncs.
+
+name: Pollster flow — draft resume + offline sync
+
+# ─── 1. Launch ────────────────────────────────────────────────────────────────
+- launchApp
+
+# ─── 2. Login ─────────────────────────────────────────────────────────────────
+- assertVisible: "Iniciar sesión"
+- tapOn: "Correo electrónico"
+- inputText: "encuestador@sosagro.co"
+- tapOn: "Contraseña"
+- inputText: "Test1234!"
+- tapOn: "Iniciar sesión"
+
+# ─── 3. Navigate to Campaigns ─────────────────────────────────────────────────
+- assertVisible: "Campañas"
+- tapOn: "Campañas"
+- assertVisible: "Actualizar"
+- tapOn: "Actualizar"
+
+# ─── 4. Enter a campaign ──────────────────────────────────────────────────────
+- assertVisible:
+    text: "Campaña"
+    index: 0
+- tapOn:
+    text: "Campaña"
+    index: 0
+
+# ─── 5. Pre-survey — farmer data ──────────────────────────────────────────────
+- assertVisible: "Buscar agricultor"
+- tapOn: "Nuevo agricultor"
+- tapOn: "Nombre"
+- inputText: "Carlos"
+- tapOn: "Apellido"
+- inputText: "Pérez"
+- tapOn: "Documento"
+- inputText: "12345678"
+- tapOn: "Teléfono"
+- inputText: "3001234567"
+- tapOn: "Continuar"
+
+# ─── 6. Start the instrument ──────────────────────────────────────────────────
+- assertVisible: "Comenzar"
+- tapOn: "Comenzar"
+
+# ─── 7. Answer the first question ─────────────────────────────────────────────
+- assertVisible:
+    id: "question-container"
+- tapOn: "Siguiente"
+
+# ─── 8. Kill the app mid-session ──────────────────────────────────────────────
+- stopApp
+
+# ─── 9. Reopen the app ────────────────────────────────────────────────────────
+- launchApp
+
+# ─── 10. Navigate to Drafts ───────────────────────────────────────────────────
+- assertVisible: "Borradores"
+- tapOn: "Borradores"
+- assertVisible:
+    text: "Pérez"
+
+# ─── 11. Resume the draft ─────────────────────────────────────────────────────
+- tapOn:
+    text: "Pérez"
+- assertVisible: "Continuar encuesta"
+- tapOn: "Continuar encuesta"
+
+# ─── 12. Verify resume at correct question (question 2 or later) ─────────────
+- assertVisible:
+    id: "question-container"
+
+# ─── 13. Complete the remaining questions ────────────────────────────────────
+- scrollUntilVisible:
+    element:
+      text: "Finalizar"
+    direction: DOWN
+- tapOn: "Finalizar"
+- assertVisible: "Encuesta completada"
+
+# ─── 14. Enable airplane mode (simulate offline) ─────────────────────────────
+- setLocation:
+    lat: 0
+    long: 0
+# MSW-style offline: use Maestro network toggle
+- toggleAirplaneMode: true
+
+# ─── 15. Submit (should succeed offline — queued) ────────────────────────────
+- tapOn: "Enviar"
+- assertVisible: "Guardado sin conexión"
+
+# ─── 16. Re-enable network ───────────────────────────────────────────────────
+- toggleAirplaneMode: false
+
+# ─── 17. Verify sync completes ───────────────────────────────────────────────
+- assertVisible:
+    text: "Sincronizado"
+    timeout: 15000

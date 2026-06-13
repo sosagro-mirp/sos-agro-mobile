@@ -17,4 +17,7 @@ export const endpoints = {
   campaignSessions: "/api/campaign-sessions",
   campaignSessionNextStep: (id: string) => `/api/campaign-sessions/${id}/next-step`,
   campaignSessionSync: (id: string) => `/api/campaign-sessions/${id}/sync`,
+
+  // Telemetry
+  telemetrySync: '/api/telemetry/sync',
 } as const;

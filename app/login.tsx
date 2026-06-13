@@ -106,7 +106,6 @@ export default function LoginScreen() {
 }
 
 const GREEN = "#1B6B3A";
-const GREEN_DARK = "#145430";
 
 const styles = StyleSheet.create({
   root: {
