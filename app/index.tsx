@@ -1,5 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useAuthStore } from "../src/store/useAuthStore";
+import { Fonts } from "../src/theme/fonts";
 
 export default function HomeScreen() {
   const { user, logout } = useAuthStore();
@@ -29,18 +30,19 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 28,
-    fontWeight: "800",
+    fontFamily: Fonts.extraBold,
     color: "#1B6B3A",
     marginBottom: 24,
   },
   welcome: {
     fontSize: 18,
-    fontWeight: "600",
+    fontFamily: Fonts.semiBold,
     color: "#111827",
     textAlign: "center",
   },
   role: {
     fontSize: 14,
+    fontFamily: Fonts.regular,
     color: "#6B7280",
     marginTop: 6,
     marginBottom: 40,
@@ -56,6 +58,6 @@ const styles = StyleSheet.create({
   buttonText: {
     color: "#1B6B3A",
     fontSize: 15,
-    fontWeight: "600",
+    fontFamily: Fonts.semiBold,
   },
 });

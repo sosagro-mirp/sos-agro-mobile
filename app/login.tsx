@@ -10,6 +10,7 @@ import {
   View,
 } from "react-native";
 import { useAuthStore } from "../src/store/useAuthStore";
+import { Fonts } from "../src/theme/fonts";
 
 export default function LoginScreen() {
   const { login, loading, error, clearError } = useAuthStore();
@@ -120,12 +121,13 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 32,
-    fontWeight: "800",
+    fontFamily: Fonts.extraBold,
     color: "#fff",
     letterSpacing: -0.5,
   },
   subtitle: {
     fontSize: 14,
+    fontFamily: Fonts.regular,
     color: "rgba(255,255,255,0.7)",
     marginTop: 6,
     textAlign: "center",
@@ -142,7 +144,7 @@ const styles = StyleSheet.create({
   },
   cardTitle: {
     fontSize: 20,
-    fontWeight: "700",
+    fontFamily: Fonts.bold,
     color: "#111827",
     marginBottom: 24,
   },
@@ -151,7 +153,7 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: 14,
-    fontWeight: "600",
+    fontFamily: Fonts.semiBold,
     color: "#374151",
     marginBottom: 6,
   },
@@ -161,7 +163,8 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 14,
-    fontSize: 16,
+    fontSize: 15,
+    fontFamily: Fonts.regular,
     color: "#111827",
     backgroundColor: "#F9FAFB",
   },
@@ -180,8 +183,8 @@ const styles = StyleSheet.create({
   },
   eyeText: {
     fontSize: 13,
+    fontFamily: Fonts.semiBold,
     color: GREEN,
-    fontWeight: "600",
   },
   errorBox: {
     backgroundColor: "#FEF2F2",
@@ -194,6 +197,7 @@ const styles = StyleSheet.create({
   errorText: {
     color: "#DC2626",
     fontSize: 14,
+    fontFamily: Fonts.regular,
   },
   button: {
     backgroundColor: GREEN,
@@ -208,6 +212,6 @@ const styles = StyleSheet.create({
   buttonText: {
     color: "#fff",
     fontSize: 16,
-    fontWeight: "700",
+    fontFamily: Fonts.bold,
   },
 });
