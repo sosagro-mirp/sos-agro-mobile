@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { login as apiLogin, me as apiMe, type AuthUser } from "../api/auth";
+import { ServerError } from "../api/httpClient";
 import { secureStorage } from "../storage/secureStorage";
 
 interface AuthState {
@@ -27,9 +28,10 @@ export const useAuthStore = create<AuthState>((set) => ({
     try {
       const token = await secureStorage.getToken();
       if (!token) return;
-      const user = await apiMe(token);
+      const user = await apiMe();
       set({ token, user });
     } catch {
+      // Token expirado o inválido — limpiar y forzar login
       await secureStorage.deleteToken();
     } finally {
       set({ isRestoring: false });
@@ -43,7 +45,12 @@ export const useAuthStore = create<AuthState>((set) => ({
       await secureStorage.saveToken(accessToken);
       set({ token: accessToken, user, loading: false });
     } catch (e) {
-      const message = e instanceof Error ? e.message : "Error al iniciar sesión";
+      const message =
+        e instanceof ServerError && e.status === 401
+          ? "Correo o contraseña incorrectos"
+          : e instanceof Error
+            ? e.message
+            : "Error al iniciar sesión";
       set({ error: message, loading: false });
     }
   },
