@@ -1,0 +1,185 @@
+export type QuestionTypeName =
+  | "open_text"
+  | "numeric"
+  | "yes_no"
+  | "single_choice"
+  | "multiple_choice"
+  | "likert"
+  | "compliance"
+  | (string & {});
+
+export interface InstrumentType {
+  typeId: string;
+  name: QuestionTypeName;
+}
+
+export interface InstrumentOption {
+  optionId: string;
+  text: string;
+  value: string | number | boolean | null;
+  isOther?: boolean;
+}
+
+export interface InstrumentQuestion {
+  questionId: string;
+  text: string;
+  isRequired: boolean;
+  isSelectionCriteria?: boolean;
+  order: number;
+  systemField?: string | null;
+  type: InstrumentType;
+  options: InstrumentOption[];
+  conditionQuestionId?: string | null;
+  conditionValue?: string | null;
+}
+
+export interface InstrumentDraftAnswer {
+  questionId: string;
+  optionId?: string;
+  optionIds?: string[];
+  textValue?: string;
+  numericValue?: number;
+  booleanValue?: boolean;
+  otherText?: string;
+}
+
+export interface CreateResponsePayload extends InstrumentDraftAnswer {
+  surveyId: string;
+}
+
+export interface InstrumentSection {
+  sectionId: string;
+  name: string;
+  order: number;
+  questions: InstrumentQuestion[];
+}
+
+export interface InstrumentResponse {
+  instrumentId: string;
+  name: string;
+  version: number;
+  publishDate: string;
+  isActive: boolean;
+  code?: string | null;
+  sections: InstrumentSection[];
+}
+
+export interface SurveyResponse {
+  surveyId: string;
+}
+
+export type SubmitResult =
+  | { outcome: "submitted" }
+  | { outcome: "saved_offline" }
+  | { outcome: "session_expired" }
+  | { outcome: "error"; message: string };
+
+export interface InitializeSurveyPayload {
+  localId: string;
+  instrumentName: string;
+  sections: InstrumentSection[];
+}
+
+export interface FlattenedQuestionItem {
+  sectionId: string;
+  sectionName: string;
+  sectionOrder: number;
+  question: InstrumentQuestion;
+}
+
+// ── Actor / instrument summaries ─────────────────────────────────────────────
+
+export interface ActorTypeSummary {
+  actorTypeId: string;
+  name: string;
+  description: string | null;
+}
+
+export interface InstrumentSummary {
+  instrumentId: string;
+  name: string;
+  version: number;
+  publishDate: string;
+  isActive: boolean;
+  actorTypes: ActorTypeSummary[];
+}
+
+// ── Pre-survey form S1/S2 ────────────────────────────────────────────────────
+
+export interface CropSummary {
+  cropId: string;
+  name: string;
+}
+
+export interface FarmerSearchResult {
+  id: string;
+  name: string;
+  lastName: string;
+  documentId: string;
+  phone?: string | null;
+  farm?: {
+    farmId: string;
+    name: string;
+    town?: { townId: string; name: string } | null;
+  } | null;
+}
+
+export interface ExtractFarmerResult {
+  farmer: FarmerSearchResult;
+  existed: boolean;
+}
+
+export interface ExtractCropsResult {
+  crops: CropSummary[];
+}
+
+export type LastFarmerResult = {
+  farmerId: string;
+  name: string;
+  lastName: string | null;
+  farm?: { name: string };
+} | null;
+
+export interface CreateFarmerPayload {
+  name: string;
+  lastName: string;
+  documentId: string;
+  phone?: string;
+  email?: string;
+  age?: number;
+  gender?: string;
+  educationLevel?: string;
+  experienceYears?: number;
+  familySize?: number;
+  isMainIncome?: boolean;
+  participationInTraining?: boolean;
+  farmName?: string;
+  townId?: string;
+  latitude?: number;
+  longitude?: number;
+  altitude?: number;
+}
+
+export interface DuplicateCheckResult {
+  hasDuplicate: boolean;
+  surveyId?: string;
+}
+
+export interface PreSurveyFormData {
+  mode: "search" | "create";
+  searchQuery: string;
+  name: string;
+  lastName: string;
+  documentId: string;
+  phone: string;
+  email: string;
+  farmName: string;
+  departmentId: string;
+  townId: string;
+  vereda: string;
+  latitude: string;
+  longitude: string;
+  altitude: string;
+  cropIds: string[];
+  selectedFarmerId: string | null;
+}
