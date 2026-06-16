@@ -6,6 +6,9 @@ import { SingleChoiceList } from "../inputs/SingleChoiceList";
 import { MultipleChoiceList } from "../inputs/MultipleChoiceList";
 import { LikertScale } from "../inputs/LikertScale";
 import { ComplianceInput } from "../inputs/ComplianceInput";
+import { ImageCaptureInput } from "../inputs/ImageCaptureInput";
+import { VoiceRecordingInput } from "../inputs/VoiceRecordingInput";
+import { DocumentPickerInput } from "../inputs/DocumentPickerInput";
 
 interface QuestionRendererProps {
   item: FlattenedQuestionItem;
@@ -88,6 +91,33 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
           questionId={questionId}
           options={options}
           value={answer?.optionId}
+          onChange={onChange}
+        />
+      );
+
+    case "image":
+      return (
+        <ImageCaptureInput
+          questionId={questionId}
+          value={answer?.mediaLocalPath}
+          onChange={onChange}
+        />
+      );
+
+    case "voice_recording":
+      return (
+        <VoiceRecordingInput
+          questionId={questionId}
+          value={answer?.mediaLocalPath}
+          onChange={onChange}
+        />
+      );
+
+    case "document":
+      return (
+        <DocumentPickerInput
+          questionId={questionId}
+          value={answer?.mediaLocalPath}
           onChange={onChange}
         />
       );

@@ -47,6 +47,8 @@ export const surveyDraftStore = {
         numericValue: answer.numericValue ?? null,
         booleanValue: answer.booleanValue ?? null,
         otherText: answer.otherText ?? null,
+        mediaLocalPath: answer.mediaLocalPath ?? null,
+        mimeType: answer.mimeType ?? null,
       })
       .onConflictDoUpdate({
         target: responses.id,
@@ -57,6 +59,8 @@ export const surveyDraftStore = {
           numericValue: answer.numericValue ?? null,
           booleanValue: answer.booleanValue ?? null,
           otherText: answer.otherText ?? null,
+          mediaLocalPath: answer.mediaLocalPath ?? null,
+          mimeType: answer.mimeType ?? null,
         },
       });
 
@@ -85,6 +89,8 @@ export const surveyDraftStore = {
             numericValue: answer.numericValue ?? null,
             booleanValue: answer.booleanValue ?? null,
             otherText: answer.otherText ?? null,
+            mediaLocalPath: answer.mediaLocalPath ?? null,
+            mimeType: answer.mimeType ?? null,
           })
           .onConflictDoUpdate({
             target: responses.id,
@@ -95,6 +101,8 @@ export const surveyDraftStore = {
               numericValue: answer.numericValue ?? null,
               booleanValue: answer.booleanValue ?? null,
               otherText: answer.otherText ?? null,
+              mediaLocalPath: answer.mediaLocalPath ?? null,
+              mimeType: answer.mimeType ?? null,
             },
           });
       }
@@ -130,6 +138,8 @@ export const surveyDraftStore = {
         numericValue: row.numericValue ?? undefined,
         booleanValue: row.booleanValue ?? undefined,
         otherText: row.otherText ?? undefined,
+        mediaLocalPath: row.mediaLocalPath ?? undefined,
+        mimeType: row.mimeType ?? undefined,
       };
     }
 
