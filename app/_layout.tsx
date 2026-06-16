@@ -13,6 +13,7 @@ import * as SplashScreen from "expo-splash-screen";
 import { useAuthStore } from "../src/store/useAuthStore";
 import { runMigrations } from "../src/storage/db/db";
 import { syncQueueStorage } from "../src/storage/syncQueue";
+import { surveyDraftStore } from "../src/storage/surveyDraftStore";
 import { NetworkMonitor } from "../src/sync/NetworkMonitor";
 import { BackgroundSync } from "../src/sync/BackgroundSync";
 import { initSentry, captureError } from "../src/lib/sentry";
@@ -39,7 +40,7 @@ function AuthGuard() {
     if (!user && !inLogin) {
       router.replace("/login");
     } else if (user && inLogin) {
-      router.replace("/");
+      router.replace("/campaign");
     }
   }, [user, isRestoring, segments]);
 
@@ -75,6 +76,11 @@ export default function RootLayout() {
     // Reset any entries that were in_flight when the app was last killed.
     syncQueueStorage.resetInFlightToRetry().catch(console.error);
 
+    // Purge synced surveys older than 30 days to keep local DB lean.
+    surveyDraftStore.purgeSyncedSurveys()
+      .then((count) => { if (count > 0) logger.info(`Purged ${count} old synced surveys`); })
+      .catch(console.error);
+
     NetworkMonitor.start();
     BackgroundSync.register().catch(() => {
       // expo-background-fetch not available in Expo Go — silently ignored
@@ -101,7 +107,7 @@ export default function RootLayout() {
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="login" />
         <Stack.Screen name="index" />
-        <Stack.Screen name="campaign/index" />
+        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="campaign/[id]/pre-survey" />
         <Stack.Screen name="campaign/[id]/session/[sessionId]/orchestrator" />
         <Stack.Screen name="campaign/[id]/session/[sessionId]/completed" />
@@ -113,8 +119,6 @@ export default function RootLayout() {
         />
         <Stack.Screen name="instrument/[id]/review" />
         <Stack.Screen name="instrument/[id]/completed" />
-        <Stack.Screen name="drafts/index" />
-        <Stack.Screen name="sync/index" />
         <Stack.Screen name="dev/logs" />
       </Stack>
     </QueryClientProvider>

@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq, lt } from 'drizzle-orm';
 import { db } from './db/db';
 import { surveys, responses } from './db/schema';
 import type { InstrumentDraftAnswer } from '../types';
@@ -169,5 +169,13 @@ export const surveyDraftStore = {
   async deleteDraft(surveyId: string): Promise<void> {
     // responses se borran en cascada por FK
     await db.delete(surveys).where(eq(surveys.id, surveyId));
+  },
+
+  async purgeSyncedSurveys(olderThanDays = 30): Promise<number> {
+    const cutoff = new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000);
+    const result = await db
+      .delete(surveys)
+      .where(and(eq(surveys.status, 'synced'), lt(surveys.updatedAt, cutoff)));
+    return result.changes ?? 0;
   },
 };
