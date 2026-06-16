@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Stack, useRouter, useSegments } from "expo-router";
+import { useEffect, useRef, useState } from "react";
+import { Stack, useRouter } from "expo-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   useFonts,
@@ -11,8 +11,10 @@ import {
 } from "@expo-google-fonts/jetbrains-mono";
 import * as SplashScreen from "expo-splash-screen";
 import { useAuthStore } from "../src/store/useAuthStore";
+import { useCampaignSessionStore } from "../src/store/useCampaignSessionStore";
 import { runMigrations } from "../src/storage/db/db";
 import { syncQueueStorage } from "../src/storage/syncQueue";
+import { surveyDraftStore } from "../src/storage/surveyDraftStore";
 import { NetworkMonitor } from "../src/sync/NetworkMonitor";
 import { BackgroundSync } from "../src/sync/BackgroundSync";
 import { initSentry, captureError } from "../src/lib/sentry";
@@ -30,24 +32,33 @@ const queryClient = new QueryClient({
 
 function AuthGuard() {
   const { user, isRestoring } = useAuthStore();
-  const segments = useSegments();
   const router = useRouter();
+  // Track previous user value to only act on actual changes, not re-renders
+  const prevUserRef = useRef<string | null | undefined>(undefined);
 
   useEffect(() => {
     if (isRestoring) return;
-    const inLogin = segments[0] === "login";
-    if (!user && !inLogin) {
+
+    const prevId = prevUserRef.current;
+    const currId = user?.userId ?? null;
+
+    // Skip if user identity hasn't changed (avoids resetting navigation mid-session)
+    if (prevId === currId) return;
+    prevUserRef.current = currId;
+
+    if (!user) {
       router.replace("/login");
-    } else if (user && inLogin) {
-      router.replace("/");
+    } else {
+      router.replace("/campaign");
     }
-  }, [user, isRestoring, segments]);
+  }, [user, isRestoring]);
 
   return null;
 }
 
 export default function RootLayout() {
   const { isRestoring, restoreSession } = useAuthStore();
+  const { loadLastFarmer } = useCampaignSessionStore();
   const [dbReady, setDbReady] = useState(false);
 
   const [fontsLoaded] = useFonts({
@@ -60,9 +71,10 @@ export default function RootLayout() {
 
   useEffect(() => {
     runMigrations()
-      .then(() => {
+      .then(async () => {
         setDbReady(true);
-        return restoreSession();
+        await restoreSession();
+        loadLastFarmer().catch(console.error);
       })
       .catch((err) => { captureError(err); console.error(err); });
   }, []);
@@ -74,6 +86,11 @@ export default function RootLayout() {
 
     // Reset any entries that were in_flight when the app was last killed.
     syncQueueStorage.resetInFlightToRetry().catch(console.error);
+
+    // Purge synced surveys older than 30 days to keep local DB lean.
+    surveyDraftStore.purgeSyncedSurveys()
+      .then((count) => { if (count > 0) logger.info(`Purged ${count} old synced surveys`); })
+      .catch(console.error);
 
     NetworkMonitor.start();
     BackgroundSync.register().catch(() => {
@@ -101,7 +118,7 @@ export default function RootLayout() {
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="login" />
         <Stack.Screen name="index" />
-        <Stack.Screen name="campaign/index" />
+        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="campaign/[id]/pre-survey" />
         <Stack.Screen name="campaign/[id]/session/[sessionId]/orchestrator" />
         <Stack.Screen name="campaign/[id]/session/[sessionId]/completed" />
@@ -113,8 +130,6 @@ export default function RootLayout() {
         />
         <Stack.Screen name="instrument/[id]/review" />
         <Stack.Screen name="instrument/[id]/completed" />
-        <Stack.Screen name="drafts/index" />
-        <Stack.Screen name="sync/index" />
         <Stack.Screen name="dev/logs" />
       </Stack>
     </QueryClientProvider>

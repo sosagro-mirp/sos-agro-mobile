@@ -11,10 +11,12 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useCachedCampaignsStore } from "../../src/store/useCachedCampaignsStore";
-import { useSyncStatusStore } from "../../src/store/useSyncStatusStore";
-import type { CampaignRender } from "../../src/types";
-import { Fonts } from "../../src/theme/fonts";
+import { useCachedCampaignsStore } from "../../../src/store/useCachedCampaignsStore";
+import { useSyncStatusStore } from "../../../src/store/useSyncStatusStore";
+import type { CampaignRender } from "../../../src/types";
+import { Fonts } from "../../../src/theme/fonts";
+
+const GREEN = "#1B6B3A";
 
 export default function CampaignListScreen() {
   const router = useRouter();
@@ -39,11 +41,9 @@ export default function CampaignListScreen() {
       : "0%";
 
   return (
-    <SafeAreaView style={styles.root}>
+    <SafeAreaView style={styles.root} edges={["bottom"]}>
+      {/* Tab header */}
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} accessibilityLabel="Volver">
-          <Text style={styles.back}>← Inicio</Text>
-        </Pressable>
         <Text style={styles.title}>Campañas</Text>
         <Pressable
           onPress={refresh}
@@ -76,10 +76,7 @@ export default function CampaignListScreen() {
           </Text>
           <View style={styles.progressTrack}>
             <View
-              style={[
-                styles.progressFill,
-                { width: progressPercent as DimensionValue },
-              ]}
+              style={[styles.progressFill, { width: progressPercent as DimensionValue }]}
             />
           </View>
         </View>
@@ -125,9 +122,7 @@ export default function CampaignListScreen() {
             key={campaign.campaignId}
             campaign={campaign}
             fullyCached={isCampaignFullyCached(campaign.campaignId)}
-            onPress={() =>
-              router.push(`/campaign/${campaign.campaignId}/pre-survey`)
-            }
+            onPress={() => router.push(`/campaign/${campaign.campaignId}/pre-survey`)}
           />
         ))}
 
@@ -185,7 +180,7 @@ function CacheStatusBadge({ fullyCached }: { fullyCached: boolean }) {
   if (fullyCached) {
     return (
       <View style={[styles.badge, styles.badgeCached]}>
-        <Text style={styles.badgeCachedText}>✓ Disponible sin conexión</Text>
+        <Text style={styles.badgeCachedText}>✓ Sin conexión</Text>
       </View>
     );
   }
@@ -196,8 +191,6 @@ function CacheStatusBadge({ fullyCached }: { fullyCached: boolean }) {
   );
 }
 
-const GREEN = "#1B6B3A";
-
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#F9FAFB" },
 
@@ -206,17 +199,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingVertical: 14,
     backgroundColor: "#fff",
     borderBottomWidth: 1,
     borderBottomColor: "#E5E7EB",
   },
-  back: { fontSize: 15, fontFamily: Fonts.regular, color: GREEN },
   title: { fontSize: 17, fontFamily: Fonts.bold, color: "#111827" },
   refreshBtn: { fontSize: 15, fontFamily: Fonts.semiBold, color: GREEN },
   refreshDisabled: { color: "#9CA3AF" },
 
-  // Progress
   progressContainer: {
     backgroundColor: "#fff",
     paddingHorizontal: 20,
@@ -233,19 +224,9 @@ const styles = StyleSheet.create({
   progressPhase: { fontSize: 13, fontFamily: Fonts.semiBold, color: "#374151" },
   progressCount: { fontSize: 13, fontFamily: Fonts.regular, color: "#6B7280" },
   progressName: { fontSize: 12, fontFamily: Fonts.regular, color: "#9CA3AF" },
-  progressTrack: {
-    height: 6,
-    backgroundColor: "#E5E7EB",
-    borderRadius: 3,
-    overflow: "hidden",
-  },
-  progressFill: {
-    height: 6,
-    backgroundColor: GREEN,
-    borderRadius: 3,
-  },
+  progressTrack: { height: 6, backgroundColor: "#E5E7EB", borderRadius: 3, overflow: "hidden" },
+  progressFill: { height: 6, backgroundColor: GREEN, borderRadius: 3 },
 
-  // Offline banner
   offlineBanner: {
     backgroundColor: "#FEF3C7",
     paddingHorizontal: 20,
@@ -255,7 +236,6 @@ const styles = StyleSheet.create({
   },
   offlineText: { fontSize: 13, fontFamily: Fonts.regular, color: "#92400E" },
 
-  // Error
   errorBox: {
     margin: 20,
     padding: 14,
@@ -266,11 +246,9 @@ const styles = StyleSheet.create({
   },
   errorText: { fontSize: 14, fontFamily: Fonts.regular, color: "#DC2626" },
 
-  // List
   list: { padding: 20, gap: 12 },
   loader: { marginTop: 48 },
 
-  // Campaign card
   card: {
     backgroundColor: "#fff",
     borderRadius: 12,
@@ -286,36 +264,18 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
     gap: 8,
   },
-  campaignName: {
-    flex: 1,
-    fontSize: 17,
-    fontFamily: Fonts.semiBold,
-    color: "#111827",
-  },
-  campaignDesc: {
-    fontSize: 14,
-    fontFamily: Fonts.regular,
-    color: "#6B7280",
-  },
-  cardBottom: {
-    flexDirection: "row",
-    gap: 16,
-  },
+  campaignName: { flex: 1, fontSize: 17, fontFamily: Fonts.semiBold, color: "#111827" },
+  campaignDesc: { fontSize: 14, fontFamily: Fonts.regular, color: "#6B7280" },
+  cardBottom: { flexDirection: "row", gap: 16 },
   stepsCount: { fontSize: 12, fontFamily: Fonts.regular, color: GREEN },
   instrumentsCount: { fontSize: 12, fontFamily: Fonts.regular, color: "#6B7280" },
 
-  // Cache status badge
-  badge: {
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-  },
+  badge: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
   badgeCached: { backgroundColor: "#DCFCE7" },
   badgeCachedText: { fontSize: 11, fontFamily: Fonts.semiBold, color: GREEN },
   badgePending: { backgroundColor: "#FEF3C7" },
   badgePendingText: { fontSize: 11, fontFamily: Fonts.semiBold, color: "#92400E" },
 
-  // Empty state
   empty: { alignItems: "center", paddingVertical: 48, gap: 8 },
   emptyTitle: { fontSize: 17, fontFamily: Fonts.semiBold, color: "#374151" },
   emptyDesc: {

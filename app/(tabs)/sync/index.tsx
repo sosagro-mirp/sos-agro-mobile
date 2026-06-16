@@ -7,15 +7,16 @@ import {
   Text,
   View,
 } from "react-native";
-import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useSyncStatusStore } from "../../src/store/useSyncStatusStore";
-import { syncQueueStorage, type SyncQueueEntry } from "../../src/storage/syncQueue";
-import { NetworkMonitor } from "../../src/sync/NetworkMonitor";
-import { Fonts } from "../../src/theme/fonts";
+import { useSyncStatusStore } from "../../../src/store/useSyncStatusStore";
+import { syncQueueStorage, type SyncQueueEntry } from "../../../src/storage/syncQueue";
+import { surveyDraftStore } from "../../../src/storage/surveyDraftStore";
+import { NetworkMonitor } from "../../../src/sync/NetworkMonitor";
+import { Fonts } from "../../../src/theme/fonts";
+
+const GREEN = "#1B6B3A";
 
 export default function SyncScreen() {
-  const router = useRouter();
   const {
     isOnline,
     pendingCount,
@@ -27,6 +28,8 @@ export default function SyncScreen() {
   const [failedEntries, setFailedEntries] = useState<SyncQueueEntry[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [retryingId, setRetryingId] = useState<string | null>(null);
+  const [purgeResult, setPurgeResult] = useState<number | null>(null);
+  const [isPurging, setIsPurging] = useState(false);
 
   const refreshData = async () => {
     await refreshPendingCount();
@@ -38,7 +41,6 @@ export default function SyncScreen() {
     refreshData().catch(console.error);
   }, []);
 
-  // Refresh counters whenever a sync cycle completes.
   useEffect(() => {
     if (lastSyncAt) {
       refreshData().catch(console.error);
@@ -53,6 +55,18 @@ export default function SyncScreen() {
       await refreshData();
     } finally {
       setIsSyncing(false);
+    }
+  };
+
+  const handlePurge = async () => {
+    if (isPurging) return;
+    setIsPurging(true);
+    setPurgeResult(null);
+    try {
+      const count = await surveyDraftStore.purgeSyncedSurveys();
+      setPurgeResult(count);
+    } finally {
+      setIsPurging(false);
     }
   };
 
@@ -73,17 +87,12 @@ export default function SyncScreen() {
   const statusLabel = isOnline ? "En línea" : "Sin conexión";
 
   return (
-    <SafeAreaView style={styles.root}>
+    <SafeAreaView style={styles.root} edges={["bottom"]}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()}>
-          <Text style={styles.back}>← Inicio</Text>
-        </Pressable>
         <Text style={styles.title}>Sincronización</Text>
-        <View style={{ width: 60 }} />
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
-        {/* Connection status */}
         <View style={styles.statusCard}>
           <View style={styles.statusRow}>
             <View style={[styles.dot, { backgroundColor: statusColor }]} />
@@ -107,13 +116,11 @@ export default function SyncScreen() {
           )}
         </View>
 
-        {/* Counters */}
         <View style={styles.countersRow}>
           <CounterCard label="Pendientes" value={pendingCount} color="#F59E0B" />
           <CounterCard label="Con error" value={failedEntries.length} color="#DC2626" />
         </View>
 
-        {/* Manual sync */}
         <Pressable
           style={[styles.syncButton, (!isOnline || isBusy) && styles.syncButtonDisabled]}
           onPress={handleSyncNow}
@@ -126,7 +133,25 @@ export default function SyncScreen() {
           )}
         </Pressable>
 
-        {/* Failed validation entries */}
+        <Pressable
+          style={[styles.purgeButton, isPurging && styles.syncButtonDisabled]}
+          onPress={handlePurge}
+          disabled={isPurging}
+        >
+          {isPurging ? (
+            <ActivityIndicator color={GREEN} />
+          ) : (
+            <Text style={styles.purgeButtonText}>Limpiar historial sincronizado</Text>
+          )}
+        </Pressable>
+        {purgeResult !== null ? (
+          <Text style={styles.purgeResult}>
+            {purgeResult === 0
+              ? 'No hay registros para limpiar (menos de 30 días).'
+              : `${purgeResult} registro${purgeResult !== 1 ? 's' : ''} eliminado${purgeResult !== 1 ? 's' : ''}.`}
+          </Text>
+        ) : null}
+
         {failedEntries.length > 0 ? (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Errores de validación</Text>
@@ -177,15 +202,7 @@ export default function SyncScreen() {
   );
 }
 
-function CounterCard({
-  label,
-  value,
-  color,
-}: {
-  label: string;
-  value: number;
-  color: string;
-}) {
+function CounterCard({ label, value, color }: { label: string; value: number; color: string }) {
   return (
     <View style={styles.counterCard}>
       <Text style={[styles.counterValue, { color }]}>{value}</Text>
@@ -194,25 +211,18 @@ function CounterCard({
   );
 }
 
-const GREEN = "#1B6B3A";
-
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#F9FAFB" },
   header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
     paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingVertical: 14,
     backgroundColor: "#fff",
     borderBottomWidth: 1,
     borderBottomColor: "#E5E7EB",
   },
-  back: { fontSize: 15, fontFamily: Fonts.regular, color: GREEN },
   title: { fontSize: 17, fontFamily: Fonts.bold, color: "#111827" },
   content: { padding: 20, gap: 16 },
 
-  // Status card
   statusCard: {
     backgroundColor: "#fff",
     borderRadius: 12,
@@ -227,7 +237,6 @@ const styles = StyleSheet.create({
   syncingDetail: { fontSize: 13, fontFamily: Fonts.regular, color: GREEN },
   lastSync: { fontSize: 13, fontFamily: Fonts.regular, color: "#9CA3AF" },
 
-  // Counters
   countersRow: { flexDirection: "row", gap: 12 },
   counterCard: {
     flex: 1,
@@ -239,14 +248,8 @@ const styles = StyleSheet.create({
     borderColor: "#E5E7EB",
   },
   counterValue: { fontSize: 32, fontFamily: Fonts.bold },
-  counterLabel: {
-    fontSize: 13,
-    fontFamily: Fonts.regular,
-    color: "#6B7280",
-    marginTop: 2,
-  },
+  counterLabel: { fontSize: 13, fontFamily: Fonts.regular, color: "#6B7280", marginTop: 2 },
 
-  // Sync button
   syncButton: {
     backgroundColor: GREEN,
     borderRadius: 12,
@@ -256,15 +259,20 @@ const styles = StyleSheet.create({
   syncButtonDisabled: { backgroundColor: "#9CA3AF" },
   syncButtonText: { fontSize: 17, fontFamily: Fonts.bold, color: "#fff" },
 
-  // Failed entries
+  purgeButton: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#D1D5DB",
+  },
+  purgeButtonText: { fontSize: 15, fontFamily: Fonts.medium, color: "#374151" },
+  purgeResult: { fontSize: 13, fontFamily: Fonts.regular, color: "#6B7280", textAlign: "center" },
+
   section: { gap: 10 },
   sectionTitle: { fontSize: 15, fontFamily: Fonts.semiBold, color: "#374151" },
-  sectionHint: {
-    fontSize: 13,
-    fontFamily: Fonts.regular,
-    color: "#9CA3AF",
-    lineHeight: 18,
-  },
+  sectionHint: { fontSize: 13, fontFamily: Fonts.regular, color: "#9CA3AF", lineHeight: 18 },
   failedCard: {
     backgroundColor: "#FEF2F2",
     borderRadius: 10,
@@ -291,19 +299,7 @@ const styles = StyleSheet.create({
   retryBtnDisabled: { backgroundColor: "#9CA3AF" },
   retryBtnText: { fontSize: 13, fontFamily: Fonts.semiBold, color: "#fff" },
 
-  // All good state
-  allGood: {
-    alignItems: "center",
-    paddingVertical: 32,
-    gap: 8,
-  },
-  allGoodIcon: {
-    fontSize: 40,
-    color: GREEN,
-  },
-  allGoodText: {
-    fontSize: 16,
-    fontFamily: Fonts.semiBold,
-    color: "#374151",
-  },
+  allGood: { alignItems: "center", paddingVertical: 32, gap: 8 },
+  allGoodIcon: { fontSize: 40, color: GREEN },
+  allGoodText: { fontSize: 16, fontFamily: Fonts.semiBold, color: "#374151" },
 });

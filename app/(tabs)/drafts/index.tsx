@@ -9,13 +9,15 @@ import {
 } from "react-native";
 import { useRouter, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { surveyDraftStore, type SurveyDraft } from "../../src/storage/surveyDraftStore";
-import { instrumentCacheStorage } from "../../src/storage/instrumentCache";
-import { useInstrumentSurveyStore } from "../../src/store/useInstrumentSurveyStore";
-import { flattenSections } from "../../src/lib/flattenSections";
-import { isQuestionVisible } from "../../src/lib/isQuestionVisible";
-import { isAnswerComplete } from "../../src/lib/isAnswerComplete";
-import { Fonts } from "../../src/theme/fonts";
+import { surveyDraftStore, type SurveyDraft } from "../../../src/storage/surveyDraftStore";
+import { instrumentCacheStorage } from "../../../src/storage/instrumentCache";
+import { useInstrumentSurveyStore } from "../../../src/store/useInstrumentSurveyStore";
+import { flattenSections } from "../../../src/lib/flattenSections";
+import { isQuestionVisible } from "../../../src/lib/isQuestionVisible";
+import { isAnswerComplete } from "../../../src/lib/isAnswerComplete";
+import { Fonts } from "../../../src/theme/fonts";
+
+const GREEN = "#1B6B3A";
 
 export default function DraftsScreen() {
   const router = useRouter();
@@ -24,7 +26,6 @@ export default function DraftsScreen() {
   const [resumingId, setResumingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Reload on focus so list stays current after returning from a survey.
   useFocusEffect(
     useCallback(() => {
       setIsLoading(true);
@@ -46,7 +47,6 @@ export default function DraftsScreen() {
 
     try {
       const instrument = await instrumentCacheStorage.get(draft.instrumentId);
-
       if (!instrument) {
         setError(
           "El instrumento de este borrador ya no está en caché. Descárgalo de nuevo desde Campañas."
@@ -58,8 +58,6 @@ export default function DraftsScreen() {
       const visibleQuestions = flattenedQuestions.filter(({ question }) =>
         isQuestionVisible(question, draft.answers)
       );
-
-      // First visible question that still needs an answer.
       const firstIncomplete = visibleQuestions.findIndex(
         ({ question }) =>
           !isAnswerComplete(question, draft.answers[question.questionId])
@@ -75,12 +73,9 @@ export default function DraftsScreen() {
       });
 
       if (firstIncomplete === -1) {
-        // Everything answered — land on review screen.
         router.push(`/instrument/${instrument.instrumentId}/review`);
       } else {
-        router.push(
-          `/instrument/${instrument.instrumentId}/question/${firstIncomplete}`
-        );
+        router.push(`/instrument/${instrument.instrumentId}/question/${firstIncomplete}`);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al reanudar borrador");
@@ -90,13 +85,9 @@ export default function DraftsScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.root}>
+    <SafeAreaView style={styles.root} edges={["bottom"]}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()}>
-          <Text style={styles.back}>← Inicio</Text>
-        </Pressable>
         <Text style={styles.title}>Borradores</Text>
-        <View style={{ width: 60 }} />
       </View>
 
       {error ? (
@@ -181,21 +172,15 @@ function DraftCard({
   );
 }
 
-const GREEN = "#1B6B3A";
-
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#F9FAFB" },
   header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
     paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingVertical: 14,
     backgroundColor: "#fff",
     borderBottomWidth: 1,
     borderBottomColor: "#E5E7EB",
   },
-  back: { fontSize: 15, fontFamily: Fonts.regular, color: GREEN },
   title: { fontSize: 17, fontFamily: Fonts.bold, color: "#111827" },
   errorBox: {
     margin: 16,
@@ -224,11 +209,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   cardMain: { flex: 1, gap: 4 },
-  instrumentId: {
-    fontSize: 15,
-    fontFamily: Fonts.semiBold,
-    color: "#111827",
-  },
+  instrumentId: { fontSize: 15, fontFamily: Fonts.semiBold, color: "#111827" },
   campaignBadge: {
     alignSelf: "flex-start",
     backgroundColor: "#DCFCE7",

@@ -1,66 +1,165 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useCampaignSessionStore } from "../../../../../src/store/useCampaignSessionStore";
+import { useCachedInstrumentsStore } from "../../../../../src/store/useCachedInstrumentsStore";
+import { useInstrumentSurveyStore } from "../../../../../src/store/useInstrumentSurveyStore";
 import { useSyncStatusStore } from "../../../../../src/store/useSyncStatusStore";
 import { getNextStep } from "../../../../../src/api/campaignSessions";
+import { fetchInstrumentByCode } from "../../../../../src/api/instruments";
+import { extractFarmer, extractCrops } from "../../../../../src/api/farmers";
+import { createSurvey } from "../../../../../src/api/surveys";
+import { surveyDraftStore } from "../../../../../src/storage/surveyDraftStore";
 import { NetworkError } from "../../../../../src/api/httpClient";
 import { Fonts } from "../../../../../src/theme/fonts";
+
+type ScreenState = 'loading' | 'offline' | 'injection_error' | 'error';
 
 export default function OrchestratorScreen() {
   const { id, sessionId } = useLocalSearchParams<{ id: string; sessionId: string }>();
   const router = useRouter();
 
-  const { sessionId: storeSessionId, applyNextStep } = useCampaignSessionStore();
+  const store = useCampaignSessionStore();
+  const { downloadAndCache, instruments } = useCachedInstrumentsStore();
+  const { initializeSurvey } = useInstrumentSurveyStore();
   const { isOnline } = useSyncStatusStore();
 
-  const resolvedSessionId = sessionId !== "new" ? sessionId : storeSessionId;
+  const resolvedSessionId = sessionId !== "new" ? sessionId : store.sessionId;
 
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [isOffline, setIsOffline] = useState(false);
+  const [screenState, setScreenState] = useState<ScreenState>('loading');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const hasStarted = useRef(false);
 
-  const fetchNextStep = useCallback(async () => {
+  // ── helpers ────────────────────────────────────────────────────────────────
+
+  const getOrDownloadInstrument = useCallback(async (instrumentId: string) => {
+    const cached = instruments.find((i) => i.instrumentId === instrumentId);
+    if (cached) return cached;
+    return downloadAndCache(instrumentId);
+  }, [instruments, downloadAndCache]);
+
+  const injectInstrument = useCallback(async (code: 'S1' | 'S2') => {
     if (!resolvedSessionId) return;
 
-    setIsLoading(true);
-    setError(null);
-    setIsOffline(false);
+    const { instrumentId, name } = await fetchInstrumentByCode(code);
+    const instrument = await getOrDownloadInstrument(instrumentId);
+
+    const { surveyId } = await createSurvey({
+      instrumentIds: [instrumentId],
+      campaignSessionId: resolvedSessionId,
+    });
+
+    await surveyDraftStore.createDraft({
+      surveyId,
+      instrumentId,
+      campaignSessionId: resolvedSessionId,
+    });
+
+    if (code === 'S1') {
+      store.setInjectionS1SurveyId(surveyId);
+    } else {
+      store.setInjectionS2SurveyId(surveyId);
+    }
+
+    initializeSurvey({
+      surveyId,
+      instrumentId,
+      instrumentName: name,
+      sections: instrument.sections,
+      campaignSessionId: resolvedSessionId,
+    });
+
+    router.replace(`/instrument/${instrumentId}/question/0`);
+  }, [resolvedSessionId, getOrDownloadInstrument, store, initializeSurvey, router]);
+
+  // ── main entry logic ───────────────────────────────────────────────────────
+
+  const run = useCallback(async () => {
+    if (!resolvedSessionId) return;
+
+    setScreenState('loading');
+    setErrorMessage(null);
 
     try {
-      const nextStep = await getNextStep(resolvedSessionId);
-      applyNextStep(nextStep);
+      const { injectionPhase, s1SurveyId, s2SurveyId } =
+        useCampaignSessionStore.getState();
 
-      if (!nextStep.stepId || !nextStep.instrument) {
-        router.replace(`/campaign/${id}/session/${resolvedSessionId}/completed`);
-        return;
+      if (injectionPhase === 's1') {
+        if (!s1SurveyId) {
+          // First entry: inject S1
+          await injectInstrument('S1');
+        } else {
+          // Returning from S1: extract farmer then inject S2
+          const { farmer } = await extractFarmer(s1SurveyId);
+          store.completeS1Injection(farmer.farmerId, farmer.name);
+          store.setLastFarmer({
+            farmerId: farmer.farmerId,
+            name: farmer.name,
+            lastName: farmer.lastName,
+            ...(farmer.farm ? { farm: { name: farmer.farm.name } } : {}),
+          });
+          await injectInstrument('S2');
+        }
+      } else if (injectionPhase === 's2') {
+        if (!s2SurveyId) {
+          await injectInstrument('S2');
+        } else {
+          // Returning from S2: extract crops then enter normal flow
+          await extractCrops(s2SurveyId);
+          store.completeS2Injection();
+          // Fall through to getNextStep below
+          const nextStep = await getNextStep(resolvedSessionId);
+          store.applyNextStep(nextStep);
+          if (!nextStep.stepId || !nextStep.instrument) {
+            router.replace(`/campaign/${id}/session/${resolvedSessionId}/completed`);
+            return;
+          }
+          router.replace(`/instrument/${nextStep.instrument.instrumentId}/start`);
+        }
+      } else {
+        // Normal flow
+        const nextStep = await getNextStep(resolvedSessionId);
+        store.applyNextStep(nextStep);
+        if (!nextStep.stepId || !nextStep.instrument) {
+          router.replace(`/campaign/${id}/session/${resolvedSessionId}/completed`);
+          return;
+        }
+        router.replace(`/instrument/${nextStep.instrument.instrumentId}/start`);
       }
-
-      router.replace(`/instrument/${nextStep.instrument.instrumentId}/start`);
     } catch (err) {
       if (err instanceof NetworkError) {
-        setIsOffline(true);
+        setScreenState('offline');
       } else {
-        setError(err instanceof Error ? err.message : "Error obteniendo el siguiente paso");
+        const isInjectionError =
+          useCampaignSessionStore.getState().injectionPhase !== 'none';
+        setScreenState(isInjectionError ? 'injection_error' : 'error');
+        setErrorMessage(err instanceof Error ? err.message : "Error inesperado");
       }
-    } finally {
-      setIsLoading(false);
     }
-  }, [resolvedSessionId, id]);
+  }, [resolvedSessionId, id, injectInstrument, store, router]);
 
   useEffect(() => {
-    fetchNextStep();
-  }, [fetchNextStep]);
+    if (hasStarted.current) return;
+    hasStarted.current = true;
+    run();
+  }, [run]);
 
   // Auto-retry when coming back online after an offline failure
   useEffect(() => {
-    if (isOnline && isOffline) {
-      fetchNextStep();
+    if (isOnline && screenState === 'offline') {
+      hasStarted.current = false;
+      run();
     }
   }, [isOnline]);
 
-  if (isOffline) {
+  const handleSkipInjection = () => {
+    store.completeS2Injection(); // resets injectionPhase to 'none'
+    hasStarted.current = false;
+    run();
+  };
+
+  if (screenState === 'offline') {
     return (
       <SafeAreaView style={styles.root}>
         <View style={styles.center}>
@@ -72,37 +171,48 @@ export default function OrchestratorScreen() {
           </Text>
           <Pressable
             style={[styles.button, isOnline && styles.buttonActive]}
-            onPress={fetchNextStep}
-            disabled={isLoading}
+            onPress={() => { hasStarted.current = false; run(); }}
           >
-            {isLoading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.buttonText}>Reintentar</Text>
-            )}
+            <Text style={styles.buttonText}>Reintentar</Text>
           </Pressable>
         </View>
       </SafeAreaView>
     );
   }
 
-  if (error) {
+  if (screenState === 'injection_error') {
+    return (
+      <SafeAreaView style={styles.root}>
+        <View style={styles.center}>
+          <Text style={styles.bigIcon}>⚠️</Text>
+          <Text style={styles.title}>Error identificando encuestado</Text>
+          <Text style={styles.errorDesc}>{errorMessage}</Text>
+          <Pressable
+            style={styles.buttonActive}
+            onPress={() => { hasStarted.current = false; run(); }}
+          >
+            <Text style={styles.buttonText}>Reintentar</Text>
+          </Pressable>
+          <Pressable style={styles.skipButton} onPress={handleSkipInjection}>
+            <Text style={styles.skipText}>Continuar sin identificar</Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (screenState === 'error') {
     return (
       <SafeAreaView style={styles.root}>
         <View style={styles.center}>
           <Text style={styles.bigIcon}>⚠️</Text>
           <Text style={styles.title}>Error inesperado</Text>
-          <Text style={styles.errorDesc}>{error}</Text>
+          <Text style={styles.errorDesc}>{errorMessage}</Text>
           <Pressable
             style={styles.buttonActive}
-            onPress={fetchNextStep}
-            disabled={isLoading}
+            onPress={() => { hasStarted.current = false; run(); }}
           >
-            {isLoading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.buttonText}>Reintentar</Text>
-            )}
+            <Text style={styles.buttonText}>Reintentar</Text>
           </Pressable>
         </View>
       </SafeAreaView>
@@ -161,4 +271,11 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   buttonText: { fontSize: 16, fontFamily: Fonts.semiBold, color: "#fff" },
+  skipButton: { paddingVertical: 8 },
+  skipText: {
+    fontSize: 14,
+    fontFamily: Fonts.medium,
+    color: "#6B7280",
+    textDecorationLine: "underline",
+  },
 });

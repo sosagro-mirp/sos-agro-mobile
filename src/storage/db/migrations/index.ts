@@ -3,7 +3,7 @@
 const migrations = {
   journal: {
     entries: [
-      { idx: 0, when: 0, tag: '0000_initial', breakpoints: true },
+      { idx: 0, when: 0, tag: 'm0000', breakpoints: true },
     ],
   },
   migrations: {

@@ -18,6 +18,17 @@ export const endpoints = {
   campaignSessionNextStep: (id: string) => `/api/campaign-sessions/${id}/next-step`,
   campaignSessionSync: (id: string) => `/api/campaign-sessions/${id}/sync`,
 
+  // Farmers
+  farmersSearch: '/api/farmers/search',
+  surveyExtractFarmer: (id: string) => `/api/surveys/${id}/extract-farmer`,
+  surveyExtractCrops: (id: string) => `/api/surveys/${id}/extract-crops`,
+
+  // Instruments by code
+  instrumentByCode: (code: string) => `/api/instruments/by-code/${code}`,
+
+  // Last farmer for current user
+  campaignSessionLastFarmer: '/api/campaign-sessions/last-farmer',
+
   // Telemetry
   telemetrySync: '/api/telemetry/sync',
 } as const;
