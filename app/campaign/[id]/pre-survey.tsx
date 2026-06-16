@@ -9,7 +9,6 @@ import { createCampaignSession } from "../../../src/api/campaignSessions";
 import { useAuthStore } from "../../../src/store/useAuthStore";
 import { PreSurveyForm } from "../../../src/components/campaign/PreSurveyForm";
 import { OfflineBanner } from "../../../src/components/network/OfflineBanner";
-import type { PreSurveyFormData } from "../../../src/types";
 import { Fonts } from "../../../src/theme/fonts";
 
 export default function PreSurveyScreen() {
@@ -17,7 +16,13 @@ export default function PreSurveyScreen() {
   const router = useRouter();
 
   const campaign = useCachedCampaignsStore((s) => s.getById(id));
-  const { startSession, setPreSurveyData, applySessionResponse } = useCampaignSessionStore();
+  const {
+    startSession,
+    applySessionResponse,
+    setSelectedFarmer,
+    setNewFarmerMode,
+    lastFarmer,
+  } = useCampaignSessionStore();
   const { isOnline } = useSyncStatusStore();
   const { user } = useAuthStore();
 
@@ -35,37 +40,44 @@ export default function PreSurveyScreen() {
     );
   }
 
-  const handleSubmit = async (data: PreSurveyFormData) => {
-    if (!isOnline) {
-      setError("Necesitas conexión para iniciar una visita.");
-      return;
-    }
-
+  const startAndNavigate = async (farmerId?: string) => {
     setError(null);
     setIsLoading(true);
     startSession(campaign);
-    setPreSurveyData(data);
 
     try {
       const sessionResponse = await createCampaignSession({
         campaignId: campaign.campaignId,
         userId: user?.userId,
-        farmerId: data.selectedFarmerId ?? undefined,
-        cropIds: data.cropIds.length > 0 ? data.cropIds : undefined,
+        ...(farmerId ? { farmerId } : {}),
       });
 
       applySessionResponse(sessionResponse);
-
-      router.push(
-        `/campaign/${id}/session/${sessionResponse.sessionId}/orchestrator`
-      );
+      router.push(`/campaign/${id}/session/${sessionResponse.sessionId}/orchestrator`);
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Error al crear la sesión"
-      );
+      setError(err instanceof Error ? err.message : "Error al crear la sesión");
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleSearchSelect = async (farmerId: string, farmerName: string) => {
+    setSelectedFarmer(farmerId, farmerName);
+    await startAndNavigate(farmerId);
+  };
+
+  const handleNewFarmer = async () => {
+    setNewFarmerMode();
+    await startAndNavigate();
+  };
+
+  const handleContinueLast = async (farmerId: string, farmerName: string) => {
+    setSelectedFarmer(farmerId, farmerName);
+    await startAndNavigate(farmerId);
+  };
+
+  const handleSkip = async () => {
+    await startAndNavigate();
   };
 
   return (
@@ -87,7 +99,20 @@ export default function PreSurveyScreen() {
         </View>
       ) : null}
 
-      <PreSurveyForm onSubmit={handleSubmit} isLoading={isLoading} />
+      {isLoading ? (
+        <View style={styles.loadingOverlay}>
+          <Text style={styles.loadingText}>Iniciando sesión…</Text>
+        </View>
+      ) : (
+        <PreSurveyForm
+          lastFarmer={lastFarmer}
+          isOnline={isOnline}
+          onSearchSelect={handleSearchSelect}
+          onNewFarmer={handleNewFarmer}
+          onContinueLast={handleContinueLast}
+          onSkip={handleSkip}
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -107,7 +132,13 @@ const styles = StyleSheet.create({
     borderBottomColor: "#E5E7EB",
   },
   back: { fontSize: 15, fontFamily: Fonts.regular, color: GREEN },
-  title: { flex: 1, fontSize: 17, fontFamily: Fonts.bold, color: "#111827", textAlign: "center" },
+  title: {
+    flex: 1,
+    fontSize: 17,
+    fontFamily: Fonts.bold,
+    color: "#111827",
+    textAlign: "center",
+  },
   errorBox: {
     margin: 16,
     padding: 12,
@@ -117,5 +148,20 @@ const styles = StyleSheet.create({
     borderColor: "#FECACA",
   },
   errorBoxText: { fontSize: 14, fontFamily: Fonts.regular, color: "#DC2626" },
-  errorText: { fontSize: 16, fontFamily: Fonts.regular, color: "#DC2626", margin: 24 },
+  errorText: {
+    fontSize: 16,
+    fontFamily: Fonts.regular,
+    color: "#DC2626",
+    margin: 24,
+  },
+  loadingOverlay: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  loadingText: {
+    fontSize: 15,
+    fontFamily: Fonts.regular,
+    color: "#6B7280",
+  },
 });
