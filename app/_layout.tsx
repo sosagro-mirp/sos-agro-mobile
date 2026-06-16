@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Stack, useRouter, useSegments } from "expo-router";
+import { useEffect, useRef, useState } from "react";
+import { Stack, useRouter } from "expo-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   useFonts,
@@ -32,18 +32,26 @@ const queryClient = new QueryClient({
 
 function AuthGuard() {
   const { user, isRestoring } = useAuthStore();
-  const segments = useSegments();
   const router = useRouter();
+  // Track previous user value to only act on actual changes, not re-renders
+  const prevUserRef = useRef<string | null | undefined>(undefined);
 
   useEffect(() => {
     if (isRestoring) return;
-    const inLogin = segments[0] === "login";
-    if (!user && !inLogin) {
+
+    const prevId = prevUserRef.current;
+    const currId = user?.userId ?? null;
+
+    // Skip if user identity hasn't changed (avoids resetting navigation mid-session)
+    if (prevId === currId) return;
+    prevUserRef.current = currId;
+
+    if (!user) {
       router.replace("/login");
-    } else if (user && inLogin) {
-      router.replace("/(tabs)/campaign");
+    } else {
+      router.replace("/campaign");
     }
-  }, [user, isRestoring, segments]);
+  }, [user, isRestoring]);
 
   return null;
 }

@@ -1,46 +1,47 @@
-import * as BackgroundFetch from 'expo-background-fetch';
 import * as TaskManager from 'expo-task-manager';
 import { NetworkMonitor } from './NetworkMonitor';
 
 const TASK_NAME = 'sosagro-background-sync';
-const INTERVAL_SECONDS = 15 * 60; // 15 minutes
+const INTERVAL_MINUTES = 15;
 
 // Task definition must be at module level, before any TaskManager registration.
+// expo-background-task is loaded lazily inside the callback to avoid crashing
+// if the native module is not available in Expo Go.
 TaskManager.defineTask(TASK_NAME, async () => {
+  const { BackgroundTaskResult } = await import('expo-background-task');
   try {
     await NetworkMonitor.checkAndSync();
-    return BackgroundFetch.BackgroundFetchResult.NewData;
+    return BackgroundTaskResult.Success;
   } catch {
-    return BackgroundFetch.BackgroundFetchResult.Failed;
+    return BackgroundTaskResult.Failed;
   }
 });
 
 export const BackgroundSync = {
   async register(): Promise<void> {
-    const status = await BackgroundFetch.getStatusAsync();
+    const { getStatusAsync, registerTaskAsync, BackgroundTaskStatus } = await import(
+      'expo-background-task'
+    );
 
-    if (
-      status === BackgroundFetch.BackgroundFetchStatus.Restricted ||
-      status === BackgroundFetch.BackgroundFetchStatus.Denied
-    ) {
-      // Background fetch not available on this device/OS configuration.
+    const status = await getStatusAsync();
+
+    if (status === BackgroundTaskStatus.Restricted) {
       return;
     }
 
     const isRegistered = await TaskManager.isTaskRegisteredAsync(TASK_NAME);
     if (isRegistered) return;
 
-    await BackgroundFetch.registerTaskAsync(TASK_NAME, {
-      minimumInterval: INTERVAL_SECONDS,
-      stopOnTerminate: false,
-      startOnBoot: true,
+    await registerTaskAsync(TASK_NAME, {
+      minimumInterval: INTERVAL_MINUTES,
     });
   },
 
   async unregister(): Promise<void> {
     const isRegistered = await TaskManager.isTaskRegisteredAsync(TASK_NAME);
     if (isRegistered) {
-      await BackgroundFetch.unregisterTaskAsync(TASK_NAME);
+      const { unregisterTaskAsync } = await import('expo-background-task');
+      await unregisterTaskAsync(TASK_NAME);
     }
   },
 };
