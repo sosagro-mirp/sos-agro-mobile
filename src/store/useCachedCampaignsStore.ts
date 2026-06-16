@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { campaignCacheStorage } from '../storage/campaignCache';
 import { instrumentCacheStorage } from '../storage/instrumentCache';
 import { fetchActiveCampaigns, fetchCampaignRender } from '../api/campaigns';
-import { fetchInstrumentRender } from '../api/instruments';
+import { fetchInstrumentRender, fetchInstrumentByCode } from '../api/instruments';
 import type { CampaignRender } from '../types';
 
 export interface DownloadProgress {
@@ -130,6 +130,20 @@ export const useCachedCampaignsStore = create<CachedCampaignsState>((set, get) =
               }
             : null,
         }));
+      }
+
+      // ── Phase 3: pre-cache S1 and S2 ─────────────────────────────────────
+      for (const code of ['S1', 'S2'] as const) {
+        try {
+          const meta = await fetchInstrumentByCode(code);
+          const cached = await instrumentCacheStorage.get(meta.instrumentId);
+          if (!cached) {
+            const instrument = await fetchInstrumentRender(meta.instrumentId);
+            await instrumentCacheStorage.save(instrument);
+          }
+        } catch {
+          // S1/S2 not configured in backend — ignore silently
+        }
       }
 
       // ── Final state refresh ────────────────────────────────────────────────
