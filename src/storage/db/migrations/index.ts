@@ -7,7 +7,7 @@ const migrations = {
     ],
   },
   migrations: {
-    '0000_initial': [
+    'm0000': [
       "CREATE TABLE IF NOT EXISTS `surveys` (`id` text PRIMARY KEY NOT NULL, `campaign_session_id` text, `instrument_id` text NOT NULL, `status` text NOT NULL DEFAULT 'draft', `created_at` integer NOT NULL, `updated_at` integer NOT NULL)",
       '--> statement-breakpoint',
       "CREATE TABLE IF NOT EXISTS `responses` (`id` text PRIMARY KEY NOT NULL, `survey_id` text NOT NULL, `question_id` text NOT NULL, `option_id` text, `option_ids` text, `text_value` text, `numeric_value` real, `boolean_value` integer, `other_text` text, FOREIGN KEY (`survey_id`) REFERENCES `surveys`(`id`) ON DELETE CASCADE)",

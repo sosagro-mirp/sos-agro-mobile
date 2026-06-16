@@ -4,6 +4,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -11,6 +12,8 @@ import {
 } from "react-native";
 import { useAuthStore } from "../src/store/useAuthStore";
 import { Fonts } from "../src/theme/fonts";
+
+const GREEN = "#1B6B3A";
 
 export default function LoginScreen() {
   const { login, loading, error, clearError } = useAuthStore();
@@ -28,91 +31,107 @@ export default function LoginScreen() {
   const isDisabled = loading || !email.trim() || !password;
 
   return (
-    <KeyboardAvoidingView
-      style={styles.root}
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
-    >
-      <View style={styles.header}>
-        <Text style={styles.title}>SOS Agro 4C</Text>
-        <Text style={styles.subtitle}>Plataforma de caracterización agrícola</Text>
-      </View>
+    // Outer View fills the screen with green — covers any gap left by the keyboard
+    <View style={styles.fill}>
+      <KeyboardAvoidingView
+        style={styles.kav}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "android" ? -24 : 0}
+      >
+        <ScrollView
+          contentContainerStyle={styles.scroll}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          bounces={false}
+        >
+          <View style={styles.header}>
+            <Text style={styles.title}>SOS Agro 4C</Text>
+            <Text style={styles.subtitle}>Plataforma de caracterización agrícola</Text>
+          </View>
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Iniciar sesión</Text>
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Iniciar sesión</Text>
 
-        <View style={styles.field}>
-          <Text style={styles.label}>Correo electrónico</Text>
-          <TextInput
-            style={styles.input}
-            value={email}
-            onChangeText={setEmail}
-            placeholder="usuario@ejemplo.com"
-            placeholderTextColor="#9CA3AF"
-            keyboardType="email-address"
-            autoCapitalize="none"
-            autoCorrect={false}
-            editable={!loading}
-          />
-        </View>
+            <View style={styles.field}>
+              <Text style={styles.label}>Correo electrónico</Text>
+              <TextInput
+                style={styles.input}
+                value={email}
+                onChangeText={setEmail}
+                placeholder="usuario@ejemplo.com"
+                placeholderTextColor="#9CA3AF"
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+                editable={!loading}
+              />
+            </View>
 
-        <View style={styles.field}>
-          <Text style={styles.label}>Contraseña</Text>
-          <View style={styles.passwordRow}>
-            <TextInput
-              style={[styles.input, styles.passwordInput]}
-              value={password}
-              onChangeText={setPassword}
-              placeholder="••••••••"
-              placeholderTextColor="#9CA3AF"
-              secureTextEntry={!showPassword}
-              autoCapitalize="none"
-              autoCorrect={false}
-              editable={!loading}
-              onSubmitEditing={handleLogin}
-              returnKeyType="done"
-            />
+            <View style={styles.field}>
+              <Text style={styles.label}>Contraseña</Text>
+              <View style={styles.passwordRow}>
+                <TextInput
+                  style={[styles.input, styles.passwordInput]}
+                  value={password}
+                  onChangeText={setPassword}
+                  placeholder="••••••••"
+                  placeholderTextColor="#9CA3AF"
+                  secureTextEntry={!showPassword}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  editable={!loading}
+                  onSubmitEditing={handleLogin}
+                  returnKeyType="done"
+                />
+                <Pressable
+                  style={styles.eyeButton}
+                  onPress={() => setShowPassword((v) => !v)}
+                  accessibilityLabel={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+                >
+                  <Text style={styles.eyeText}>{showPassword ? "Ocultar" : "Ver"}</Text>
+                </Pressable>
+              </View>
+            </View>
+
+            {error ? (
+              <View style={styles.errorBox}>
+                <Text style={styles.errorText}>{error}</Text>
+              </View>
+            ) : null}
+
             <Pressable
-              style={styles.eyeButton}
-              onPress={() => setShowPassword((v) => !v)}
-              accessibilityLabel={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+              style={[styles.button, isDisabled && styles.buttonDisabled]}
+              onPress={handleLogin}
+              disabled={isDisabled}
+              accessibilityRole="button"
+              accessibilityLabel="Iniciar sesión"
             >
-              <Text style={styles.eyeText}>{showPassword ? "Ocultar" : "Ver"}</Text>
+              {loading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.buttonText}>Ingresar</Text>
+              )}
             </Pressable>
           </View>
-        </View>
-
-        {error ? (
-          <View style={styles.errorBox}>
-            <Text style={styles.errorText}>{error}</Text>
-          </View>
-        ) : null}
-
-        <Pressable
-          style={[styles.button, isDisabled && styles.buttonDisabled]}
-          onPress={handleLogin}
-          disabled={isDisabled}
-          accessibilityRole="button"
-          accessibilityLabel="Iniciar sesión"
-        >
-          {loading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.buttonText}>Ingresar</Text>
-          )}
-        </Pressable>
-      </View>
-    </KeyboardAvoidingView>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </View>
   );
 }
 
-const GREEN = "#1B6B3A";
-
 const styles = StyleSheet.create({
-  root: {
+  fill: {
     flex: 1,
     backgroundColor: GREEN,
+  },
+  kav: {
+    flex: 1,
+  },
+  scroll: {
+    flexGrow: 1,
     justifyContent: "center",
     paddingHorizontal: 24,
+    paddingVertical: 32,
   },
   header: {
     alignItems: "center",

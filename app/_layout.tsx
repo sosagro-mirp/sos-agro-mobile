@@ -41,7 +41,7 @@ function AuthGuard() {
     if (!user && !inLogin) {
       router.replace("/login");
     } else if (user && inLogin) {
-      router.replace("/campaign");
+      router.replace("/(tabs)/campaign");
     }
   }, [user, isRestoring, segments]);
 

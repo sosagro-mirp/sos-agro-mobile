@@ -36,7 +36,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     web: {
       favicon: './assets/favicon.png',
     },
-    plugins: ['expo-router', 'expo-sqlite', '@sentry/react-native/expo'],
+    plugins: ['expo-router', 'expo-sqlite'],
     extra: {
       apiBaseUrl: process.env.EXPO_PUBLIC_API_BASE_URL,
     },
