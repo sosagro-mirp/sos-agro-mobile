@@ -93,7 +93,12 @@ export default function OrchestratorScreen() {
           // Returning from S1: extract farmer then inject S2
           const { farmer } = await extractFarmer(s1SurveyId);
           store.completeS1Injection(farmer.farmerId, farmer.name);
-          store.setLastFarmer(farmer);
+          store.setLastFarmer({
+            farmerId: farmer.farmerId,
+            name: farmer.name,
+            lastName: farmer.lastName,
+            ...(farmer.farm ? { farm: { name: farmer.farm.name } } : {}),
+          });
           await injectInstrument('S2');
         }
       } else if (injectionPhase === 's2') {
