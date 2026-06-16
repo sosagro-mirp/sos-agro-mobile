@@ -112,16 +112,12 @@ export interface CropSummary {
 }
 
 export interface FarmerSearchResult {
-  id: string;
+  farmerId: string;
   name: string;
-  lastName: string;
-  documentId: string;
+  lastName: string | null;
+  documentId: string | null;
   phone?: string | null;
-  farm?: {
-    farmId: string;
-    name: string;
-    town?: { townId: string; name: string } | null;
-  } | null;
+  farm?: { name: string } | null;
 }
 
 export interface ExtractFarmerResult {
