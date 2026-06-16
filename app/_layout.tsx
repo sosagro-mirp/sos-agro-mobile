@@ -11,6 +11,7 @@ import {
 } from "@expo-google-fonts/jetbrains-mono";
 import * as SplashScreen from "expo-splash-screen";
 import { useAuthStore } from "../src/store/useAuthStore";
+import { useCampaignSessionStore } from "../src/store/useCampaignSessionStore";
 import { runMigrations } from "../src/storage/db/db";
 import { syncQueueStorage } from "../src/storage/syncQueue";
 import { surveyDraftStore } from "../src/storage/surveyDraftStore";
@@ -49,6 +50,7 @@ function AuthGuard() {
 
 export default function RootLayout() {
   const { isRestoring, restoreSession } = useAuthStore();
+  const { loadLastFarmer } = useCampaignSessionStore();
   const [dbReady, setDbReady] = useState(false);
 
   const [fontsLoaded] = useFonts({
@@ -61,9 +63,10 @@ export default function RootLayout() {
 
   useEffect(() => {
     runMigrations()
-      .then(() => {
+      .then(async () => {
         setDbReady(true);
-        return restoreSession();
+        await restoreSession();
+        loadLastFarmer().catch(console.error);
       })
       .catch((err) => { captureError(err); console.error(err); });
   }, []);

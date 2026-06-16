@@ -1,12 +1,14 @@
 import { create } from 'zustand';
+import { secureStorage } from '../storage/secureStorage';
 import type {
   CampaignRender,
   CampaignSessionResponse,
+  LastFarmerResult,
   NextStepResponse,
-  PreSurveyFormData,
 } from '../types';
 
 type SessionPhase = 'idle' | 'pre_survey' | 'in_step' | 'completed';
+type InjectionPhase = 'none' | 's1' | 's2';
 
 interface CurrentStep {
   stepId: string;
@@ -21,27 +23,54 @@ interface CampaignSessionState {
   phase: SessionPhase;
   campaign: CampaignRender | null;
   sessionId: string | null;
-  preSurveyData: PreSurveyFormData | null;
   currentStep: CurrentStep | null;
   error: string | null;
 
+  // Farmer identification
+  farmerId: string | null;
+  farmerName: string | null;
+  isNewFarmer: boolean;
+
+  // S1/S2 injection tracking
+  injectionPhase: InjectionPhase;
+  s1SurveyId: string | null;
+  s2SurveyId: string | null;
+
+  // Last identified farmer (persisted in SecureStorage)
+  lastFarmer: LastFarmerResult;
+
   startSession: (campaign: CampaignRender) => void;
-  setPreSurveyData: (data: PreSurveyFormData) => void;
   applySessionResponse: (response: CampaignSessionResponse) => void;
   applyNextStep: (nextStep: NextStepResponse) => void;
   markStepCompleted: () => void;
   markCompleted: () => void;
   setError: (message: string) => void;
   reset: () => void;
+
+  // Farmer identification actions
+  setNewFarmerMode: () => void;
+  setSelectedFarmer: (farmerId: string, farmerName: string) => void;
+  setInjectionS1SurveyId: (surveyId: string) => void;
+  setInjectionS2SurveyId: (surveyId: string) => void;
+  completeS1Injection: (farmerId: string, farmerName: string) => void;
+  completeS2Injection: () => void;
+  setLastFarmer: (farmer: LastFarmerResult) => void;
+  loadLastFarmer: () => Promise<void>;
 }
 
 const initialState = {
   phase: 'idle' as SessionPhase,
   campaign: null,
   sessionId: null,
-  preSurveyData: null,
   currentStep: null,
   error: null,
+  farmerId: null,
+  farmerName: null,
+  isNewFarmer: false,
+  injectionPhase: 'none' as InjectionPhase,
+  s1SurveyId: null,
+  s2SurveyId: null,
+  lastFarmer: null as LastFarmerResult,
 };
 
 export const useCampaignSessionStore = create<CampaignSessionState>((set, get) => ({
@@ -49,10 +78,6 @@ export const useCampaignSessionStore = create<CampaignSessionState>((set, get) =
 
   startSession(campaign) {
     set({ ...initialState, campaign, phase: 'pre_survey' });
-  },
-
-  setPreSurveyData(data) {
-    set({ preSurveyData: data });
   },
 
   applySessionResponse(response) {
@@ -99,5 +124,39 @@ export const useCampaignSessionStore = create<CampaignSessionState>((set, get) =
 
   reset() {
     set(initialState);
+  },
+
+  setNewFarmerMode() {
+    set({ isNewFarmer: true, injectionPhase: 's1', farmerId: null, farmerName: null });
+  },
+
+  setSelectedFarmer(farmerId, farmerName) {
+    set({ isNewFarmer: false, injectionPhase: 'none', farmerId, farmerName });
+  },
+
+  setInjectionS1SurveyId(surveyId) {
+    set({ s1SurveyId: surveyId });
+  },
+
+  setInjectionS2SurveyId(surveyId) {
+    set({ s2SurveyId: surveyId });
+  },
+
+  completeS1Injection(farmerId, farmerName) {
+    set({ injectionPhase: 's2', farmerId, farmerName });
+  },
+
+  completeS2Injection() {
+    set({ injectionPhase: 'none' });
+  },
+
+  setLastFarmer(farmer) {
+    set({ lastFarmer: farmer });
+    secureStorage.saveLastFarmer(farmer).catch(console.error);
+  },
+
+  async loadLastFarmer() {
+    const farmer = await secureStorage.getLastFarmer();
+    set({ lastFarmer: farmer });
   },
 }));
