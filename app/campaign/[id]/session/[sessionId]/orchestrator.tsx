@@ -13,6 +13,7 @@ import { createSurvey } from "../../../../../src/api/surveys";
 import { overwriteSurvey, skipStepApi } from "../../../../../src/api/surveys";
 import { surveyDraftStore } from "../../../../../src/storage/surveyDraftStore";
 import { syncQueueStorage } from "../../../../../src/storage/syncQueue";
+import { SyncQueueService } from "../../../../../src/sync/SyncQueueService";
 import { checkDuplicate } from "../../../../../src/storage/duplicateDetection";
 import { getNextStepOffline } from "../../../../../src/lib/getNextStepOffline";
 import { DuplicateAlertModal } from "../../../../../src/components/campaign/DuplicateAlertModal";
@@ -142,6 +143,8 @@ export default function OrchestratorScreen() {
         if (!s1SurveyId) {
           await injectInstrument('S1');
         } else {
+          // Ensure S1 responses are on the backend before extracting farmer data.
+          await SyncQueueService.processSurveyNow(s1SurveyId);
           const { farmer } = await extractFarmer(s1SurveyId);
           store.completeS1Injection(farmer.farmerId, farmer.name);
           store.setLastFarmer({
@@ -156,6 +159,8 @@ export default function OrchestratorScreen() {
         if (!s2SurveyId) {
           await injectInstrument('S2');
         } else {
+          // Ensure S2 responses are on the backend before extracting crop data.
+          await SyncQueueService.processSurveyNow(s2SurveyId);
           await extractCrops(s2SurveyId);
           store.completeS2Injection();
           const nextStep = await getNextStep(resolvedSessionId);

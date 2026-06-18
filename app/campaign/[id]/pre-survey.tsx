@@ -40,16 +40,27 @@ export default function PreSurveyScreen() {
     );
   }
 
-  const startAndNavigate = async (farmerId?: string) => {
+  const startAndNavigate = async (options?: {
+    farmerId?: string;
+    farmerName?: string;
+    isNew?: boolean;
+  }) => {
     setError(null);
     setIsLoading(true);
     startSession(campaign);
+
+    // Apply farmer state AFTER startSession, which resets the store to initialState.
+    if (options?.isNew) {
+      setNewFarmerMode();
+    } else if (options?.farmerId && options?.farmerName) {
+      setSelectedFarmer(options.farmerId, options.farmerName);
+    }
 
     try {
       const sessionResponse = await createCampaignSession({
         campaignId: campaign.campaignId,
         userId: user?.userId,
-        ...(farmerId ? { farmerId } : {}),
+        ...(options?.farmerId ? { farmerId: options.farmerId } : {}),
       });
 
       applySessionResponse(sessionResponse);
@@ -62,18 +73,15 @@ export default function PreSurveyScreen() {
   };
 
   const handleSearchSelect = async (farmerId: string, farmerName: string) => {
-    setSelectedFarmer(farmerId, farmerName);
-    await startAndNavigate(farmerId);
+    await startAndNavigate({ farmerId, farmerName });
   };
 
   const handleNewFarmer = async () => {
-    setNewFarmerMode();
-    await startAndNavigate();
+    await startAndNavigate({ isNew: true });
   };
 
   const handleContinueLast = async (farmerId: string, farmerName: string) => {
-    setSelectedFarmer(farmerId, farmerName);
-    await startAndNavigate(farmerId);
+    await startAndNavigate({ farmerId, farmerName });
   };
 
   return (

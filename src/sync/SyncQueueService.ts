@@ -121,6 +121,25 @@ class SyncQueueServiceClass {
     // If we hit the cap, processAll() will stop on the next iteration check.
   }
 
+  // Ensures a specific survey's responses are on the backend before returning.
+  // Used by the S1/S2 injection flow, which needs the data immediately after submission.
+  async processSurveyNow(surveyId: string): Promise<void> {
+    const entry = await syncQueueStorage.getPendingBySurveyId(surveyId);
+
+    if (entry) {
+      await this.processEntry(entry);
+      return;
+    }
+
+    // Entry may be in_flight (processAll already picked it up); wait up to 10s.
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      const active = await syncQueueStorage.getActiveBySurveyId(surveyId);
+      if (!active) return;
+      await sleep(300);
+    }
+  }
+
   resetNetworkFailures(): void {
     this.consecutiveNetworkFailures = 0;
   }
