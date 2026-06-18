@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  FlatList,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -93,13 +93,13 @@ export const PreSurveyForm: React.FC<PreSurveyFormProps> = ({
             <Text style={styles.searchError}>{searchError}</Text>
           ) : null}
           {results.length > 0 ? (
-            <FlatList
-              data={results}
-              keyExtractor={(item) => item.farmerId}
+            <ScrollView
               style={styles.resultsList}
               keyboardShouldPersistTaps="handled"
-              renderItem={({ item }) => (
+            >
+              {results.map((item) => (
                 <Pressable
+                  key={item.farmerId}
                   style={styles.resultItem}
                   onPress={() => handleSelect(item)}
                 >
@@ -113,8 +113,8 @@ export const PreSurveyForm: React.FC<PreSurveyFormProps> = ({
                     <Text style={styles.resultDetail}>Finca: {item.farm.name}</Text>
                   ) : null}
                 </Pressable>
-              )}
-            />
+              ))}
+            </ScrollView>
           ) : query.trim() && !isSearching ? (
             <Text style={styles.noResults}>Sin resultados para "{query}"</Text>
           ) : null}
