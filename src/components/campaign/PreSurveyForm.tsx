@@ -18,7 +18,6 @@ interface PreSurveyFormProps {
   onSearchSelect: (farmerId: string, farmerName: string) => void;
   onNewFarmer: () => void;
   onContinueLast: (farmerId: string, farmerName: string) => void;
-  onSkip: () => void;
 }
 
 export const PreSurveyForm: React.FC<PreSurveyFormProps> = ({
@@ -27,7 +26,6 @@ export const PreSurveyForm: React.FC<PreSurveyFormProps> = ({
   onSearchSelect,
   onNewFarmer,
   onContinueLast,
-  onSkip,
 }) => {
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -156,12 +154,6 @@ export const PreSurveyForm: React.FC<PreSurveyFormProps> = ({
         </Pressable>
       ) : null}
 
-      <View style={styles.divider} />
-
-      {/* Skip link */}
-      <Pressable style={styles.skipLink} onPress={onSkip}>
-        <Text style={styles.skipText}>Continuar sin identificar encuestado</Text>
-      </Pressable>
     </View>
   );
 };
@@ -268,20 +260,5 @@ const styles = StyleSheet.create({
     color: "#6B7280",
     textAlign: "center",
     paddingVertical: 4,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: "#E5E7EB",
-    marginTop: 4,
-  },
-  skipLink: {
-    alignItems: "center",
-    paddingVertical: 8,
-  },
-  skipText: {
-    fontFamily: Fonts.medium,
-    fontSize: 14,
-    color: "#9CA3AF",
-    textDecorationLine: "underline",
   },
 });

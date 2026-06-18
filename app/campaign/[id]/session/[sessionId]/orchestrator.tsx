@@ -153,12 +153,6 @@ export default function OrchestratorScreen() {
     }
   }, [isOnline]);
 
-  const handleSkipInjection = () => {
-    store.completeS2Injection(); // resets injectionPhase to 'none'
-    hasStarted.current = false;
-    run();
-  };
-
   if (screenState === 'offline') {
     return (
       <SafeAreaView style={styles.root}>
@@ -187,14 +181,21 @@ export default function OrchestratorScreen() {
           <Text style={styles.bigIcon}>⚠️</Text>
           <Text style={styles.title}>Error identificando encuestado</Text>
           <Text style={styles.errorDesc}>{errorMessage}</Text>
+          <Text style={styles.desc}>
+            Debes identificar al encuestado antes de continuar.{"\n"}
+            Vuelve y regístralo si aún no existe en el sistema.
+          </Text>
           <Pressable
             style={styles.buttonActive}
             onPress={() => { hasStarted.current = false; run(); }}
           >
             <Text style={styles.buttonText}>Reintentar</Text>
           </Pressable>
-          <Pressable style={styles.skipButton} onPress={handleSkipInjection}>
-            <Text style={styles.skipText}>Continuar sin identificar</Text>
+          <Pressable
+            style={styles.button}
+            onPress={() => router.replace(`/campaign/${id}/pre-survey`)}
+          >
+            <Text style={styles.buttonText}>← Volver a identificar</Text>
           </Pressable>
         </View>
       </SafeAreaView>
@@ -271,11 +272,4 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   buttonText: { fontSize: 16, fontFamily: Fonts.semiBold, color: "#fff" },
-  skipButton: { paddingVertical: 8 },
-  skipText: {
-    fontSize: 14,
-    fontFamily: Fonts.medium,
-    color: "#6B7280",
-    textDecorationLine: "underline",
-  },
 });

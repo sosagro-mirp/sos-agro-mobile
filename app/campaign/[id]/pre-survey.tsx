@@ -76,10 +76,6 @@ export default function PreSurveyScreen() {
     await startAndNavigate(farmerId);
   };
 
-  const handleSkip = async () => {
-    await startAndNavigate();
-  };
-
   return (
     <SafeAreaView style={styles.root}>
       <OfflineBanner />
@@ -110,7 +106,6 @@ export default function PreSurveyScreen() {
           onSearchSelect={handleSearchSelect}
           onNewFarmer={handleNewFarmer}
           onContinueLast={handleContinueLast}
-          onSkip={handleSkip}
         />
       )}
     </SafeAreaView>
