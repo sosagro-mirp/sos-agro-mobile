@@ -31,4 +31,8 @@ export const endpoints = {
 
   // Telemetry
   telemetrySync: '/api/telemetry/sync',
+
+  // Media attachments
+  mediaPresignedUrl: '/api/media-attachments/presigned-url',
+  mediaConfirmUpload: (id: string) => `/api/media-attachments/${id}/confirm`,
 } as const;

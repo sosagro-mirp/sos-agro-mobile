@@ -49,6 +49,20 @@ export const QuestionScreen: React.FC<QuestionScreenProps> = ({
     setAnswer(currentItem.question.questionId, answer);
   };
 
+  const altitudeQuestion = visible.find(
+    (q) => q.question.systemField === "farm.altitude",
+  );
+
+  const handleAltitudeObtained = (altitude: number) => {
+    if (!altitudeQuestion) return;
+    const existing = answers[altitudeQuestion.question.questionId];
+    if (existing?.numericValue !== undefined) return;
+    setAnswer(altitudeQuestion.question.questionId, {
+      questionId: altitudeQuestion.question.questionId,
+      numericValue: altitude,
+    });
+  };
+
   const handleNext = () => {
     if (isLast) {
       onFinished();
@@ -123,6 +137,7 @@ export const QuestionScreen: React.FC<QuestionScreenProps> = ({
             item={currentItem}
             answer={currentAnswer}
             onChange={handleChange}
+            onAltitudeObtained={handleAltitudeObtained}
           />
         </QuestionContainer>
       </ScrollView>

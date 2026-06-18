@@ -51,6 +51,7 @@ export interface InstrumentDraftAnswer {
 
 export interface CreateResponsePayload extends InstrumentDraftAnswer {
   surveyId: string;
+  attachmentId?: string;
 }
 
 export interface InstrumentSection {

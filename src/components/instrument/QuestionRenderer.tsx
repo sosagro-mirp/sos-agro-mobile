@@ -2,6 +2,7 @@ import React from "react";
 import type { FlattenedQuestionItem, InstrumentDraftAnswer } from "../../types";
 import { OpenTextInput } from "../inputs/OpenTextInput";
 import { NumericInput } from "../inputs/NumericInput";
+import { GpsCoordinateInput } from "../inputs/GpsCoordinateInput";
 import { SingleChoiceList } from "../inputs/SingleChoiceList";
 import { MultipleChoiceList } from "../inputs/MultipleChoiceList";
 import { LikertScale } from "../inputs/LikertScale";
@@ -10,19 +11,35 @@ import { ImageCaptureInput } from "../inputs/ImageCaptureInput";
 import { VoiceRecordingInput } from "../inputs/VoiceRecordingInput";
 import { DocumentPickerInput } from "../inputs/DocumentPickerInput";
 
+const GPS_SYSTEM_FIELDS = new Set(["farm.latitude", "farm.longitude"]);
+
 interface QuestionRendererProps {
   item: FlattenedQuestionItem;
   answer: InstrumentDraftAnswer | undefined;
   onChange: (answer: InstrumentDraftAnswer) => void;
+  onAltitudeObtained?: (altitude: number) => void;
 }
 
 export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
   item,
   answer,
   onChange,
+  onAltitudeObtained,
 }) => {
   const { question } = item;
   const { questionId, options, type } = question;
+
+  if (question.systemField && GPS_SYSTEM_FIELDS.has(question.systemField)) {
+    return (
+      <GpsCoordinateInput
+        questionId={questionId}
+        fieldType={question.systemField === "farm.latitude" ? "latitude" : "longitude"}
+        value={answer?.numericValue}
+        onChange={onChange}
+        onAltitudeObtained={onAltitudeObtained}
+      />
+    );
+  }
 
   switch (type.name) {
     case "open_text":

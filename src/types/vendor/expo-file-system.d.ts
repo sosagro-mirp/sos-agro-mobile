@@ -67,4 +67,32 @@ declare module 'expo-file-system' {
   ): Promise<void>;
 
   export function readDirectoryAsync(fileUri: string): Promise<string[]>;
+
+  export enum FileSystemUploadType {
+    BINARY_CONTENT = 0,
+    MULTIPART = 1,
+  }
+
+  export interface FileSystemUploadOptions {
+    uploadType?: FileSystemUploadType;
+    httpMethod?: 'POST' | 'PUT' | 'PATCH';
+    headers?: Record<string, string>;
+    fieldName?: string;
+    mimeType?: string;
+    parameters?: Record<string, string>;
+  }
+
+  export interface FileSystemUploadResult {
+    body: string;
+    headers: Record<string, string>;
+    mimeType: string | null;
+    status: number;
+    url: string;
+  }
+
+  export function uploadAsync(
+    url: string,
+    fileUri: string,
+    options?: FileSystemUploadOptions
+  ): Promise<FileSystemUploadResult>;
 }

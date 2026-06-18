@@ -9,6 +9,7 @@ import { buildResponsesPayload } from '../lib/buildResponsesPayload';
 import { flattenSections } from '../lib/flattenSections';
 import { instrumentCacheStorage } from '../storage/instrumentCache';
 import { useSyncStatusStore } from '../store/useSyncStatusStore';
+import { MediaUploadService } from './MediaUploadService';
 import { eq } from 'drizzle-orm';
 import { NetworkError, httpClient } from '../api/httpClient';
 import { endpoints } from '../api/endpoints';
@@ -52,6 +53,8 @@ class SyncQueueServiceClass {
     await syncQueueStorage.markInFlight(entry.id);
 
     try {
+      await MediaUploadService.processPendingForSurvey(entry.surveyId);
+
       const payload = await this.buildPayload(entry);
 
       if (!payload || payload.length === 0) {
@@ -103,7 +106,7 @@ class SyncQueueServiceClass {
     if (!instrument) return [];
 
     const flattenedQuestions = flattenSections(instrument.sections);
-    return buildResponsesPayload(entry.surveyId, flattenedQuestions, draft.answers);
+    return await buildResponsesPayload(entry.surveyId, flattenedQuestions, draft.answers);
   }
 
   private async handleNetworkError(entry: SyncQueueEntry): Promise<void> {

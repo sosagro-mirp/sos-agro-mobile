@@ -4,47 +4,69 @@ import type {
   InstrumentDraftAnswer,
 } from "../types";
 import { isQuestionVisible } from "./isQuestionVisible";
+import { mediaUploadQueueStorage } from "../storage/mediaUploadQueueStorage";
 
-export function buildResponsesPayload(
+const MEDIA_QUESTION_TYPES = new Set([
+  "image",
+  "voice_recording",
+  "document",
+  "video",
+]);
+
+export async function buildResponsesPayload(
   surveyId: string,
   flattenedQuestions: FlattenedQuestionItem[],
   answers: Record<string, InstrumentDraftAnswer>,
-): CreateResponsePayload[] {
+): Promise<CreateResponsePayload[]> {
   const payload: CreateResponsePayload[] = [];
 
-  flattenedQuestions
-    .filter(({ question }) => isQuestionVisible(question, answers))
-    .forEach(({ question }) => {
-      const answer = answers[question.questionId];
+  for (const { question } of flattenedQuestions.filter(({ question }) =>
+    isQuestionVisible(question, answers),
+  )) {
+    const answer = answers[question.questionId];
+    if (!answer) continue;
 
-      if (!answer) return;
+    if (MEDIA_QUESTION_TYPES.has(question.type.name)) {
+      if (!answer.mediaLocalPath) continue;
 
-      if (question.type.name === "multiple_choice") {
-        const selectedOptionIds = answer.optionIds ?? [];
-        selectedOptionIds.forEach((optionId) => {
-          payload.push({ surveyId, questionId: question.questionId, optionId });
-        });
-        return;
-      }
-
-      const trimmedText = answer.textValue?.trim();
-      const item = {
+      const attachmentId = await mediaUploadQueueStorage.getUploadedAttachmentId(
         surveyId,
-        questionId: answer.questionId,
-        ...(answer.optionId !== undefined && { optionId: answer.optionId }),
-        ...(trimmedText ? { textValue: trimmedText } : {}),
-        ...(answer.numericValue !== undefined && { numericValue: answer.numericValue }),
-        ...(answer.booleanValue !== undefined && { booleanValue: answer.booleanValue }),
-      };
+        question.questionId,
+      );
 
-      const hasValue =
-        "optionId" in item ||
-        "textValue" in item ||
-        "numericValue" in item ||
-        "booleanValue" in item;
+      // Skip if the upload didn't complete — avoids sending an unlinked response.
+      if (!attachmentId) continue;
 
-      if (hasValue) payload.push(item);
-    });
+      payload.push({ surveyId, questionId: question.questionId, attachmentId });
+      continue;
+    }
+
+    if (question.type.name === "multiple_choice") {
+      const selectedOptionIds = answer.optionIds ?? [];
+      selectedOptionIds.forEach((optionId) => {
+        payload.push({ surveyId, questionId: question.questionId, optionId });
+      });
+      continue;
+    }
+
+    const trimmedText = answer.textValue?.trim();
+    const item: CreateResponsePayload = {
+      surveyId,
+      questionId: answer.questionId,
+      ...(answer.optionId !== undefined && { optionId: answer.optionId }),
+      ...(trimmedText ? { textValue: trimmedText } : {}),
+      ...(answer.numericValue !== undefined && { numericValue: answer.numericValue }),
+      ...(answer.booleanValue !== undefined && { booleanValue: answer.booleanValue }),
+    };
+
+    const hasValue =
+      "optionId" in item ||
+      "textValue" in item ||
+      "numericValue" in item ||
+      "booleanValue" in item;
+
+    if (hasValue) payload.push(item);
+  }
 
   return payload;
 }
