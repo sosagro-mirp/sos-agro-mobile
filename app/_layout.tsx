@@ -12,6 +12,7 @@ import {
 import * as SplashScreen from "expo-splash-screen";
 import { useAuthStore } from "../src/store/useAuthStore";
 import { useCampaignSessionStore } from "../src/store/useCampaignSessionStore";
+import { useCachedInstrumentsStore } from "../src/store/useCachedInstrumentsStore";
 import { runMigrations } from "../src/storage/db/db";
 import { syncQueueStorage } from "../src/storage/syncQueue";
 import { surveyDraftStore } from "../src/storage/surveyDraftStore";
@@ -59,6 +60,7 @@ function AuthGuard() {
 export default function RootLayout() {
   const { isRestoring, restoreSession } = useAuthStore();
   const { loadLastFarmer } = useCampaignSessionStore();
+  const loadInstrumentCache = useCachedInstrumentsStore((s) => s.loadFromCache);
   const [dbReady, setDbReady] = useState(false);
 
   const [fontsLoaded] = useFonts({
@@ -75,6 +77,7 @@ export default function RootLayout() {
         setDbReady(true);
         await restoreSession();
         loadLastFarmer().catch(console.error);
+        loadInstrumentCache().catch(console.error);
       })
       .catch((err) => { captureError(err); console.error(err); });
   }, []);

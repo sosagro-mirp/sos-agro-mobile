@@ -125,6 +125,8 @@ export default function OrchestratorScreen() {
           router.replace(`/campaign/${id}/session/${resolvedSessionId}/completed`);
           return;
         }
+        // Ensure the instrument is in memory before the start screen looks it up.
+        await getOrDownloadInstrument(nextStep.instrument.instrumentId);
         router.replace(`/instrument/${nextStep.instrument.instrumentId}/start`);
       }
     } catch (err) {
