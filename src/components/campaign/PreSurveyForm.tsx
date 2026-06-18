@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -93,11 +92,8 @@ export const PreSurveyForm: React.FC<PreSurveyFormProps> = ({
             <Text style={styles.searchError}>{searchError}</Text>
           ) : null}
           {results.length > 0 ? (
-            <ScrollView
-              style={styles.resultsList}
-              keyboardShouldPersistTaps="handled"
-            >
-              {results.map((item) => (
+            <View style={styles.resultsList}>
+              {results.slice(0, 5).map((item) => (
                 <Pressable
                   key={item.farmerId}
                   style={styles.resultItem}
@@ -114,7 +110,7 @@ export const PreSurveyForm: React.FC<PreSurveyFormProps> = ({
                   ) : null}
                 </Pressable>
               ))}
-            </ScrollView>
+            </View>
           ) : query.trim() && !isSearching ? (
             <Text style={styles.noResults}>Sin resultados para "{query}"</Text>
           ) : null}
