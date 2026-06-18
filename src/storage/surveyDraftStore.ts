@@ -23,7 +23,9 @@ export const surveyDraftStore = {
       id: params.surveyId,
       instrumentId: params.instrumentId,
       campaignSessionId: params.campaignSessionId ?? null,
-      farmerId: params.farmerId ?? null,
+      // Only include farmerId when present — omitting it entirely avoids
+      // referencing the column on devices where m0001 hasn't applied yet.
+      ...(params.farmerId != null ? { farmerId: params.farmerId } : {}),
       status: 'draft',
       createdAt: now,
       updatedAt: now,
