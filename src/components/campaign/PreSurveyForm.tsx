@@ -93,9 +93,9 @@ export const PreSurveyForm: React.FC<PreSurveyFormProps> = ({
           ) : null}
           {results.length > 0 ? (
             <View style={styles.resultsList}>
-              {results.slice(0, 5).map((item) => (
+              {results.slice(0, 5).map((item, index) => (
                 <Pressable
-                  key={item.farmerId}
+                  key={item.farmerId ?? `r-${index}`}
                   style={styles.resultItem}
                   onPress={() => handleSelect(item)}
                 >
