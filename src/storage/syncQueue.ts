@@ -131,6 +131,10 @@ export const syncQueueStorage = {
       .set({ status: 'pending' })
       .where(eq(syncQueue.status, 'in_flight'));
   },
+
+  async deleteBySurveyId(surveyId: string): Promise<void> {
+    await db.delete(syncQueue).where(eq(syncQueue.surveyId, surveyId));
+  },
 };
 
 function mapRow(row: typeof syncQueue.$inferSelect): SyncQueueEntry {

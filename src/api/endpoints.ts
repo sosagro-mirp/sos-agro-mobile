@@ -29,6 +29,11 @@ export const endpoints = {
   // Last farmer for current user
   campaignSessionLastFarmer: '/api/campaign-sessions/last-farmer',
 
+  // Duplicate survey detection
+  surveyCheckDuplicate: '/api/surveys/check-duplicate',
+  surveyOverwrite: '/api/surveys/overwrite',
+  surveySkipStep: '/api/surveys/skip-step',
+
   // Telemetry
   telemetrySync: '/api/telemetry/sync',
 } as const;

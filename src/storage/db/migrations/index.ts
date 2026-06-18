@@ -4,9 +4,14 @@ const migrations = {
   journal: {
     entries: [
       { idx: 0, when: 0, tag: 'm0000', breakpoints: true },
+      { idx: 1, when: 1, tag: 'm0001', breakpoints: true },
     ],
   },
   migrations: {
+    m0001: [
+      "ALTER TABLE `surveys` ADD COLUMN `farmer_id` text",
+    ].join('\n'),
+
     m0000: [
       "CREATE TABLE IF NOT EXISTS `surveys` (`id` text PRIMARY KEY NOT NULL, `campaign_session_id` text, `instrument_id` text NOT NULL, `status` text NOT NULL DEFAULT 'draft', `created_at` integer NOT NULL, `updated_at` integer NOT NULL)",
       '--> statement-breakpoint',

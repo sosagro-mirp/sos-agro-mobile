@@ -16,12 +16,14 @@ export const surveyDraftStore = {
     surveyId: string;
     instrumentId: string;
     campaignSessionId?: string;
+    farmerId?: string;
   }): Promise<void> {
     const now = new Date();
     await db.insert(surveys).values({
       id: params.surveyId,
       instrumentId: params.instrumentId,
       campaignSessionId: params.campaignSessionId ?? null,
+      farmerId: params.farmerId ?? null,
       status: 'draft',
       createdAt: now,
       updatedAt: now,

@@ -19,14 +19,14 @@ import { OfflineBanner } from "../../../src/components/network/OfflineBanner";
 import { Fonts } from "../../../src/theme/fonts";
 
 export default function InstrumentStartScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, existingSurveyId } = useLocalSearchParams<{ id: string; existingSurveyId?: string }>();
   const router = useRouter();
 
   const instrument = useCachedInstrumentsStore((s) =>
     s.instruments.find((i) => i.instrumentId === id)
   );
   const { initializeSurvey } = useInstrumentSurveyStore();
-  const { sessionId: campaignSessionId, currentStep } = useCampaignSessionStore();
+  const { sessionId: campaignSessionId, currentStep, farmerId } = useCampaignSessionStore();
   const { isOnline } = useSyncStatusStore();
 
   const [starting, setStarting] = useState(false);
@@ -54,19 +54,36 @@ export default function InstrumentStartScreen() {
     setStarting(true);
 
     try {
-      const surveyPayload = {
-        instrumentIds: [instrument.instrumentId],
-        ...(campaignSessionId ? { campaignSessionId } : {}),
-        ...(currentStep ? { stepOrder: currentStep.order } : {}),
-      };
+      let surveyId: string;
 
-      const { surveyId } = await createSurvey(surveyPayload);
+      if (existingSurveyId) {
+        // Overwrite flow: backend already created the survey via /overwrite.
+        // Just create the local draft with the provided ID.
+        surveyId = existingSurveyId;
+        await surveyDraftStore.createDraft({
+          surveyId,
+          instrumentId: instrument.instrumentId,
+          campaignSessionId: campaignSessionId ?? undefined,
+          farmerId: farmerId ?? undefined,
+        });
+      } else {
+        const surveyPayload = {
+          instrumentIds: [instrument.instrumentId],
+          ...(campaignSessionId ? { campaignSessionId } : {}),
+          ...(currentStep ? { stepOrder: currentStep.order } : {}),
+          ...(farmerId ? { farmerId } : {}),
+        };
 
-      await surveyDraftStore.createDraft({
-        surveyId,
-        instrumentId: instrument.instrumentId,
-        campaignSessionId: campaignSessionId ?? undefined,
-      });
+        const response = await createSurvey(surveyPayload);
+        surveyId = response.surveyId;
+
+        await surveyDraftStore.createDraft({
+          surveyId,
+          instrumentId: instrument.instrumentId,
+          campaignSessionId: campaignSessionId ?? undefined,
+          farmerId: farmerId ?? undefined,
+        });
+      }
 
       initializeSurvey({
         surveyId,
@@ -126,7 +143,7 @@ export default function InstrumentStartScreen() {
           ))}
         </View>
 
-        {!isOnline && (
+        {!isOnline && !existingSurveyId && (
           <View style={styles.offlineBanner}>
             <Text style={styles.offlineText}>
               Necesitas conexión para iniciar la encuesta.
@@ -145,10 +162,10 @@ export default function InstrumentStartScreen() {
         <Pressable
           style={[
             styles.button,
-            (!isOnline || starting) && styles.buttonDisabled,
+            ((!isOnline && !existingSurveyId) || starting) && styles.buttonDisabled,
           ]}
           onPress={handleStart}
-          disabled={!isOnline || starting}
+          disabled={(!isOnline && !existingSurveyId) || starting}
         >
           {starting ? (
             <ActivityIndicator color="#fff" />

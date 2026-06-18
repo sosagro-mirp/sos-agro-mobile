@@ -4,6 +4,7 @@ export const surveys = sqliteTable('surveys', {
   id: text('id').primaryKey(),
   campaignSessionId: text('campaign_session_id'),
   instrumentId: text('instrument_id').notNull(),
+  farmerId: text('farmer_id'),
   status: text('status', { enum: ['draft', 'completed', 'synced'] })
     .notNull()
     .default('draft'),
