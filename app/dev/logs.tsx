@@ -13,6 +13,7 @@ import { useRouter } from "expo-router";
 import { useFocusEffect } from "expo-router";
 import * as FileSystem from "expo-file-system/legacy";
 import { logger, type LogFile } from "../../src/lib/logger";
+import { farmerCacheStorage } from "../../src/storage/farmerCache";
 import { Fonts } from "../../src/theme/fonts";
 
 const LOG_DIR = (FileSystem.documentDirectory ?? "") + "logs/";
@@ -27,6 +28,8 @@ export default function DevLogsScreen() {
   const [files, setFiles] = useState<LogFileMeta[]>([]);
   const [selectedLog, setSelectedLog] = useState<LogFile | null>(null);
   const [loading, setLoading] = useState(false);
+  const [clearingFarmers, setClearingFarmers] = useState(false);
+  const [farmerClearResult, setFarmerClearResult] = useState<string | null>(null);
 
   async function loadFileList() {
     setLoading(true);
@@ -71,6 +74,21 @@ export default function DevLogsScreen() {
     Share.share({ message: content });
   }
 
+  async function handleClearFarmers() {
+    if (clearingFarmers) return;
+    setClearingFarmers(true);
+    setFarmerClearResult(null);
+    try {
+      const count = await farmerCacheStorage.clearAll();
+      setFarmerClearResult(`${count} agricultor${count !== 1 ? 'es' : ''} eliminado${count !== 1 ? 's' : ''}`);
+    } catch (e) {
+      setFarmerClearResult('Error al limpiar');
+      console.error("[DevLogs] clearFarmers error", e);
+    } finally {
+      setClearingFarmers(false);
+    }
+  }
+
   async function handleClear() {
     try {
       const info = await FileSystem.getInfoAsync(LOG_DIR);
@@ -106,7 +124,7 @@ export default function DevLogsScreen() {
           <Text style={styles.logText}>{selectedLog.content}</Text>
         </ScrollView>
       ) : (
-        <ScrollView style={styles.listScroll}>
+        <ScrollView style={styles.listScroll} contentContainerStyle={styles.listContent}>
           {files.length === 0 ? (
             <Text style={styles.emptyText}>No hay archivos de log.</Text>
           ) : (
@@ -121,18 +139,33 @@ export default function DevLogsScreen() {
               </Pressable>
             ))
           )}
+
+          {/* Actions */}
+          <View style={styles.actions}>
+            <View style={styles.actionsRow}>
+              <Pressable style={styles.actionButton} onPress={handleExport}>
+                <Text style={styles.actionText}>Exportar todo</Text>
+              </Pressable>
+              <Pressable style={[styles.actionButton, styles.clearButton]} onPress={handleClear}>
+                <Text style={[styles.actionText, styles.clearText]}>Limpiar logs</Text>
+              </Pressable>
+            </View>
+            <Pressable
+              style={[styles.actionButton, styles.clearButton, clearingFarmers && styles.buttonDisabled]}
+              onPress={handleClearFarmers}
+              disabled={clearingFarmers}
+            >
+              {clearingFarmers
+                ? <ActivityIndicator color="#FECACA" size="small" />
+                : <Text style={[styles.actionText, styles.clearText]}>Limpiar caché de agricultores</Text>
+              }
+            </Pressable>
+            {farmerClearResult ? (
+              <Text style={styles.devResult}>{farmerClearResult}</Text>
+            ) : null}
+          </View>
         </ScrollView>
       )}
-
-      {/* Bottom bar */}
-      <View style={styles.bottomBar}>
-        <Pressable style={styles.actionButton} onPress={handleExport}>
-          <Text style={styles.actionText}>Exportar todo</Text>
-        </Pressable>
-        <Pressable style={[styles.actionButton, styles.clearButton]} onPress={handleClear}>
-          <Text style={[styles.actionText, styles.clearText]}>Limpiar logs</Text>
-        </Pressable>
-      </View>
     </SafeAreaView>
   );
 }
@@ -209,12 +242,19 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 18,
   },
-  bottomBar: {
-    flexDirection: "row",
-    gap: 12,
+  listContent: {
+    flexGrow: 1,
+  },
+  actions: {
+    gap: 10,
     padding: 16,
     borderTopWidth: 1,
     borderTopColor: "#1E293B",
+    marginTop: 8,
+  },
+  actionsRow: {
+    flexDirection: "row",
+    gap: 12,
   },
   actionButton: {
     flex: 1,
@@ -233,5 +273,14 @@ const styles = StyleSheet.create({
   },
   clearText: {
     color: "#FECACA",
+  },
+  buttonDisabled: {
+    opacity: 0.5,
+  },
+  devResult: {
+    color: "#94A3B8",
+    fontFamily: Fonts.regular,
+    fontSize: 13,
+    textAlign: "center",
   },
 });

@@ -98,4 +98,9 @@ export const farmerCacheStorage = {
       .all();
     return rows.map(mapRow);
   },
+
+  async clearAll(): Promise<number> {
+    const result = await db.delete(farmerCache);
+    return result.changes ?? 0;
+  },
 };
