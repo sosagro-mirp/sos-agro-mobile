@@ -7,6 +7,7 @@ export interface SurveyDraft {
   surveyId: string;
   instrumentId: string;
   campaignSessionId?: string;
+  farmerId?: string;
   answers: Record<string, InstrumentDraftAnswer>;
   updatedAt: Date;
 }
@@ -141,6 +142,7 @@ export const surveyDraftStore = {
       surveyId: survey.id,
       instrumentId: survey.instrumentId,
       campaignSessionId: survey.campaignSessionId ?? undefined,
+      farmerId: survey.farmerId ?? undefined,
       answers,
       updatedAt: survey.updatedAt,
     };
