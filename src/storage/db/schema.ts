@@ -52,3 +52,26 @@ export const campaignCache = sqliteTable('campaign_cache', {
   data: text('data').notNull(),
   cachedAt: integer('cached_at', { mode: 'timestamp' }).notNull(),
 });
+
+export const pendingSessions = sqliteTable('pending_sessions', {
+  localSessionId: text('local_session_id').primaryKey(),
+  campaignId: text('campaign_id').notNull(),
+  farmerId: text('farmer_id'),
+  userId: text('user_id'),
+  realSessionId: text('real_session_id'),
+  status: text('status', { enum: ['pending', 'resolved', 'failed'] })
+    .notNull()
+    .default('pending'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  resolvedAt: integer('resolved_at', { mode: 'timestamp' }),
+});
+
+export const farmerCache = sqliteTable('farmer_cache', {
+  farmerId: text('farmer_id').primaryKey(),
+  name: text('name').notNull(),
+  lastName: text('last_name'),
+  documentId: text('document_id'),
+  phone: text('phone'),
+  farmName: text('farm_name'),
+  cachedAt: integer('cached_at', { mode: 'timestamp' }).notNull(),
+});
