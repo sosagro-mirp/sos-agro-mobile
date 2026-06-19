@@ -10,8 +10,18 @@ export const searchFarmers = async (query: string): Promise<FarmerSearchResult[]
   return raw.map((r) => ({ ...r, farmerId: r.farmerId ?? r.id ?? '' }));
 };
 
-export const extractFarmer = (surveyId: string): Promise<ExtractFarmerResult> =>
-  httpClient.post(endpoints.surveyExtractFarmer(surveyId), {});
+export const extractFarmer = async (surveyId: string): Promise<ExtractFarmerResult> => {
+  // The Farmer entity exposes its PK as `id` (not `farmerId`) — normalise here,
+  // same as searchFarmers does.
+  const raw = await httpClient.post<{
+    farmer: Omit<FarmerSearchResult, 'farmerId'> & { id?: string; farmerId?: string };
+    existed: boolean;
+  }>(endpoints.surveyExtractFarmer(surveyId), {});
+  return {
+    farmer: { ...raw.farmer, farmerId: raw.farmer.farmerId ?? raw.farmer.id ?? '' },
+    existed: raw.existed,
+  };
+};
 
 export const extractCrops = (surveyId: string): Promise<ExtractCropsResult> =>
   httpClient.post(endpoints.surveyExtractCrops(surveyId), {});

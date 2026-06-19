@@ -1,10 +1,12 @@
-import React from "react";
+import React, { useState } from "react";
 import {
   View,
   Text,
   ScrollView,
   StyleSheet,
   TouchableOpacity,
+  Modal,
+  Pressable,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -28,6 +30,7 @@ export const QuestionScreen: React.FC<QuestionScreenProps> = ({
   onFinished,
 }) => {
   const router = useRouter();
+  const [showExitConfirm, setShowExitConfirm] = useState(false);
 
   const answers = useInstrumentSurveyStore((s) => s.answers);
   const currentIndex = useInstrumentSurveyStore((s) => s.currentIndex);
@@ -102,8 +105,14 @@ export const QuestionScreen: React.FC<QuestionScreenProps> = ({
           </Text>
         </View>
 
-        {/* Spacer to balance back button */}
-        <View style={styles.headerRight} />
+        <TouchableOpacity
+          onPress={() => setShowExitConfirm(true)}
+          style={styles.exitButton}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          accessibilityLabel="Salir de la encuesta"
+        >
+          <Text style={styles.exitIcon}>✕</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Progress bar */}
@@ -126,6 +135,41 @@ export const QuestionScreen: React.FC<QuestionScreenProps> = ({
           />
         </QuestionContainer>
       </ScrollView>
+
+      {/* Modal de confirmación de salida */}
+      <Modal
+        visible={showExitConfirm}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => setShowExitConfirm(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>¿Salir de la encuesta?</Text>
+            <Text style={styles.modalBody}>
+              La encuesta está sin terminar. Las respuestas guardadas quedarán como borrador y podrás reanudarla más tarde.
+            </Text>
+            <View style={styles.modalActions}>
+              <Pressable
+                style={[styles.modalButton, styles.modalButtonSecondary]}
+                onPress={() => setShowExitConfirm(false)}
+              >
+                <Text style={styles.modalButtonSecondaryText}>Cancelar</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.modalButton, styles.modalButtonDestructive]}
+                onPress={() => {
+                  setShowExitConfirm(false);
+                  router.replace("/(tabs)/campaign");
+                }}
+              >
+                <Text style={styles.modalButtonText}>Salir</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* Footer */}
       <View style={styles.footer}>
@@ -206,8 +250,72 @@ const styles = StyleSheet.create({
     color: "#6B7280",
     marginTop: 2,
   },
-  headerRight: {
+  exitButton: {
     width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  exitIcon: {
+    fontSize: 18,
+    color: "#9CA3AF",
+    fontFamily: Fonts.regular,
+  },
+
+  // Exit confirmation modal
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 24,
+  },
+  modalCard: {
+    width: "100%",
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 24,
+    gap: 12,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontFamily: Fonts.bold,
+    color: "#111827",
+  },
+  modalBody: {
+    fontSize: 15,
+    fontFamily: Fonts.regular,
+    color: "#374151",
+    lineHeight: 22,
+  },
+  modalActions: {
+    flexDirection: "row",
+    gap: 12,
+    marginTop: 4,
+  },
+  modalButton: {
+    flex: 1,
+    borderRadius: 10,
+    paddingVertical: 14,
+    alignItems: "center",
+  },
+  modalButtonSecondary: {
+    backgroundColor: "#F3F4F6",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+  },
+  modalButtonDestructive: {
+    backgroundColor: "#DC2626",
+  },
+  modalButtonText: {
+    fontSize: 15,
+    fontFamily: Fonts.semiBold,
+    color: "#fff",
+  },
+  modalButtonSecondaryText: {
+    fontSize: 15,
+    fontFamily: Fonts.semiBold,
+    color: "#374151",
   },
 
   // Progress

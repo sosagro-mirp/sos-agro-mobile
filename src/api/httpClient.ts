@@ -73,9 +73,10 @@ async function request<T>(
     const res = await attempt(url, options);
 
     if (res.ok) {
-      // 204 No Content — no hay body que parsear
       if (res.status === 204) return undefined as T;
-      return res.json() as Promise<T>;
+      const text = await res.text();
+      if (!text.trim()) return null as T;
+      return JSON.parse(text) as T;
     }
 
     // 4xx → error de cliente, no reintentar

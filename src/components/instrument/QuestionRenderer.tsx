@@ -68,7 +68,6 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
           onChange={(a) =>
             onChange({
               questionId,
-              optionId: a.optionId,
               booleanValue: a.optionId === "yes",
             })
           }
