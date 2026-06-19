@@ -29,6 +29,10 @@ export const endpoints = {
   // Last farmer for current user
   campaignSessionLastFarmer: '/api/campaign-sessions/last-farmer',
 
+  // Media attachments
+  mediaAttachmentsPresignedUrl: '/api/media-attachments/presigned-url',
+  mediaAttachmentsConfirm: (id: string) => `/api/media-attachments/${id}/confirm`,
+
   // Telemetry
   telemetrySync: '/api/telemetry/sync',
 } as const;

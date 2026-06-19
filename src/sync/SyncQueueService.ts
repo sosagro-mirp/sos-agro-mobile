@@ -14,6 +14,7 @@ import { NetworkError, httpClient } from '../api/httpClient';
 import { endpoints } from '../api/endpoints';
 import { logger } from '../lib/logger';
 import { captureError } from '../lib/sentry';
+import { MediaUploadService } from './MediaUploadService';
 
 const MAX_CONSECUTIVE_NETWORK_FAILURES = 5;
 const BACKOFF_BASE_MS = 1000;
@@ -102,8 +103,10 @@ class SyncQueueServiceClass {
     const instrument = await instrumentCacheStorage.get(draft.instrumentId);
     if (!instrument) return [];
 
+    const attachmentIds = await MediaUploadService.processPendingForSurvey(entry.surveyId);
+
     const flattenedQuestions = flattenSections(instrument.sections);
-    return buildResponsesPayload(entry.surveyId, flattenedQuestions, draft.answers);
+    return buildResponsesPayload(entry.surveyId, flattenedQuestions, draft.answers, attachmentIds);
   }
 
   private async handleNetworkError(entry: SyncQueueEntry): Promise<void> {
