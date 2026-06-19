@@ -16,6 +16,7 @@ import { useCachedInstrumentsStore } from "../src/store/useCachedInstrumentsStor
 import { runMigrations } from "../src/storage/db/db";
 import { syncQueueStorage } from "../src/storage/syncQueue";
 import { surveyDraftStore } from "../src/storage/surveyDraftStore";
+import { pendingSessionStorage } from "../src/storage/pendingSessions";
 import { NetworkMonitor } from "../src/sync/NetworkMonitor";
 import { BackgroundSync } from "../src/sync/BackgroundSync";
 import { initSentry, captureError } from "../src/lib/sentry";
@@ -89,6 +90,15 @@ export default function RootLayout() {
 
     // Reset any entries that were in_flight when the app was last killed.
     syncQueueStorage.resetInFlightToRetry().catch(console.error);
+
+    // Log how many offline sessions are pending resolution.
+    pendingSessionStorage.listPending()
+      .then((pending) => {
+        if (pending.length > 0) {
+          logger.info(`[App] ${pending.length} offline session(s) pending sync`);
+        }
+      })
+      .catch(console.error);
 
     // Purge synced surveys older than 30 days to keep local DB lean.
     surveyDraftStore.purgeSyncedSurveys()
