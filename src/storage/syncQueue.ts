@@ -132,6 +132,13 @@ export const syncQueueStorage = {
       .where(eq(syncQueue.status, 'in_flight'));
   },
 
+  async clearFailed(): Promise<number> {
+    const result = await db
+      .delete(syncQueue)
+      .where(eq(syncQueue.status, 'failed_validation'));
+    return result.changes ?? 0;
+  },
+
   async deleteBySurveyId(surveyId: string): Promise<void> {
     await db.delete(syncQueue).where(eq(syncQueue.surveyId, surveyId));
   },
