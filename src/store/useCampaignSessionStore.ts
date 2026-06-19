@@ -92,7 +92,8 @@ export const useCampaignSessionStore = create<CampaignSessionState>((set, get) =
   ...initialState,
 
   startSession(campaign) {
-    set({ ...initialState, campaign, phase: 'pre_survey' });
+    const { lastFarmer } = get();
+    set({ ...initialState, campaign, phase: 'pre_survey', lastFarmer });
   },
 
   applySessionResponse(response) {
