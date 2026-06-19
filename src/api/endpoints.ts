@@ -19,6 +19,7 @@ export const endpoints = {
   campaignSessionSync: (id: string) => `/api/campaign-sessions/${id}/sync`,
 
   // Farmers
+  farmers: '/api/farmers',
   farmersSearch: '/api/farmers/search',
   surveyExtractFarmer: (id: string) => `/api/surveys/${id}/extract-farmer`,
   surveyExtractCrops: (id: string) => `/api/surveys/${id}/extract-crops`,
