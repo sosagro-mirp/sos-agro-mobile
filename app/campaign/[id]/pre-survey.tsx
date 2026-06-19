@@ -1,15 +1,19 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { StyleSheet, Text, View, Pressable } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useCachedCampaignsStore } from "../../../src/store/useCachedCampaignsStore";
 import { useCampaignSessionStore } from "../../../src/store/useCampaignSessionStore";
 import { useSyncStatusStore } from "../../../src/store/useSyncStatusStore";
-import { createCampaignSession } from "../../../src/api/campaignSessions";
+import { createCampaignSession, getLastFarmer } from "../../../src/api/campaignSessions";
 import { useAuthStore } from "../../../src/store/useAuthStore";
 import { PreSurveyForm } from "../../../src/components/campaign/PreSurveyForm";
 import { OfflineBanner } from "../../../src/components/network/OfflineBanner";
 import { Fonts } from "../../../src/theme/fonts";
+import { generateLocalId } from "../../../src/lib/generateLocalId";
+import { pendingSessionStorage } from "../../../src/storage/pendingSessions";
+import { farmerCacheStorage } from "../../../src/storage/farmerCache";
+import type { FarmerSearchResult } from "../../../src/types";
 
 export default function PreSurveyScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -19,8 +23,10 @@ export default function PreSurveyScreen() {
   const {
     startSession,
     applySessionResponse,
+    applyOfflineSession,
     setSelectedFarmer,
     setNewFarmerMode,
+    setLastFarmer,
     lastFarmer,
   } = useCampaignSessionStore();
   const { isOnline } = useSyncStatusStore();
@@ -28,6 +34,13 @@ export default function PreSurveyScreen() {
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isOnline) return;
+    getLastFarmer()
+      .then((farmer) => { if (farmer) setLastFarmer(farmer); })
+      .catch(() => {});
+  }, [isOnline]);
 
   if (!campaign) {
     return (
@@ -40,7 +53,7 @@ export default function PreSurveyScreen() {
     );
   }
 
-  const startAndNavigate = async (options?: {
+  const startSessionOnline = async (options?: {
     farmerId?: string;
     farmerName?: string;
     isNew?: boolean;
@@ -49,7 +62,6 @@ export default function PreSurveyScreen() {
     setIsLoading(true);
     startSession(campaign);
 
-    // Apply farmer state AFTER startSession, which resets the store to initialState.
     if (options?.isNew) {
       setNewFarmerMode();
     } else if (options?.farmerId && options?.farmerName) {
@@ -72,16 +84,73 @@ export default function PreSurveyScreen() {
     }
   };
 
-  const handleSearchSelect = async (farmerId: string, farmerName: string) => {
-    await startAndNavigate({ farmerId, farmerName });
+  const startSessionOffline = async (options?: {
+    farmerId?: string;
+    farmerName?: string;
+    isNew?: boolean;
+  }) => {
+    setError(null);
+    setIsLoading(true);
+
+    const localSessionId = generateLocalId('session');
+    startSession(campaign);
+
+    if (options?.isNew) {
+      setNewFarmerMode();
+    } else if (options?.farmerId && options?.farmerName) {
+      setSelectedFarmer(options.farmerId, options.farmerName);
+    }
+
+    try {
+      await pendingSessionStorage.create({
+        localSessionId,
+        campaignId: campaign.campaignId,
+        farmerId: options?.farmerId,
+        userId: user?.userId,
+      });
+
+      applyOfflineSession(localSessionId);
+      router.push(`/campaign/${id}/session/${localSessionId}/orchestrator`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al iniciar sesión offline");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const startSession_ = async (options?: {
+    farmerId?: string;
+    farmerName?: string;
+    isNew?: boolean;
+  }) => {
+    if (isOnline) {
+      await startSessionOnline(options);
+    } else {
+      await startSessionOffline(options);
+    }
+  };
+
+  const handleSearchSelect = async (farmerId: string, farmerName: string, farmer?: FarmerSearchResult) => {
+    if (isOnline && farmer) {
+      await farmerCacheStorage.upsert({
+        farmerId: farmer.farmerId,
+        name: farmer.name,
+        lastName: farmer.lastName ?? undefined,
+        documentId: farmer.documentId ?? undefined,
+        phone: farmer.phone ?? undefined,
+        farmName: farmer.farm?.name ?? undefined,
+        cachedAt: new Date(),
+      });
+    }
+    await startSession_({ farmerId, farmerName });
   };
 
   const handleNewFarmer = async () => {
-    await startAndNavigate({ isNew: true });
+    await startSession_({ isNew: true });
   };
 
   const handleContinueLast = async (farmerId: string, farmerName: string) => {
-    await startAndNavigate({ farmerId, farmerName });
+    await startSession_({ farmerId, farmerName });
   };
 
   return (

@@ -9,12 +9,13 @@ import {
 } from "react-native";
 import { Fonts } from "../../theme/fonts";
 import { searchFarmers } from "../../api/farmers";
+import { farmerCacheStorage } from "../../storage/farmerCache";
 import type { FarmerSearchResult, LastFarmerResult } from "../../types";
 
 interface PreSurveyFormProps {
   lastFarmer: LastFarmerResult;
   isOnline: boolean;
-  onSearchSelect: (farmerId: string, farmerName: string) => void;
+  onSearchSelect: (farmerId: string, farmerName: string, farmer?: FarmerSearchResult) => void;
   onNewFarmer: () => void;
   onContinueLast: (farmerId: string, farmerName: string) => void;
 }
@@ -35,7 +36,7 @@ export const PreSurveyForm: React.FC<PreSurveyFormProps> = ({
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (!query.trim() || !isOnline) {
+    if (!query.trim()) {
       setResults([]);
       return;
     }
@@ -43,10 +44,26 @@ export const PreSurveyForm: React.FC<PreSurveyFormProps> = ({
       setIsSearching(true);
       setSearchError(null);
       try {
-        const data = await searchFarmers(query.trim());
-        setResults(data);
+        if (isOnline) {
+          const data = await searchFarmers(query.trim());
+          setResults(data);
+        } else {
+          const cached = await farmerCacheStorage.search(query.trim());
+          setResults(
+            cached.map((c) => ({
+              farmerId: c.farmerId,
+              name: c.name,
+              lastName: c.lastName ?? null,
+              documentId: c.documentId ?? null,
+              phone: c.phone ?? null,
+              farm: c.farmName ? { name: c.farmName } : null,
+            }))
+          );
+        }
       } catch {
-        setSearchError("No se pudo buscar. Verifica la conexión.");
+        if (isOnline) {
+          setSearchError("No se pudo buscar. Verifica la conexión.");
+        }
       } finally {
         setIsSearching(false);
       }
@@ -58,7 +75,7 @@ export const PreSurveyForm: React.FC<PreSurveyFormProps> = ({
 
   const handleSelect = (farmer: FarmerSearchResult) => {
     const fullName = [farmer.name, farmer.lastName].filter(Boolean).join(" ");
-    onSearchSelect(farmer.farmerId, fullName);
+    onSearchSelect(farmer.farmerId, fullName, farmer);
   };
 
   return (
@@ -68,9 +85,8 @@ export const PreSurveyForm: React.FC<PreSurveyFormProps> = ({
       {/* Search section */}
       {!searchOpen ? (
         <Pressable
-          style={[styles.actionButton, !isOnline && styles.actionButtonDisabled]}
-          onPress={() => { if (isOnline) setSearchOpen(true); }}
-          disabled={!isOnline}
+          style={styles.actionButton}
+          onPress={() => setSearchOpen(true)}
         >
           <Text style={styles.actionButtonText}>Buscar encuestado</Text>
         </Pressable>
@@ -85,6 +101,11 @@ export const PreSurveyForm: React.FC<PreSurveyFormProps> = ({
             autoFocus
             returnKeyType="search"
           />
+          {!isOnline && searchOpen ? (
+            <Text style={styles.offlineSearchHint}>
+              Buscando en agricultores guardados
+            </Text>
+          ) : null}
           {isSearching ? (
             <ActivityIndicator size="small" color={GREEN} style={styles.searchSpinner} />
           ) : null}
@@ -112,7 +133,11 @@ export const PreSurveyForm: React.FC<PreSurveyFormProps> = ({
               ))}
             </View>
           ) : query.trim() && !isSearching ? (
-            <Text style={styles.noResults}>Sin resultados para "{query}"</Text>
+            <Text style={styles.noResults}>
+              {isOnline
+                ? `Sin resultados para "${query}"`
+                : "Este agricultor no está guardado localmente. Conéctate para buscarlo."}
+            </Text>
           ) : null}
           <Pressable onPress={() => { setSearchOpen(false); setQuery(""); setResults([]); }}>
             <Text style={styles.cancelLink}>Cancelar búsqueda</Text>
@@ -122,16 +147,15 @@ export const PreSurveyForm: React.FC<PreSurveyFormProps> = ({
 
       {/* New farmer */}
       <Pressable
-        style={[styles.actionButton, !isOnline && styles.actionButtonDisabled]}
-        onPress={() => { if (isOnline) onNewFarmer(); }}
-        disabled={!isOnline}
+        style={styles.actionButton}
+        onPress={onNewFarmer}
       >
         <Text style={styles.actionButtonText}>+ Nuevo encuestado</Text>
       </Pressable>
 
       {!isOnline ? (
         <Text style={styles.offlineHint}>
-          Buscar y registrar encuestados requiere conexión.
+          Sin conexión: los datos se sincronizarán al reconectar.
         </Text>
       ) : null}
 
@@ -175,9 +199,6 @@ const styles = StyleSheet.create({
     paddingVertical: 18,
     alignItems: "center",
   },
-  actionButtonDisabled: {
-    backgroundColor: "#9CA3AF",
-  },
   actionButtonLast: {
     backgroundColor: "#fff",
     borderWidth: 1.5,
@@ -196,6 +217,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: "#6B7280",
     textAlign: "center",
+  },
+  offlineSearchHint: {
+    fontFamily: Fonts.regular,
+    fontSize: 12,
+    color: "#6B7280",
   },
   searchBox: {
     gap: 8,

@@ -6,6 +6,7 @@ import type {
   LastFarmerResult,
   NextStepResponse,
 } from '../types';
+import type { LocalFarmerDraft } from '../lib/extractFarmerLocally';
 
 type SessionPhase = 'idle' | 'pre_survey' | 'in_step' | 'completed';
 type InjectionPhase = 'none' | 's1' | 's2';
@@ -39,6 +40,11 @@ interface CampaignSessionState {
   // Last identified farmer (persisted in SecureStorage)
   lastFarmer: LastFarmerResult;
 
+  // Offline session tracking
+  isOfflineSession: boolean;
+  localSessionId: string | null;
+  localFarmerId: string | null;
+
   startSession: (campaign: CampaignRender) => void;
   applySessionResponse: (response: CampaignSessionResponse) => void;
   applyNextStep: (nextStep: NextStepResponse) => void;
@@ -56,6 +62,12 @@ interface CampaignSessionState {
   completeS2Injection: () => void;
   setLastFarmer: (farmer: LastFarmerResult) => void;
   loadLastFarmer: () => Promise<void>;
+
+  // Offline session actions
+  applyOfflineSession: (localSessionId: string) => void;
+  resolveSession: (realSessionId: string) => void;
+  applyLocalFarmer: (draft: LocalFarmerDraft) => void;
+  resolveFarmer: (realFarmerId: string) => void;
 }
 
 const initialState = {
@@ -71,6 +83,9 @@ const initialState = {
   s1SurveyId: null,
   s2SurveyId: null,
   lastFarmer: null as LastFarmerResult,
+  isOfflineSession: false,
+  localSessionId: null,
+  localFarmerId: null,
 };
 
 export const useCampaignSessionStore = create<CampaignSessionState>((set, get) => ({
@@ -158,5 +173,25 @@ export const useCampaignSessionStore = create<CampaignSessionState>((set, get) =
   async loadLastFarmer() {
     const farmer = await secureStorage.getLastFarmer();
     set({ lastFarmer: farmer });
+  },
+
+  applyOfflineSession(localSessionId) {
+    set({ sessionId: localSessionId, isOfflineSession: true, localSessionId });
+  },
+
+  resolveSession(realSessionId) {
+    set({ sessionId: realSessionId, isOfflineSession: false });
+  },
+
+  applyLocalFarmer(draft) {
+    set({
+      farmerId: draft.farmerId,
+      farmerName: draft.name,
+      localFarmerId: draft.isProvisional ? draft.farmerId : null,
+    });
+  },
+
+  resolveFarmer(realFarmerId) {
+    set({ farmerId: realFarmerId, localFarmerId: null });
   },
 }));
