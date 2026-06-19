@@ -1,15 +1,19 @@
-import { eq, and } from 'drizzle-orm';
+import { eq, and, inArray } from 'drizzle-orm';
 import { db } from '../storage/db/db';
 import { surveys } from '../storage/db/schema';
 import { campaignCacheStorage } from '../storage/campaignCache';
+import { sessionCropsStorage } from '../storage/sessionCropsStorage';
+import { stepPassesConditionsOffline } from './stepPassesConditionsOffline';
 import type { NextStepResponse } from '../types';
 
 /**
  * Computes the next campaign step locally, without a backend call.
- * Used in offline mode after skipping a step.
+ * Used in offline mode to navigate between steps and to check for duplicates.
  *
- * Ignores conditional steps (conditionQuestion) — if the active campaign
- * has conditional steps, the caller should fall back to /completed.
+ * Crop conditions are evaluated against cropIds stored in sessionCropsStorage.
+ * Question conditions cannot be evaluated offline and are treated as true
+ * (conservative: better to show an extra instrument than to skip one that applies;
+ * the backend re-evaluates at sync time).
  */
 export async function getNextStepOffline(
   campaignId: string,
@@ -19,28 +23,30 @@ export async function getNextStepOffline(
   const campaign = await campaignCacheStorage.get(campaignId);
   if (!campaign) return null;
 
-  const hasConditionalSteps = campaign.steps.some((s) => s.conditionQuestion !== null);
-  if (hasConditionalSteps) return null;
-
   const sortedSteps = [...campaign.steps].sort((a, b) => a.order - b.order);
 
-  const completedSurveys = await db
-    .select({ instrumentId: surveys.instrumentId })
-    .from(surveys)
-    .where(
-      and(
-        eq(surveys.campaignSessionId, sessionId),
-        // status 'completed' or 'synced' = step done or marked as skip
+  const [completedSurveys, sessionCrops] = await Promise.all([
+    db
+      .select({ instrumentId: surveys.instrumentId })
+      .from(surveys)
+      .where(
+        and(
+          eq(surveys.campaignSessionId, sessionId),
+          inArray(surveys.status, ['completed', 'synced']),
+        )
       )
-    )
-    .all();
+      .all(),
+    sessionCropsStorage.get(sessionId),
+  ]);
 
   const completedInstrumentIds = new Set(completedSurveys.map((s) => s.instrumentId));
+  const cropIds = sessionCrops.map((c) => c.cropId);
 
   const nextStep = sortedSteps.find(
     (step) =>
       step.order > currentStepOrder &&
-      !completedInstrumentIds.has(step.instrument.instrumentId)
+      !completedInstrumentIds.has(step.instrument.instrumentId) &&
+      stepPassesConditionsOffline(step, cropIds)
   );
 
   if (!nextStep) {

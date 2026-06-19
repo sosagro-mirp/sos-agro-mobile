@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, real, primaryKey } from 'drizzle-orm/sqlite-core';
 
 export const surveys = sqliteTable('surveys', {
   id: text('id').primaryKey(),
@@ -65,6 +65,14 @@ export const pendingSessions = sqliteTable('pending_sessions', {
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
   resolvedAt: integer('resolved_at', { mode: 'timestamp' }),
 });
+
+export const sessionCrops = sqliteTable('session_crops', {
+  sessionId: text('session_id').notNull(),
+  cropId: text('crop_id').notNull(),
+  cropName: text('crop_name').notNull(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.sessionId, table.cropId] }),
+}));
 
 export const farmerCache = sqliteTable('farmer_cache', {
   farmerId: text('farmer_id').primaryKey(),

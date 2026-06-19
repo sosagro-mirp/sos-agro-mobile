@@ -18,6 +18,7 @@ import { useCampaignSessionStore } from '../store/useCampaignSessionStore';
 import { NetworkError, httpClient } from '../api/httpClient';
 import { endpoints } from '../api/endpoints';
 import { logger } from '../lib/logger';
+import { sessionCropsStorage } from '../storage/sessionCropsStorage';
 import { captureError } from '../lib/sentry';
 
 const MAX_CONSECUTIVE_NETWORK_FAILURES = 5;
@@ -241,8 +242,11 @@ class SyncQueueServiceClass {
 
       logger.info(`[Sync] extractFarmer completed for survey ${realSurveyId}`);
     } else if (code === 'S2') {
-      await extractCrops(realSurveyId);
+      const cropsResult = await extractCrops(realSurveyId);
       logger.info(`[Sync] extractCrops completed for survey ${realSurveyId}`);
+      if (entry.campaignSessionId) {
+        await sessionCropsStorage.save(entry.campaignSessionId, cropsResult.crops);
+      }
     }
   }
 

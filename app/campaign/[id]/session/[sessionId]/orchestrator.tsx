@@ -18,8 +18,10 @@ import { farmerCacheStorage } from "../../../../../src/storage/farmerCache";
 import { SyncQueueService } from "../../../../../src/sync/SyncQueueService";
 import { checkDuplicate } from "../../../../../src/storage/duplicateDetection";
 import { getNextStepOffline } from "../../../../../src/lib/getNextStepOffline";
+import { extractCropsOffline } from "../../../../../src/lib/extractCropsOffline";
 import { generateLocalId } from "../../../../../src/lib/generateLocalId";
 import { extractFarmerLocally } from "../../../../../src/lib/extractFarmerLocally";
+import { sessionCropsStorage } from "../../../../../src/storage/sessionCropsStorage";
 import { DuplicateAlertModal } from "../../../../../src/components/campaign/DuplicateAlertModal";
 import { NetworkError } from "../../../../../src/api/httpClient";
 import { Fonts } from "../../../../../src/theme/fonts";
@@ -142,6 +144,44 @@ export default function OrchestratorScreen() {
     }
   }, [isOnline, injectInstrumentOnline, injectInstrumentOffline]);
 
+  // Offline-only duplicate check: preserves the original navigation logic (instrument! is safe
+  // because callers already guard against missing instrument) while adding duplicate detection.
+  const checkDuplicateAndNavigateOffline = useCallback(async (nextStep: {
+    stepId?: string;
+    order?: number;
+    instrument?: { instrumentId: string; name: string; isActive: boolean };
+  }) => {
+    if (!nextStep.instrument) {
+      router.replace(`/campaign/${id}/session/${resolvedSessionId}/completed`);
+      return;
+    }
+
+    const { farmerId, campaign } = useCampaignSessionStore.getState();
+
+    if (farmerId && campaign?.campaignId) {
+      const duplicateResult = await checkDuplicate({
+        farmerId,
+        instrumentId: nextStep.instrument.instrumentId,
+        campaignId: campaign.campaignId,
+        isOnline: false,
+      });
+
+      if (duplicateResult.hasDuplicate) {
+        setDuplicatePending({
+          instrument: nextStep.instrument,
+          stepOrder: nextStep.order ?? 0,
+          localSurveyId: duplicateResult.localSurveyId,
+          remoteSurveyId: undefined,
+        });
+        setScreenState('duplicate_pending');
+        return;
+      }
+    }
+
+    await getOrDownloadInstrument(nextStep.instrument.instrumentId);
+    router.replace(`/instrument/${nextStep.instrument.instrumentId}/start`);
+  }, [id, resolvedSessionId, getOrDownloadInstrument, router]);
+
   // Check for duplicates and either navigate or set duplicate_pending state.
   const checkAndNavigate = useCallback(async (nextStep: {
     stepId?: string;
@@ -233,15 +273,24 @@ export default function OrchestratorScreen() {
         } else if (isOnline) {
           // Online: sync S2, extract crops, get next step
           await SyncQueueService.processSurveyNow(s2SurveyId);
-          await extractCrops(s2SurveyId);
+          const cropsResult = await extractCrops(s2SurveyId);
+          if (resolvedSessionId) {
+            await sessionCropsStorage.save(resolvedSessionId, cropsResult.crops);
+          }
           store.completeS2Injection();
           const nextStep = await getNextStep(resolvedSessionId);
           store.applyNextStep(nextStep);
           await checkAndNavigate(nextStep);
         } else {
-          // Offline: skip extractCrops, continue directly
-          store.completeS2Injection();
+          // Offline: extract crops locally from cached S2 responses, then continue
           const { campaign } = useCampaignSessionStore.getState();
+          if (s2SurveyId && campaign?.campaignId && resolvedSessionId) {
+            const offlineCrops = await extractCropsOffline(s2SurveyId, campaign.campaignId);
+            if (offlineCrops.length > 0) {
+              await sessionCropsStorage.save(resolvedSessionId, offlineCrops);
+            }
+          }
+          store.completeS2Injection();
           if (!campaign?.campaignId) {
             router.replace(`/campaign/${id}/session/${resolvedSessionId}/completed`);
             return;
@@ -252,8 +301,7 @@ export default function OrchestratorScreen() {
             return;
           }
           store.applyNextStep(nextStep);
-          await getOrDownloadInstrument(nextStep.instrument!.instrumentId);
-          router.replace(`/instrument/${nextStep.instrument!.instrumentId}/start`);
+          await checkDuplicateAndNavigateOffline(nextStep);
         }
       } else {
         if (isOnline) {
@@ -273,8 +321,7 @@ export default function OrchestratorScreen() {
             return;
           }
           store.applyNextStep(nextStep);
-          await getOrDownloadInstrument(nextStep.instrument!.instrumentId);
-          router.replace(`/instrument/${nextStep.instrument!.instrumentId}/start`);
+          await checkDuplicateAndNavigateOffline(nextStep);
         }
       }
     } catch (err) {
@@ -287,7 +334,7 @@ export default function OrchestratorScreen() {
         setErrorMessage(err instanceof Error ? err.message : "Error inesperado");
       }
     }
-  }, [resolvedSessionId, id, injectInstrument, store, checkAndNavigate, isOnline, getOrDownloadInstrument, router]);
+  }, [resolvedSessionId, id, injectInstrument, store, checkAndNavigate, checkDuplicateAndNavigateOffline, isOnline, getOrDownloadInstrument, router]);
 
   // ── duplicate handlers ─────────────────────────────────────────────────────
 

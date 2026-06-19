@@ -5,16 +5,26 @@ export interface CampaignActiveSummary {
   isActive: boolean;
 }
 
-export interface CampaignStepRender {
-  stepId: string;
+export interface StepConditionRender {
+  conditionId: string;
   order: number;
-  instrument: { instrumentId: string; name: string; isActive: boolean };
+  logicalOperator: 'AND' | 'OR' | null;
+  conditionType: 'question' | 'crop';
+  conditionCrop: { cropId: string; name: string } | null;
   conditionQuestion: { questionId: string; text: string } | null;
   conditionValue: string | null;
 }
 
+export interface CampaignStepRender {
+  stepId: string;
+  order: number;
+  instrument: { instrumentId: string; name: string; isActive: boolean };
+  conditions: StepConditionRender[];
+}
+
 export interface CampaignRender extends CampaignActiveSummary {
   steps: CampaignStepRender[];
+  availableCrops: { cropId: string; name: string }[];
 }
 
 export interface CampaignSessionResponse {

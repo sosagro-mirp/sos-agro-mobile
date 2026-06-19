@@ -44,14 +44,19 @@
   "jest": {
     "preset": "jest-expo",
     "transformIgnorePatterns": [
-      "node_modules/(?!((jest-)?react-native|@react-native(-community)?)|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|drizzle-orm)"
+      "node_modules/(?!\\.pnpm)(?!((jest-)?react-native|@react-native(-community)?)|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|drizzle-orm)"
     ],
     "setupFilesAfterEnv": [
       "./src/__tests__/setup.ts"
     ],
     "moduleNameMapper": {
       "^expo-sqlite$": "<rootDir>/src/__tests__/__mocks__/expo-sqlite.ts"
-    }
+    },
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "<rootDir>/src/__tests__/setup\\.ts$",
+      "<rootDir>/src/__tests__/__mocks__/"
+    ]
   },
   "private": true
 }
