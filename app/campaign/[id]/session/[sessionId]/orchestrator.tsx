@@ -13,14 +13,18 @@ import { createSurvey } from "../../../../../src/api/surveys";
 import { overwriteSurvey, skipStepApi } from "../../../../../src/api/surveys";
 import { surveyDraftStore } from "../../../../../src/storage/surveyDraftStore";
 import { syncQueueStorage } from "../../../../../src/storage/syncQueue";
+import { instrumentCacheStorage } from "../../../../../src/storage/instrumentCache";
+import { farmerCacheStorage } from "../../../../../src/storage/farmerCache";
 import { SyncQueueService } from "../../../../../src/sync/SyncQueueService";
 import { checkDuplicate } from "../../../../../src/storage/duplicateDetection";
 import { getNextStepOffline } from "../../../../../src/lib/getNextStepOffline";
+import { generateLocalId } from "../../../../../src/lib/generateLocalId";
+import { extractFarmerLocally } from "../../../../../src/lib/extractFarmerLocally";
 import { DuplicateAlertModal } from "../../../../../src/components/campaign/DuplicateAlertModal";
 import { NetworkError } from "../../../../../src/api/httpClient";
 import { Fonts } from "../../../../../src/theme/fonts";
 
-type ScreenState = 'loading' | 'offline' | 'injection_error' | 'error' | 'duplicate_pending';
+type ScreenState = 'loading' | 'offline' | 'injection_error' | 'error' | 'duplicate_pending' | 'offline_extraction_pending';
 
 function generateId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
@@ -56,7 +60,7 @@ export default function OrchestratorScreen() {
     return downloadAndCache(instrumentId);
   }, [instruments, downloadAndCache]);
 
-  const injectInstrument = useCallback(async (code: 'S1' | 'S2') => {
+  const injectInstrumentOnline = useCallback(async (code: 'S1' | 'S2') => {
     if (!resolvedSessionId) return;
 
     const { instrumentId, name } = await fetchInstrumentByCode(code);
@@ -89,6 +93,54 @@ export default function OrchestratorScreen() {
 
     router.replace(`/instrument/${instrumentId}/question/0`);
   }, [resolvedSessionId, getOrDownloadInstrument, store, initializeSurvey, router]);
+
+  const injectInstrumentOffline = useCallback(async (code: 'S1' | 'S2') => {
+    if (!resolvedSessionId) return;
+
+    const allInstruments = await instrumentCacheStorage.list();
+    const instrument = allInstruments.find((i) => i.code === code);
+
+    if (!instrument) {
+      setScreenState('injection_error');
+      setErrorMessage('Instrumento no disponible offline. Descarga las campañas con WiFi.');
+      return;
+    }
+
+    const localSurveyId = generateLocalId('survey');
+
+    await surveyDraftStore.createDraft({
+      surveyId: localSurveyId,
+      instrumentId: instrument.instrumentId,
+      campaignSessionId: resolvedSessionId,
+    });
+
+    // NO enqueue here — enqueueSubmission() handles this when the user completes the survey,
+    // same as the online flow (injectInstrumentOnline never enqueues at injection time either).
+
+    if (code === 'S1') {
+      store.setInjectionS1SurveyId(localSurveyId);
+    } else {
+      store.setInjectionS2SurveyId(localSurveyId);
+    }
+
+    initializeSurvey({
+      surveyId: localSurveyId,
+      instrumentId: instrument.instrumentId,
+      instrumentName: instrument.name,
+      sections: instrument.sections,
+      campaignSessionId: resolvedSessionId,
+    });
+
+    router.replace(`/instrument/${instrument.instrumentId}/question/0`);
+  }, [resolvedSessionId, store, initializeSurvey, router]);
+
+  const injectInstrument = useCallback(async (code: 'S1' | 'S2') => {
+    if (isOnline) {
+      await injectInstrumentOnline(code);
+    } else {
+      await injectInstrumentOffline(code);
+    }
+  }, [isOnline, injectInstrumentOnline, injectInstrumentOffline]);
 
   // Check for duplicates and either navigate or set duplicate_pending state.
   const checkAndNavigate = useCallback(async (nextStep: {
@@ -142,8 +194,8 @@ export default function OrchestratorScreen() {
       if (injectionPhase === 's1') {
         if (!s1SurveyId) {
           await injectInstrument('S1');
-        } else {
-          // Ensure S1 responses are on the backend before extracting farmer data.
+        } else if (isOnline) {
+          // Online: sync S1, extract farmer, inject S2
           await SyncQueueService.processSurveyNow(s1SurveyId);
           const { farmer } = await extractFarmer(s1SurveyId);
           store.completeS1Injection(farmer.farmerId, farmer.name);
@@ -154,23 +206,76 @@ export default function OrchestratorScreen() {
             ...(farmer.farm ? { farm: { name: farmer.farm.name } } : {}),
           });
           await injectInstrument('S2');
+        } else {
+          // Offline: extract farmer locally from S1 responses
+          const draft = await extractFarmerLocally(s1SurveyId);
+          if (draft) {
+            if (draft.isProvisional) {
+              await farmerCacheStorage.upsert({
+                farmerId: draft.farmerId,
+                name: draft.name,
+                lastName: draft.lastName ?? undefined,
+                documentId: draft.documentId ?? undefined,
+                phone: draft.phone ?? undefined,
+                cachedAt: new Date(),
+              });
+            }
+            store.applyLocalFarmer(draft);
+            store.completeS1Injection(draft.farmerId, draft.name);
+            await injectInstrument('S2');
+          } else {
+            setScreenState('offline_extraction_pending');
+          }
         }
       } else if (injectionPhase === 's2') {
         if (!s2SurveyId) {
           await injectInstrument('S2');
-        } else {
-          // Ensure S2 responses are on the backend before extracting crop data.
+        } else if (isOnline) {
+          // Online: sync S2, extract crops, get next step
           await SyncQueueService.processSurveyNow(s2SurveyId);
           await extractCrops(s2SurveyId);
           store.completeS2Injection();
           const nextStep = await getNextStep(resolvedSessionId);
           store.applyNextStep(nextStep);
           await checkAndNavigate(nextStep);
+        } else {
+          // Offline: skip extractCrops, continue directly
+          store.completeS2Injection();
+          const { campaign } = useCampaignSessionStore.getState();
+          if (!campaign?.campaignId) {
+            router.replace(`/campaign/${id}/session/${resolvedSessionId}/completed`);
+            return;
+          }
+          const nextStep = await getNextStepOffline(campaign.campaignId, resolvedSessionId, -1);
+          if (!nextStep || (!nextStep.stepId && !nextStep.instrument)) {
+            router.replace(`/campaign/${id}/session/${resolvedSessionId}/completed`);
+            return;
+          }
+          store.applyNextStep(nextStep);
+          await getOrDownloadInstrument(nextStep.instrument!.instrumentId);
+          router.replace(`/instrument/${nextStep.instrument!.instrumentId}/start`);
         }
       } else {
-        const nextStep = await getNextStep(resolvedSessionId);
-        store.applyNextStep(nextStep);
-        await checkAndNavigate(nextStep);
+        if (isOnline) {
+          const nextStep = await getNextStep(resolvedSessionId);
+          store.applyNextStep(nextStep);
+          await checkAndNavigate(nextStep);
+        } else {
+          const { campaign, currentStep } = useCampaignSessionStore.getState();
+          if (!campaign?.campaignId) {
+            setScreenState('offline');
+            return;
+          }
+          const lastOrder = currentStep?.order ?? -1;
+          const nextStep = await getNextStepOffline(campaign.campaignId, resolvedSessionId, lastOrder);
+          if (!nextStep || (!nextStep.stepId && !nextStep.instrument)) {
+            router.replace(`/campaign/${id}/session/${resolvedSessionId}/completed`);
+            return;
+          }
+          store.applyNextStep(nextStep);
+          await getOrDownloadInstrument(nextStep.instrument!.instrumentId);
+          router.replace(`/instrument/${nextStep.instrument!.instrumentId}/start`);
+        }
       }
     } catch (err) {
       if (err instanceof NetworkError) {
@@ -182,7 +287,7 @@ export default function OrchestratorScreen() {
         setErrorMessage(err instanceof Error ? err.message : "Error inesperado");
       }
     }
-  }, [resolvedSessionId, id, injectInstrument, store, checkAndNavigate]);
+  }, [resolvedSessionId, id, injectInstrument, store, checkAndNavigate, isOnline, getOrDownloadInstrument, router]);
 
   // ── duplicate handlers ─────────────────────────────────────────────────────
 
@@ -326,6 +431,37 @@ export default function OrchestratorScreen() {
             onPress={() => { hasStarted.current = false; run(); }}
           >
             <Text style={styles.buttonText}>Reintentar</Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (screenState === 'offline_extraction_pending') {
+    return (
+      <SafeAreaView style={styles.root}>
+        <View style={styles.center}>
+          <Text style={styles.bigIcon}>⚠️</Text>
+          <Text style={styles.title}>No se pudo identificar al encuestado</Text>
+          <Text style={styles.desc}>
+            No se pudo leer los datos del encuestado.{"\n"}
+            Conéctate para continuar o continúa sin identificar.
+          </Text>
+          <Pressable
+            style={styles.buttonActive}
+            onPress={() => { hasStarted.current = false; run(); }}
+          >
+            <Text style={styles.buttonText}>Reintentar</Text>
+          </Pressable>
+          <Pressable
+            style={styles.button}
+            onPress={() => {
+              store.completeS2Injection();
+              hasStarted.current = false;
+              run();
+            }}
+          >
+            <Text style={styles.buttonText}>Continuar sin identificar</Text>
           </Pressable>
         </View>
       </SafeAreaView>
