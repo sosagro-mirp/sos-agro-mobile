@@ -15,6 +15,7 @@ import { useCampaignSessionStore } from "../../../src/store/useCampaignSessionSt
 import { useSyncStatusStore } from "../../../src/store/useSyncStatusStore";
 import { createSurvey } from "../../../src/api/surveys";
 import { surveyDraftStore } from "../../../src/storage/surveyDraftStore";
+import { generateLocalId } from "../../../src/lib/generateLocalId";
 import { OfflineBanner } from "../../../src/components/network/OfflineBanner";
 import { Fonts } from "../../../src/theme/fonts";
 
@@ -58,7 +59,6 @@ export default function InstrumentStartScreen() {
 
       if (existingSurveyId) {
         // Overwrite flow: backend already created the survey via /overwrite.
-        // Just create the local draft with the provided ID.
         surveyId = existingSurveyId;
         await surveyDraftStore.createDraft({
           surveyId,
@@ -66,17 +66,24 @@ export default function InstrumentStartScreen() {
           campaignSessionId: campaignSessionId ?? undefined,
           farmerId: farmerId ?? undefined,
         });
-      } else {
-        const surveyPayload = {
+      } else if (isOnline) {
+        const response = await createSurvey({
           instrumentIds: [instrument.instrumentId],
           ...(campaignSessionId ? { campaignSessionId } : {}),
           ...(currentStep ? { stepOrder: currentStep.order } : {}),
           ...(farmerId ? { farmerId } : {}),
-        };
-
-        const response = await createSurvey(surveyPayload);
+        });
         surveyId = response.surveyId;
 
+        await surveyDraftStore.createDraft({
+          surveyId,
+          instrumentId: instrument.instrumentId,
+          campaignSessionId: campaignSessionId ?? undefined,
+          farmerId: farmerId ?? undefined,
+        });
+      } else {
+        // Offline: generate a local id; SyncQueueService materializes it on reconnect.
+        surveyId = generateLocalId('survey');
         await surveyDraftStore.createDraft({
           surveyId,
           instrumentId: instrument.instrumentId,
@@ -143,10 +150,10 @@ export default function InstrumentStartScreen() {
           ))}
         </View>
 
-        {!isOnline && !existingSurveyId && (
+        {!isOnline && (
           <View style={styles.offlineBanner}>
             <Text style={styles.offlineText}>
-              Necesitas conexión para iniciar la encuesta.
+              Sin conexión — la encuesta se sincronizará al reconectar.
             </Text>
           </View>
         )}
@@ -160,12 +167,9 @@ export default function InstrumentStartScreen() {
 
       <View style={styles.footer}>
         <Pressable
-          style={[
-            styles.button,
-            ((!isOnline && !existingSurveyId) || starting) && styles.buttonDisabled,
-          ]}
+          style={[styles.button, starting && styles.buttonDisabled]}
           onPress={handleStart}
-          disabled={(!isOnline && !existingSurveyId) || starting}
+          disabled={starting}
         >
           {starting ? (
             <ActivityIndicator color="#fff" />
