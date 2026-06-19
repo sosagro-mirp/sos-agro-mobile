@@ -45,3 +45,6 @@ yarn-error.*
 # Claude Code agent internals
 .agents/
 skills-lock.json
+
+# Internal testing docs
+docs/testing/
