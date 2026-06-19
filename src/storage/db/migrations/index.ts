@@ -4,6 +4,7 @@ const migrations = {
   journal: {
     entries: [
       { idx: 0, when: 0, tag: 'm0000', breakpoints: true },
+      { idx: 1, when: 1, tag: 'm0001', breakpoints: true },
     ],
   },
   migrations: {
@@ -17,6 +18,11 @@ const migrations = {
       "CREATE TABLE IF NOT EXISTS `instrument_cache` (`id` text PRIMARY KEY NOT NULL, `data` text NOT NULL, `cached_at` integer NOT NULL)",
       '--> statement-breakpoint',
       "CREATE TABLE IF NOT EXISTS `campaign_cache` (`id` text PRIMARY KEY NOT NULL, `data` text NOT NULL, `cached_at` integer NOT NULL)",
+    ].join('\n'),
+    m0001: [
+      "ALTER TABLE `sync_queue` ADD COLUMN `item_type` text NOT NULL DEFAULT 'survey'",
+      '--> statement-breakpoint',
+      "CREATE TABLE IF NOT EXISTS `farm_plots` (`id` text PRIMARY KEY NOT NULL, `farm_id` text NOT NULL, `name` text NOT NULL, `description` text, `area` real, `polygon` text NOT NULL, `status` text NOT NULL DEFAULT 'draft', `captured_offline` integer NOT NULL DEFAULT 1, `created_at` integer NOT NULL, `updated_at` integer NOT NULL)",
     ].join('\n'),
   },
 };
