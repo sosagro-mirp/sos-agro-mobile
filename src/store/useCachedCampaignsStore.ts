@@ -57,6 +57,10 @@ export const useCachedCampaignsStore = create<CachedCampaignsState>((set, get) =
     set({ isLoading: true, error: null, downloadProgress: null });
 
     try {
+      // ── Clear stale cache before refreshing ───────────────────────────────
+      await campaignCacheStorage.clear();
+      await instrumentCacheStorage.clear();
+
       // ── Phase 1: fetch campaign list and full renders ──────────────────────
       const summaries = await fetchActiveCampaigns();
 
