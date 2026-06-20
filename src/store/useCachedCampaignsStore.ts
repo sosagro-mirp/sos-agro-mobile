@@ -5,6 +5,7 @@ import { farmerCacheStorage } from '../storage/farmerCache';
 import { fetchActiveCampaigns, fetchCampaignRender } from '../api/campaigns';
 import { fetchInstrumentRender, fetchInstrumentByCode } from '../api/instruments';
 import { listAllFarmers } from '../api/farmers';
+import { useCachedInstrumentsStore } from './useCachedInstrumentsStore';
 import type { CampaignRender } from '../types';
 
 export interface DownloadProgress {
@@ -178,6 +179,8 @@ export const useCachedCampaignsStore = create<CachedCampaignsState>((set, get) =
         campaigns: rendered,
         cachedInstrumentIds: new Set(finalCachedIds),
       });
+      // Sync in-memory instrument list so getOrDownloadInstrument picks up updated definitions
+      await useCachedInstrumentsStore.getState().loadFromCache();
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Error actualizando campañas';
