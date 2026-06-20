@@ -14,6 +14,7 @@ import { useFocusEffect } from "expo-router";
 import * as FileSystem from "expo-file-system/legacy";
 import { logger, type LogFile } from "../../src/lib/logger";
 import { farmerCacheStorage } from "../../src/storage/farmerCache";
+import { useCampaignSessionStore } from "../../src/store/useCampaignSessionStore";
 import { Fonts } from "../../src/theme/fonts";
 
 const LOG_DIR = (FileSystem.documentDirectory ?? "") + "logs/";
@@ -80,6 +81,7 @@ export default function DevLogsScreen() {
     setFarmerClearResult(null);
     try {
       const count = await farmerCacheStorage.clearAll();
+      useCampaignSessionStore.getState().setLastFarmer(null);
       setFarmerClearResult(`${count} agricultor${count !== 1 ? 'es' : ''} eliminado${count !== 1 ? 's' : ''}`);
     } catch (e) {
       setFarmerClearResult('Error al limpiar');
