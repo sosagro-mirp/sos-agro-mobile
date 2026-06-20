@@ -22,10 +22,14 @@ export async function extractFarmerLocally(s1SurveyId: string): Promise<LocalFar
 
   const flatQuestions = flattenSections(instrument.sections);
 
-  let farmerName: string | null = null;
-  let farmerLastName: string | null = null;
-  let farmerDocumentId: string | null = null;
-  let farmerPhone: string | null = null;
+  let respondentName: string | null = null;
+  let respondentLastName: string | null = null;
+  let respondentDocumentId: string | null = null;
+  let respondentPhone: string | null = null;
+  let producerName: string | null = null;
+  let producerDocumentId: string | null = null;
+  let producerPhone: string | null = null;
+  let isRespondent: boolean | null = null;
 
   for (const { question } of flatQuestions) {
     if (!question.systemField) continue;
@@ -38,18 +42,49 @@ export async function extractFarmerLocally(s1SurveyId: string): Promise<LocalFar
 
     switch (question.systemField) {
       case 'farmer.name':
-        farmerName = answer.textValue ?? null;
+        respondentName = answer.textValue ?? null;
         break;
       case 'farmer.lastName':
-        farmerLastName = answer.textValue ?? null;
+        respondentLastName = answer.textValue ?? null;
         break;
       case 'farmer.documentId':
-        farmerDocumentId = textOrNumeric;
+        respondentDocumentId = textOrNumeric;
         break;
       case 'farmer.phone':
-        farmerPhone = textOrNumeric;
+        respondentPhone = textOrNumeric;
+        break;
+      case 'farmer.isRespondent':
+        isRespondent = answer.booleanValue ?? null;
+        break;
+      case 'farmer.producerName':
+        producerName = answer.textValue ?? null;
+        break;
+      case 'farmer.producerDocumentId':
+        producerDocumentId = textOrNumeric;
+        break;
+      case 'farmer.producerPhone':
+        producerPhone = textOrNumeric;
         break;
     }
+  }
+
+  const respondentIsProducer = isRespondent !== false;
+
+  let farmerName: string | null;
+  let farmerLastName: string | null;
+  let farmerDocumentId: string | null;
+  let farmerPhone: string | null;
+
+  if (respondentIsProducer) {
+    farmerName = respondentName;
+    farmerLastName = respondentLastName;
+    farmerDocumentId = respondentDocumentId;
+    farmerPhone = respondentPhone;
+  } else {
+    farmerName = producerName || respondentName;
+    farmerLastName = null;
+    farmerDocumentId = producerDocumentId || respondentDocumentId;
+    farmerPhone = producerPhone;
   }
 
   if (!farmerName) return null;
