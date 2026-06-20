@@ -1,10 +1,12 @@
-import React from "react";
+import React, { useState } from "react";
 import {
   View,
   Text,
   ScrollView,
   StyleSheet,
   TouchableOpacity,
+  Modal,
+  Pressable,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -28,6 +30,7 @@ export const QuestionScreen: React.FC<QuestionScreenProps> = ({
   onFinished,
 }) => {
   const router = useRouter();
+  const [showExitConfirm, setShowExitConfirm] = useState(false);
 
   const answers = useInstrumentSurveyStore((s) => s.answers);
   const currentIndex = useInstrumentSurveyStore((s) => s.currentIndex);
@@ -80,38 +83,31 @@ export const QuestionScreen: React.FC<QuestionScreenProps> = ({
     <SafeAreaView style={styles.root} edges={["top", "bottom"]}>
       <OfflineBanner />
 
-      {/* Header */}
+      {/* 1. Header: marca + botón salir */}
       <View style={styles.header}>
-        <TouchableOpacity
-          onPress={handlePrev}
-          style={styles.backButton}
-          disabled={isFirst}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <Text style={[styles.backChevron, isFirst && styles.backChevronDisabled]}>
-            ←
-          </Text>
-        </TouchableOpacity>
-
-        <View style={styles.headerCenter}>
-          <Text style={styles.sectionName} numberOfLines={1}>
-            {currentItem.sectionName}
-          </Text>
-          <Text style={styles.counter}>
-            {currentIndex + 1} de {total}
-          </Text>
+        <View style={styles.brand}>
+          <Text style={styles.brandTitle}>SosAgro 4.C</Text>
+          <Text style={styles.brandSubtitle}>Plataforma de Caracterización Agrícola</Text>
         </View>
-
-        {/* Spacer to balance back button */}
-        <View style={styles.headerRight} />
+        <TouchableOpacity
+          onPress={() => setShowExitConfirm(true)}
+          style={styles.exitButton}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          accessibilityLabel="Salir de la encuesta"
+        >
+          <Text style={styles.exitIcon}>✕</Text>
+        </TouchableOpacity>
       </View>
 
-      {/* Progress bar */}
-      <View style={styles.progressContainer}>
-        <ProgressBar current={currentIndex + 1} total={total} />
+      {/* 2. Sección */}
+      <View style={styles.sectionCard}>
+        <View style={styles.sectionAccent} />
+        <Text style={styles.sectionName} numberOfLines={2}>
+          {currentItem.sectionName}
+        </Text>
       </View>
 
-      {/* Question */}
+      {/* 3. Pregunta + input */}
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
@@ -127,7 +123,12 @@ export const QuestionScreen: React.FC<QuestionScreenProps> = ({
         </QuestionContainer>
       </ScrollView>
 
-      {/* Footer */}
+      {/* 4. Barra de progreso */}
+      <View style={styles.progressContainer}>
+        <ProgressBar current={currentIndex + 1} total={total} />
+      </View>
+
+      {/* 5. Footer: navegación */}
       <View style={styles.footer}>
         {!isFirst && (
           <View style={styles.prevButtonWrapper}>
@@ -142,6 +143,41 @@ export const QuestionScreen: React.FC<QuestionScreenProps> = ({
           />
         </View>
       </View>
+
+      {/* Modal de confirmación de salida */}
+      <Modal
+        visible={showExitConfirm}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => setShowExitConfirm(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>¿Salir de la encuesta?</Text>
+            <Text style={styles.modalBody}>
+              La encuesta está sin terminar. Las respuestas guardadas quedarán como borrador y podrás reanudarla más tarde.
+            </Text>
+            <View style={styles.modalActions}>
+              <Pressable
+                style={[styles.modalButton, styles.modalButtonSecondary]}
+                onPress={() => setShowExitConfirm(false)}
+              >
+                <Text style={styles.modalButtonSecondaryText}>Cancelar</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.modalButton, styles.modalButtonDestructive]}
+                onPress={() => {
+                  setShowExitConfirm(false);
+                  router.replace("/(tabs)/campaign");
+                }}
+              >
+                <Text style={styles.modalButtonText}>Salir</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -166,48 +202,123 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
 
-  // Header
+  // 1. Header
   header: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "space-between",
     paddingHorizontal: 16,
     paddingVertical: 12,
     backgroundColor: "#FFFFFF",
     borderBottomWidth: 1,
     borderBottomColor: "#E5E7EB",
   },
-  backButton: {
-    width: 40,
-    height: 40,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  backChevron: {
-    fontSize: 24,
-    color: "#1B6B3A",
-    fontFamily: Fonts.bold,
-  },
-  backChevronDisabled: {
-    color: "#D1D5DB",
-  },
-  headerCenter: {
+  brand: {
     flex: 1,
     alignItems: "center",
-    paddingHorizontal: 8,
+  },
+  brandTitle: {
+    fontFamily: Fonts.bold,
+    fontSize: 17,
+    color: "#1B6B3A",
+    letterSpacing: 1.5,
+    textTransform: "uppercase",
+  },
+  brandSubtitle: {
+    fontFamily: Fonts.regular,
+    fontSize: 11,
+    color: "#9CA3AF",
+    marginTop: 2,
+  },
+  exitButton: {
+    width: 36,
+    height: 36,
+    alignItems: "center",
+    justifyContent: "center",
+    position: "absolute",
+    right: 12,
+  },
+  exitIcon: {
+    fontSize: 16,
+    color: "#9CA3AF",
+    fontFamily: Fonts.regular,
+  },
+
+  // 2. Sección
+  sectionCard: {
+    backgroundColor: "#FFFFFF",
+    borderBottomWidth: 1,
+    borderBottomColor: "#E5E7EB",
+    overflow: "hidden",
+  },
+  sectionAccent: {
+    height: 3,
+    backgroundColor: "#1B6B3A",
   },
   sectionName: {
     fontFamily: Fonts.semiBold,
-    fontSize: 16,
+    fontSize: 14,
+    color: "#374151",
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+  },
+
+  // Exit confirmation modal
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 24,
+  },
+  modalCard: {
+    width: "100%",
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 24,
+    gap: 12,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontFamily: Fonts.bold,
     color: "#111827",
   },
-  counter: {
+  modalBody: {
+    fontSize: 15,
     fontFamily: Fonts.regular,
-    fontSize: 13,
-    color: "#6B7280",
-    marginTop: 2,
+    color: "#374151",
+    lineHeight: 22,
   },
-  headerRight: {
-    width: 40,
+  modalActions: {
+    flexDirection: "row",
+    gap: 12,
+    marginTop: 4,
+  },
+  modalButton: {
+    flex: 1,
+    borderRadius: 10,
+    paddingVertical: 14,
+    alignItems: "center",
+  },
+  modalButtonSecondary: {
+    backgroundColor: "#F3F4F6",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+  },
+  modalButtonDestructive: {
+    backgroundColor: "#DC2626",
+  },
+  modalButtonText: {
+    fontSize: 15,
+    fontFamily: Fonts.semiBold,
+    color: "#fff",
+  },
+  modalButtonSecondaryText: {
+    fontSize: 15,
+    fontFamily: Fonts.semiBold,
+    color: "#374151",
   },
 
   // Progress

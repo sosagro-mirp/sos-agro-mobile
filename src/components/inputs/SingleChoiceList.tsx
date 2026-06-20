@@ -18,16 +18,7 @@ export function SingleChoiceList({
   onChange,
 }: Props): React.JSX.Element {
   function handlePress(option: InstrumentOption): void {
-    const isYesNo = typeof option.value === "boolean";
-    if (isYesNo) {
-      onChange({
-        questionId,
-        optionId: option.optionId,
-        booleanValue: option.value === true,
-      });
-    } else {
-      onChange({ questionId, optionId: option.optionId });
-    }
+    onChange({ questionId, optionId: option.optionId });
   }
 
   return (

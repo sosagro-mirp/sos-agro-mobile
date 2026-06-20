@@ -1,9 +1,10 @@
-import { sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, real, primaryKey } from 'drizzle-orm/sqlite-core';
 
 export const surveys = sqliteTable('surveys', {
   id: text('id').primaryKey(),
   campaignSessionId: text('campaign_session_id'),
   instrumentId: text('instrument_id').notNull(),
+  farmerId: text('farmer_id'),
   status: text('status', { enum: ['draft', 'completed', 'synced'] })
     .notNull()
     .default('draft'),
@@ -49,5 +50,36 @@ export const instrumentCache = sqliteTable('instrument_cache', {
 export const campaignCache = sqliteTable('campaign_cache', {
   id: text('id').primaryKey(),
   data: text('data').notNull(),
+  cachedAt: integer('cached_at', { mode: 'timestamp' }).notNull(),
+});
+
+export const pendingSessions = sqliteTable('pending_sessions', {
+  localSessionId: text('local_session_id').primaryKey(),
+  campaignId: text('campaign_id').notNull(),
+  farmerId: text('farmer_id'),
+  userId: text('user_id'),
+  realSessionId: text('real_session_id'),
+  status: text('status', { enum: ['pending', 'resolved', 'failed'] })
+    .notNull()
+    .default('pending'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  resolvedAt: integer('resolved_at', { mode: 'timestamp' }),
+});
+
+export const sessionCrops = sqliteTable('session_crops', {
+  sessionId: text('session_id').notNull(),
+  cropId: text('crop_id').notNull(),
+  cropName: text('crop_name').notNull(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.sessionId, table.cropId] }),
+}));
+
+export const farmerCache = sqliteTable('farmer_cache', {
+  farmerId: text('farmer_id').primaryKey(),
+  name: text('name').notNull(),
+  lastName: text('last_name'),
+  documentId: text('document_id'),
+  phone: text('phone'),
+  farmName: text('farm_name'),
   cachedAt: integer('cached_at', { mode: 'timestamp' }).notNull(),
 });

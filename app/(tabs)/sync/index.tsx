@@ -30,6 +30,7 @@ export default function SyncScreen() {
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [purgeResult, setPurgeResult] = useState<number | null>(null);
   const [isPurging, setIsPurging] = useState(false);
+  const [isClearingFailed, setIsClearingFailed] = useState(false);
 
   const refreshData = async () => {
     await refreshPendingCount();
@@ -67,6 +68,18 @@ export default function SyncScreen() {
       setPurgeResult(count);
     } finally {
       setIsPurging(false);
+    }
+  };
+
+  const handleClearFailed = async () => {
+    if (isClearingFailed) return;
+    setIsClearingFailed(true);
+    try {
+      await syncQueueStorage.clearFailed();
+      setFailedEntries([]);
+      await refreshPendingCount();
+    } finally {
+      setIsClearingFailed(false);
     }
   };
 
@@ -154,7 +167,16 @@ export default function SyncScreen() {
 
         {failedEntries.length > 0 ? (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Errores de validación</Text>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Errores de validación</Text>
+              <Pressable onPress={handleClearFailed} disabled={isClearingFailed}>
+                {isClearingFailed ? (
+                  <ActivityIndicator size="small" color="#DC2626" />
+                ) : (
+                  <Text style={styles.clearFailedBtn}>Limpiar todo</Text>
+                )}
+              </Pressable>
+            </View>
             <Text style={styles.sectionHint}>
               Estos registros fueron rechazados por el servidor. Revisa el error
               y toca "Reintentar" si crees que el problema fue temporal.
@@ -271,7 +293,9 @@ const styles = StyleSheet.create({
   purgeResult: { fontSize: 13, fontFamily: Fonts.regular, color: "#6B7280", textAlign: "center" },
 
   section: { gap: 10 },
+  sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   sectionTitle: { fontSize: 15, fontFamily: Fonts.semiBold, color: "#374151" },
+  clearFailedBtn: { fontSize: 14, fontFamily: Fonts.semiBold, color: "#DC2626" },
   sectionHint: { fontSize: 13, fontFamily: Fonts.regular, color: "#9CA3AF", lineHeight: 18 },
   failedCard: {
     backgroundColor: "#FEF2F2",

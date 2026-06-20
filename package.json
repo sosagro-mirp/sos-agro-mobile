@@ -18,10 +18,12 @@
     "expo-sqlite": "~16.0.10",
     "expo-status-bar": "~3.0.9",
     "expo-task-manager": "~14.0.9",
+    "lucide-react-native": "^1.21.0",
     "react": "19.1.0",
     "react-native": "0.81.5",
     "react-native-safe-area-context": "~5.6.2",
     "react-native-screens": "~4.16.0",
+    "react-native-svg": "^15.15.5",
     "zustand": "^5.0.14"
   },
   "devDependencies": {
@@ -42,14 +44,19 @@
   "jest": {
     "preset": "jest-expo",
     "transformIgnorePatterns": [
-      "node_modules/(?!((jest-)?react-native|@react-native(-community)?)|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|drizzle-orm)"
+      "node_modules/(?!\\.pnpm)(?!((jest-)?react-native|@react-native(-community)?)|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|drizzle-orm)"
     ],
     "setupFilesAfterEnv": [
       "./src/__tests__/setup.ts"
     ],
     "moduleNameMapper": {
       "^expo-sqlite$": "<rootDir>/src/__tests__/__mocks__/expo-sqlite.ts"
-    }
+    },
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "<rootDir>/src/__tests__/setup\\.ts$",
+      "<rootDir>/src/__tests__/__mocks__/"
+    ]
   },
   "private": true
 }

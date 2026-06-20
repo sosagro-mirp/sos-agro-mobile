@@ -1,12 +1,14 @@
 import { create } from 'zustand';
 import { campaignCacheStorage } from '../storage/campaignCache';
 import { instrumentCacheStorage } from '../storage/instrumentCache';
+import { farmerCacheStorage } from '../storage/farmerCache';
 import { fetchActiveCampaigns, fetchCampaignRender } from '../api/campaigns';
 import { fetchInstrumentRender, fetchInstrumentByCode } from '../api/instruments';
+import { listAllFarmers } from '../api/farmers';
 import type { CampaignRender } from '../types';
 
 export interface DownloadProgress {
-  phase: 'campaigns' | 'instruments';
+  phase: 'campaigns' | 'instruments' | 'farmers';
   currentName: string;
   done: number;
   total: number;
@@ -91,19 +93,15 @@ export const useCachedCampaignsStore = create<CachedCampaignsState>((set, get) =
         }));
       }
 
-      // ── Phase 2: download instruments not yet cached ───────────────────────
-      const neededIds = [
+      // ── Phase 2: download all campaign instruments (force refresh) ───────────
+      const toDownload = [
         ...new Set(rendered.flatMap(getInstrumentIds)),
       ];
-
-      const alreadyCached = await instrumentCacheStorage.listCachedIds();
-      const alreadyCachedSet = new Set(alreadyCached);
-      const toDownload = neededIds.filter((id) => !alreadyCachedSet.has(id));
 
       set({
         downloadProgress: {
           phase: 'instruments',
-          currentName: toDownload.length === 0 ? 'Instrumentos al día' : 'Descargando instrumentos…',
+          currentName: toDownload.length === 0 ? 'Sin instrumentos' : 'Descargando instrumentos…',
           done: 0,
           total: toDownload.length,
         },
@@ -132,18 +130,46 @@ export const useCachedCampaignsStore = create<CachedCampaignsState>((set, get) =
         }));
       }
 
-      // ── Phase 3: pre-cache S1 and S2 ─────────────────────────────────────
+      // ── Phase 3: pre-cache S1 and S2 (always refresh) ────────────────────
       for (const code of ['S1', 'S2'] as const) {
         try {
           const meta = await fetchInstrumentByCode(code);
-          const cached = await instrumentCacheStorage.get(meta.instrumentId);
-          if (!cached) {
-            const instrument = await fetchInstrumentRender(meta.instrumentId);
-            await instrumentCacheStorage.save(instrument);
-          }
+          const instrument = await fetchInstrumentRender(meta.instrumentId);
+          await instrumentCacheStorage.save(instrument);
         } catch {
           // S1/S2 not configured in backend — ignore silently
         }
+      }
+
+      // ── Phase 4: pre-cache all farmers for offline search ────────────────
+      try {
+        const farmers = await listAllFarmers();
+        set({
+          downloadProgress: {
+            phase: 'farmers',
+            currentName: 'Guardando encuestados…',
+            done: 0,
+            total: farmers.length,
+          },
+        });
+        for (const farmer of farmers) {
+          await farmerCacheStorage.upsert({
+            farmerId: farmer.farmerId,
+            name: farmer.name,
+            lastName: farmer.lastName ?? undefined,
+            documentId: farmer.documentId ?? undefined,
+            phone: farmer.phone ?? undefined,
+            farmName: farmer.farm?.name ?? undefined,
+            cachedAt: new Date(),
+          });
+          set((s) => ({
+            downloadProgress: s.downloadProgress
+              ? { ...s.downloadProgress, done: s.downloadProgress.done + 1 }
+              : null,
+          }));
+        }
+      } catch {
+        // Non-critical — skip silently if the endpoint fails
       }
 
       // ── Final state refresh ────────────────────────────────────────────────

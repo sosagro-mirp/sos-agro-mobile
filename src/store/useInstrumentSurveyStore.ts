@@ -5,6 +5,8 @@ import { isQuestionVisible } from '../lib/isQuestionVisible';
 import { isAnswerComplete } from '../lib/isAnswerComplete';
 import { surveyDraftStore } from '../storage/surveyDraftStore';
 import { syncQueueStorage } from '../storage/syncQueue';
+import { SyncQueueService } from '../sync/SyncQueueService';
+import { useSyncStatusStore } from './useSyncStatusStore';
 import type {
   FlattenedQuestionItem,
   InstrumentDraftAnswer,
@@ -150,6 +152,11 @@ export const useInstrumentSurveyStore = create<InstrumentSurveyState>((set, get)
         campaignSessionId: campaignSessionId ?? undefined,
         stepOrder: stepOrder ?? undefined,
       });
+
+      const { isOnline } = useSyncStatusStore.getState();
+      if (isOnline) {
+        SyncQueueService.processAll().catch(() => {});
+      }
 
       return { outcome: 'saved_offline' };
     } catch (error) {

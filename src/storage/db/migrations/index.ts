@@ -4,9 +4,26 @@ const migrations = {
   journal: {
     entries: [
       { idx: 0, when: 0, tag: 'm0000', breakpoints: true },
+      { idx: 1, when: 1, tag: 'm0001', breakpoints: true },
+      { idx: 2, when: 2, tag: 'm0002', breakpoints: true },
+      { idx: 3, when: 3, tag: 'm0003', breakpoints: true },
     ],
   },
   migrations: {
+    m0003: [
+      "CREATE TABLE IF NOT EXISTS `session_crops` (`session_id` text NOT NULL, `crop_id` text NOT NULL, `crop_name` text NOT NULL, PRIMARY KEY(`session_id`, `crop_id`))",
+    ].join('\n'),
+
+    m0002: [
+      "CREATE TABLE IF NOT EXISTS `pending_sessions` (`local_session_id` text PRIMARY KEY NOT NULL, `campaign_id` text NOT NULL, `farmer_id` text, `user_id` text, `real_session_id` text, `status` text NOT NULL DEFAULT 'pending', `created_at` integer NOT NULL, `resolved_at` integer)",
+      '--> statement-breakpoint',
+      "CREATE TABLE IF NOT EXISTS `farmer_cache` (`farmer_id` text PRIMARY KEY NOT NULL, `name` text NOT NULL, `last_name` text, `document_id` text, `phone` text, `farm_name` text, `cached_at` integer NOT NULL)",
+    ].join('\n'),
+
+    m0001: [
+      "ALTER TABLE `surveys` ADD COLUMN `farmer_id` text",
+    ].join('\n'),
+
     m0000: [
       "CREATE TABLE IF NOT EXISTS `surveys` (`id` text PRIMARY KEY NOT NULL, `campaign_session_id` text, `instrument_id` text NOT NULL, `status` text NOT NULL DEFAULT 'draft', `created_at` integer NOT NULL, `updated_at` integer NOT NULL)",
       '--> statement-breakpoint',

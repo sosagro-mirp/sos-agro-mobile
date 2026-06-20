@@ -21,6 +21,16 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
   const { question } = item;
   const { questionId, options, type } = question;
 
+  if (!type) {
+    return (
+      <OpenTextInput
+        questionId={questionId}
+        value={answer?.textValue}
+        onChange={onChange}
+      />
+    );
+  }
+
   switch (type.name) {
     case "open_text":
       return (
@@ -40,16 +50,30 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
         />
       );
 
-    case "yes_no":
+    case "yes_no": {
+      const YES_NO_OPTIONS = [
+        { optionId: "yes", text: "Sí", value: 1, isOther: false },
+        { optionId: "no", text: "No", value: 0, isOther: false },
+      ];
+      const selectedId = answer?.booleanValue === true
+        ? "yes"
+        : answer?.booleanValue === false
+          ? "no"
+          : undefined;
       return (
         <SingleChoiceList
           questionId={questionId}
-          options={options}
-          value={answer?.optionId}
-          booleanValue={answer?.booleanValue}
-          onChange={onChange}
+          options={YES_NO_OPTIONS}
+          value={selectedId}
+          onChange={(a) =>
+            onChange({
+              questionId,
+              booleanValue: a.optionId === "yes",
+            })
+          }
         />
       );
+    }
 
     case "single_choice":
       return (
