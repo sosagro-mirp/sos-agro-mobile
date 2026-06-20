@@ -262,6 +262,12 @@ export default function OrchestratorScreen() {
             }
             store.applyLocalFarmer(draft);
             store.completeS1Injection(draft.farmerId, draft.name);
+            store.setLastFarmer({
+              farmerId: draft.farmerId,
+              name: draft.name,
+              lastName: draft.lastName,
+              ...(draft.farmName ? { farm: { name: draft.farmName } } : {}),
+            });
             await injectInstrument('S2');
           } else {
             setScreenState('offline_extraction_pending');
