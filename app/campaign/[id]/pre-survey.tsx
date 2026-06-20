@@ -5,7 +5,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useCachedCampaignsStore } from "../../../src/store/useCachedCampaignsStore";
 import { useCampaignSessionStore } from "../../../src/store/useCampaignSessionStore";
 import { useSyncStatusStore } from "../../../src/store/useSyncStatusStore";
-import { createCampaignSession, getLastFarmer } from "../../../src/api/campaignSessions";
+import { createCampaignSession } from "../../../src/api/campaignSessions";
 import { useAuthStore } from "../../../src/store/useAuthStore";
 import { PreSurveyForm } from "../../../src/components/campaign/PreSurveyForm";
 import { OfflineBanner } from "../../../src/components/network/OfflineBanner";
@@ -26,7 +26,7 @@ export default function PreSurveyScreen() {
     applyOfflineSession,
     setSelectedFarmer,
     setNewFarmerMode,
-    setLastFarmer,
+    loadLastFarmer,
     lastFarmer,
   } = useCampaignSessionStore();
   const { isOnline } = useSyncStatusStore();
@@ -36,11 +36,8 @@ export default function PreSurveyScreen() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isOnline) return;
-    getLastFarmer()
-      .then((farmer) => { if (farmer) setLastFarmer(farmer); })
-      .catch(() => {});
-  }, [isOnline]);
+    loadLastFarmer();
+  }, []);
 
   if (!campaign) {
     return (
