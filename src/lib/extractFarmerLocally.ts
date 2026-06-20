@@ -10,6 +10,7 @@ export interface LocalFarmerDraft {
   lastName: string | null;
   documentId: string | null;
   phone: string | null;
+  farmName: string | null;
   isProvisional: boolean;
 }
 
@@ -30,6 +31,7 @@ export async function extractFarmerLocally(s1SurveyId: string): Promise<LocalFar
   let producerDocumentId: string | null = null;
   let producerPhone: string | null = null;
   let isRespondent: boolean | null = null;
+  let farmName: string | null = null;
 
   for (const { question } of flatQuestions) {
     if (!question.systemField) continue;
@@ -65,6 +67,9 @@ export async function extractFarmerLocally(s1SurveyId: string): Promise<LocalFar
       case 'farmer.producerPhone':
         producerPhone = textOrNumeric;
         break;
+      case 'farm.name':
+        farmName = answer.textValue ?? null;
+        break;
     }
   }
 
@@ -98,6 +103,7 @@ export async function extractFarmerLocally(s1SurveyId: string): Promise<LocalFar
         lastName: cached.lastName ?? null,
         documentId: cached.documentId ?? null,
         phone: cached.phone ?? null,
+        farmName,
         isProvisional: false,
       };
     }
@@ -109,6 +115,7 @@ export async function extractFarmerLocally(s1SurveyId: string): Promise<LocalFar
     lastName: farmerLastName,
     documentId: farmerDocumentId,
     phone: farmerPhone,
+    farmName,
     isProvisional: true,
   };
 }
