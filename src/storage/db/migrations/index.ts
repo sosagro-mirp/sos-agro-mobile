@@ -7,9 +7,14 @@ const migrations = {
       { idx: 1, when: 1, tag: 'm0001', breakpoints: true },
       { idx: 2, when: 2, tag: 'm0002', breakpoints: true },
       { idx: 3, when: 3, tag: 'm0003', breakpoints: true },
+      { idx: 4, when: 4, tag: 'm0004', breakpoints: true },
     ],
   },
   migrations: {
+    m0004: [
+      "CREATE TABLE IF NOT EXISTS `change_requests` (`id` text PRIMARY KEY NOT NULL, `description` text NOT NULL, `farmer_id` text, `status` text NOT NULL DEFAULT 'pending_sync', `resolved_at` integer, `created_at` integer NOT NULL, `synced_at` integer)",
+    ].join('\n'),
+
     m0003: [
       "CREATE TABLE IF NOT EXISTS `session_crops` (`session_id` text NOT NULL, `crop_id` text NOT NULL, `crop_name` text NOT NULL, PRIMARY KEY(`session_id`, `crop_id`))",
     ].join('\n'),

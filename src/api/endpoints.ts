@@ -37,4 +37,8 @@ export const endpoints = {
 
   // Telemetry
   telemetrySync: '/api/telemetry/sync',
+
+  // Change requests
+  changeRequests: '/api/change-requests',
+  changeRequestsMyResolved: '/api/change-requests/my-resolved',
 } as const;

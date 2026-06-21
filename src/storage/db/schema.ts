@@ -74,6 +74,18 @@ export const sessionCrops = sqliteTable('session_crops', {
   pk: primaryKey({ columns: [table.sessionId, table.cropId] }),
 }));
 
+export const changeRequests = sqliteTable('change_requests', {
+  id: text('id').primaryKey(),
+  description: text('description').notNull(),
+  farmerId: text('farmer_id'),
+  status: text('status', { enum: ['pending_sync', 'open', 'resolved'] })
+    .notNull()
+    .default('pending_sync'),
+  resolvedAt: integer('resolved_at', { mode: 'timestamp' }),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  syncedAt: integer('synced_at', { mode: 'timestamp' }),
+});
+
 export const farmerCache = sqliteTable('farmer_cache', {
   farmerId: text('farmer_id').primaryKey(),
   name: text('name').notNull(),
