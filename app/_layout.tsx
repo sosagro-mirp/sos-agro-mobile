@@ -21,6 +21,7 @@ import { NetworkMonitor } from "../src/sync/NetworkMonitor";
 import { BackgroundSync } from "../src/sync/BackgroundSync";
 import { initSentry, captureError } from "../src/lib/sentry";
 import { logger } from "../src/lib/logger";
+import { ChangeRequestBanner } from "../src/components/requests/ChangeRequestBanner";
 
 initSentry();
 
@@ -128,6 +129,7 @@ export default function RootLayout() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthGuard />
+      <ChangeRequestBanner />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="login" />
         <Stack.Screen name="index" />
