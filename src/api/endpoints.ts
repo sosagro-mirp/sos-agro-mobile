@@ -29,6 +29,10 @@ export const endpoints = {
   // Last farmer for current user
   campaignSessionLastFarmer: '/api/campaign-sessions/last-farmer',
 
+  // Farm plots
+  farmPlotsCreate: '/api/farm-plots',
+  farmPlotsByFarm: (farmId: string) => `/api/farm-plots/by-farm/${farmId}`,
+
   // Telemetry
   telemetrySync: '/api/telemetry/sync',
 } as const;
