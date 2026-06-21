@@ -98,6 +98,15 @@ export default function TabsLayout() {
             ),
           }}
         />
+        <Tabs.Screen
+          name="plots"
+          options={{
+            title: "Lotes",
+            tabBarIcon: ({ color }) => (
+              <Text style={{ fontSize: 20, color }}>🗺️</Text>
+            ),
+          }}
+        />
       </Tabs>
     </View>
   );
