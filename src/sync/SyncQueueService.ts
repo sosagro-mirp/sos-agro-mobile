@@ -66,9 +66,10 @@ class SyncQueueServiceClass {
       // Pull resolved change requests after the survey loop.
       try {
         const { lastSyncAt } = useSyncStatusStore.getState();
-        if (lastSyncAt) {
-          await this.pullResolvedChangeRequests(lastSyncAt);
-        }
+        // Fall back to epoch when lastSyncAt is null (first sync or after app restart)
+        // so we always catch any resolved tickets.
+        const since = lastSyncAt ?? new Date(0);
+        await this.pullResolvedChangeRequests(since);
       } catch (err) {
         logger.error('[Sync] pullResolvedChangeRequests failed, continuing anyway', err);
       }
@@ -82,6 +83,8 @@ class SyncQueueServiceClass {
 
   private async flushPendingChangeRequests(): Promise<void> {
     const pending = await changeRequestStorage.listPendingSync();
+    if (pending.length === 0) return;
+
     for (const cr of pending) {
       await postChangeRequest({
         description: cr.description,
@@ -91,6 +94,8 @@ class SyncQueueServiceClass {
       await changeRequestStorage.markSynced(cr.id);
       logger.info(`[Sync] change request ${cr.id} synced`);
     }
+
+    await useChangeRequestStore.getState().loadAll();
   }
 
   private async pullResolvedChangeRequests(since: Date): Promise<void> {

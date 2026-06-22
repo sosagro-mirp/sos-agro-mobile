@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 import { db } from './db/db';
 import { changeRequests } from './db/schema';
 
@@ -61,7 +61,11 @@ export const changeRequestStorage = {
   },
 
   async listAll(): Promise<ChangeRequestEntry[]> {
-    const rows = await db.select().from(changeRequests).all();
+    const rows = await db
+      .select()
+      .from(changeRequests)
+      .orderBy(desc(changeRequests.createdAt))
+      .all();
     return rows.map(mapRow);
   },
 };
