@@ -6,6 +6,8 @@ import {
   ActivityIndicator,
   StyleSheet,
   Alert,
+  Modal,
+  Pressable,
 } from 'react-native';
 import { PrimaryButton } from '../common/PrimaryButton';
 import { changeRequestStorage } from '../../storage/changeRequestStorage';
@@ -22,6 +24,7 @@ interface Props {
 export const ChangeRequestForm: React.FC<Props> = ({ farmerId, farmerName, onSubmitted }) => {
   const [description, setDescription] = useState('');
   const [saving, setSaving] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
   const addRequest = useChangeRequestStore((s) => s.addRequest);
 
   const handleSubmit = async () => {
@@ -45,15 +48,37 @@ export const ChangeRequestForm: React.FC<Props> = ({ farmerId, farmerName, onSub
       addRequest({ ...entry, status: 'pending_sync' });
 
       setDescription('');
-      onSubmitted?.();
-      Alert.alert('Solicitud guardada', 'Se enviará al servidor cuando haya conexión.');
+      setShowSuccess(true);
     } finally {
       setSaving(false);
     }
   };
 
+  const handleSuccessDismiss = () => {
+    setShowSuccess(false);
+    onSubmitted?.();
+  };
+
   return (
     <View style={styles.container}>
+      <Modal
+        visible={showSuccess}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+      >
+        <View style={styles.overlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Solicitud guardada</Text>
+            <Text style={styles.modalBody}>
+              Se enviará al servidor cuando haya conexión.
+            </Text>
+            <Pressable style={styles.modalButton} onPress={handleSuccessDismiss}>
+              <Text style={styles.modalButtonText}>Entendido</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
       <Text style={styles.title}>Reportar problema</Text>
 
       {farmerName && (
@@ -115,5 +140,43 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#9CA3AF',
     textAlign: 'right',
+  },
+
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  modalCard: {
+    width: '100%',
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 24,
+    gap: 12,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontFamily: Fonts.bold,
+    color: '#111827',
+  },
+  modalBody: {
+    fontSize: 15,
+    fontFamily: Fonts.regular,
+    color: '#374151',
+    lineHeight: 22,
+  },
+  modalButton: {
+    backgroundColor: '#1B6B3A',
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  modalButtonText: {
+    fontSize: 15,
+    fontFamily: Fonts.semiBold,
+    color: '#fff',
   },
 });
