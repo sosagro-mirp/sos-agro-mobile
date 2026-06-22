@@ -4,87 +4,125 @@
  * All external collaborators are mocked so no DB or network is needed.
  */
 
-import { NetworkError, ServerError } from '../../api/httpClient';
+// ─── Mock declarations (hoisted before imports) ───────────────────────────────
 
-// ─── Mock declarations (hoisted) ─────────────────────────────────────────────
-
-const mockDequeueNextPending = jest.fn();
-const mockMarkInFlight = jest.fn();
-const mockMarkSynced = jest.fn();
-const mockMarkFailedValidation = jest.fn();
-const mockIncrementAttempts = jest.fn();
-const mockRefreshPendingCount = jest.fn();
-
-jest.mock('../../storage/syncQueue', () => ({
+jest.mock('../storage/syncQueue', () => ({
   syncQueueStorage: {
-    dequeueNextPending: mockDequeueNextPending,
-    markInFlight: mockMarkInFlight,
-    markSynced: mockMarkSynced,
-    markFailedValidation: mockMarkFailedValidation,
-    incrementAttempts: mockIncrementAttempts,
+    dequeueNextPending: jest.fn(),
+    markInFlight: jest.fn(),
+    markSynced: jest.fn(),
+    markFailedValidation: jest.fn(),
+    incrementAttempts: jest.fn(),
+    getPendingBySurveyId: jest.fn(),
+    getActiveBySurveyId: jest.fn(),
   },
 }));
 
-const mockLoadDraft = jest.fn();
-const mockMarkSyncedDraft = jest.fn();
-jest.mock('../../storage/surveyDraftStore', () => ({
+jest.mock('../storage/surveyDraftStore', () => ({
   surveyDraftStore: {
-    loadDraft: mockLoadDraft,
-    markSynced: mockMarkSyncedDraft,
+    loadDraft: jest.fn(),
+    markSynced: jest.fn(),
   },
 }));
 
-const mockInstrumentCacheGet = jest.fn();
-jest.mock('../../storage/instrumentCache', () => ({
+jest.mock('../storage/instrumentCache', () => ({
   instrumentCacheStorage: {
-    get: mockInstrumentCacheGet,
+    get: jest.fn(),
   },
 }));
 
-const mockSubmitResponsesBatch = jest.fn();
-jest.mock('../../api/responses', () => ({
-  submitResponsesBatch: mockSubmitResponsesBatch,
+jest.mock('../api/responses', () => ({
+  submitResponsesBatch: jest.fn(),
 }));
 
-const mockMarkSurveyAsSynced = jest.fn();
-jest.mock('../../api/surveys', () => ({
-  markSurveyAsSynced: mockMarkSurveyAsSynced,
+jest.mock('../api/surveys', () => ({
+  markSurveyAsSynced: jest.fn(),
+  createSurvey: jest.fn(),
 }));
 
-const mockMarkSessionAsSynced = jest.fn();
-jest.mock('../../api/campaignSessions', () => ({
-  markSessionAsSynced: mockMarkSessionAsSynced,
+jest.mock('../api/campaignSessions', () => ({
+  markSessionAsSynced: jest.fn(),
+  createCampaignSession: jest.fn(),
 }));
 
-const mockSetSyncingId = jest.fn();
-const mockMarkSyncCompleted = jest.fn();
-jest.mock('../../store/useSyncStatusStore', () => ({
+jest.mock('../api/farmers', () => ({
+  extractFarmer: jest.fn(),
+  extractCrops: jest.fn(),
+}));
+
+jest.mock('../storage/sessionCropsStorage', () => ({
+  sessionCropsStorage: {
+    save: jest.fn(),
+  },
+}));
+
+jest.mock('../store/useSyncStatusStore', () => ({
   useSyncStatusStore: {
-    getState: jest.fn(() => ({
-      setSyncingId: mockSetSyncingId,
-      markSyncCompleted: mockMarkSyncCompleted,
-      refreshPendingCount: mockRefreshPendingCount,
-    })),
+    getState: jest.fn(),
   },
 }));
 
-const mockFlattenSections = jest.fn();
-jest.mock('../../lib/flattenSections', () => ({
-  flattenSections: mockFlattenSections,
+jest.mock('../lib/flattenSections', () => ({
+  flattenSections: jest.fn(),
 }));
 
-const mockBuildResponsesPayload = jest.fn();
-jest.mock('../../lib/buildResponsesPayload', () => ({
-  buildResponsesPayload: mockBuildResponsesPayload,
+jest.mock('../lib/buildResponsesPayload', () => ({
+  buildResponsesPayload: jest.fn(),
 }));
 
-// ─── Import SUT after mocks ───────────────────────────────────────────────────
+jest.mock('../storage/pendingSessions', () => ({
+  pendingSessionStorage: {
+    listPending: jest.fn().mockResolvedValue([]),
+    resolve: jest.fn(),
+    markFailed: jest.fn(),
+  },
+}));
 
-import { SyncQueueService } from '../../sync/SyncQueueService';
+// ─── Import SUT and mocked modules ───────────────────────────────────────────
+
+import { NetworkError, ServerError } from '../api/httpClient';
+import { SyncQueueService } from '../sync/SyncQueueService';
+import { syncQueueStorage } from '../storage/syncQueue';
+import { surveyDraftStore } from '../storage/surveyDraftStore';
+import { instrumentCacheStorage } from '../storage/instrumentCache';
+import { submitResponsesBatch } from '../api/responses';
+import { markSurveyAsSynced } from '../api/surveys';
+import { markSessionAsSynced } from '../api/campaignSessions';
+import { extractCrops } from '../api/farmers';
+import { sessionCropsStorage } from '../storage/sessionCropsStorage';
+import { useSyncStatusStore } from '../store/useSyncStatusStore';
+import { flattenSections } from '../lib/flattenSections';
+import { buildResponsesPayload } from '../lib/buildResponsesPayload';
+
+// ─── Typed mock aliases ───────────────────────────────────────────────────────
+
+const mockDequeueNextPending = syncQueueStorage.dequeueNextPending as jest.Mock;
+const mockMarkInFlight = syncQueueStorage.markInFlight as jest.Mock;
+const mockMarkSynced = syncQueueStorage.markSynced as jest.Mock;
+const mockMarkFailedValidation = syncQueueStorage.markFailedValidation as jest.Mock;
+const mockIncrementAttempts = syncQueueStorage.incrementAttempts as jest.Mock;
+
+const mockLoadDraft = surveyDraftStore.loadDraft as jest.Mock;
+const mockMarkSyncedDraft = surveyDraftStore.markSynced as jest.Mock;
+
+const mockInstrumentCacheGet = instrumentCacheStorage.get as jest.Mock;
+
+const mockSubmitResponsesBatch = submitResponsesBatch as jest.Mock;
+const mockMarkSurveyAsSynced = markSurveyAsSynced as jest.Mock;
+const mockMarkSessionAsSynced = markSessionAsSynced as jest.Mock;
+const mockExtractCrops = extractCrops as jest.Mock;
+const mockSessionCropsSave = sessionCropsStorage.save as jest.Mock;
+
+const mockFlattenSections = flattenSections as jest.Mock;
+const mockBuildResponsesPayload = buildResponsesPayload as jest.Mock;
+
+let mockSetSyncingId: jest.Mock;
+let mockMarkSyncCompleted: jest.Mock;
+let mockRefreshPendingCount: jest.Mock;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function makeEntry(overrides = {}) {
+function makeEntry(overrides: Record<string, unknown> = {}) {
   return {
     id: 'entry-1',
     surveyId: 'survey-1',
@@ -105,17 +143,11 @@ function makeDraft(instrumentId = 'inst-1') {
   };
 }
 
-function makeInstrument() {
+function makeInstrument(overrides: Record<string, unknown> = {}) {
   return {
     instrumentId: 'inst-1',
-    sections: [
-      {
-        sectionId: 's1',
-        name: 'Section 1',
-        order: 1,
-        questions: [],
-      },
-    ],
+    sections: [{ sectionId: 's1', name: 'Section 1', order: 1, questions: [] }],
+    ...overrides,
   };
 }
 
@@ -124,6 +156,16 @@ function makeInstrument() {
 beforeEach(() => {
   jest.clearAllMocks();
   SyncQueueService.resetNetworkFailures();
+
+  mockSetSyncingId = jest.fn();
+  mockMarkSyncCompleted = jest.fn();
+  mockRefreshPendingCount = jest.fn();
+
+  (useSyncStatusStore.getState as jest.Mock).mockReturnValue({
+    setSyncingId: mockSetSyncingId,
+    markSyncCompleted: mockMarkSyncCompleted,
+    refreshPendingCount: mockRefreshPendingCount,
+  });
 
   // Default: no pending entries
   mockDequeueNextPending.mockResolvedValue(null);
@@ -140,6 +182,8 @@ beforeEach(() => {
   mockInstrumentCacheGet.mockResolvedValue(null);
   mockFlattenSections.mockReturnValue([]);
   mockBuildResponsesPayload.mockReturnValue([]);
+  mockExtractCrops.mockResolvedValue({ crops: [] });
+  mockSessionCropsSave.mockResolvedValue(undefined);
 });
 
 // ─── processAll: guard conditions ────────────────────────────────────────────
@@ -155,24 +199,18 @@ describe('processAll', () => {
   });
 
   it('skips processing when consecutiveNetworkFailures >= 5', async () => {
-    // Simulate 5 network failures by calling processAll 5 times with network errors
-    const entry = makeEntry();
-    mockDequeueNextPending
-      .mockResolvedValueOnce(entry)
-      .mockResolvedValue(null);
     mockLoadDraft.mockResolvedValue(makeDraft());
     mockInstrumentCacheGet.mockResolvedValue(makeInstrument());
     mockFlattenSections.mockReturnValue([{ question: { questionId: 'q1' } }]);
     mockBuildResponsesPayload.mockReturnValue([{ surveyId: 'survey-1', questionId: 'q1' }]);
     mockSubmitResponsesBatch.mockRejectedValue(new NetworkError());
 
-    // 5 rounds — each round produces 1 network failure
     for (let i = 0; i < 5; i++) {
       mockDequeueNextPending.mockResolvedValueOnce(makeEntry({ id: `entry-${i}` }));
       await SyncQueueService.processAll();
     }
 
-    // Now the threshold is reached; a subsequent call should bail out immediately
+    // Threshold reached; next call should bail out immediately
     const callsBefore = mockDequeueNextPending.mock.calls.length;
     await SyncQueueService.processAll();
     expect(mockDequeueNextPending.mock.calls.length).toBe(callsBefore);
@@ -189,8 +227,6 @@ describe('processAll', () => {
 
     mockLoadDraft.mockResolvedValue(makeDraft());
     mockInstrumentCacheGet.mockResolvedValue(makeInstrument());
-    mockFlattenSections.mockReturnValue([]);
-    mockBuildResponsesPayload.mockReturnValue([]);
 
     await SyncQueueService.processAll();
 
@@ -203,7 +239,6 @@ describe('processAll', () => {
     mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
     mockLoadDraft.mockResolvedValue(makeDraft());
     mockInstrumentCacheGet.mockResolvedValue(makeInstrument());
-    mockBuildResponsesPayload.mockReturnValue([]);
 
     await SyncQueueService.processAll();
 
@@ -221,7 +256,6 @@ describe('processEntry — success', () => {
     mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
     mockLoadDraft.mockResolvedValue(makeDraft());
     mockInstrumentCacheGet.mockResolvedValue(makeInstrument());
-    mockFlattenSections.mockReturnValue([]);
     mockBuildResponsesPayload.mockReturnValue([
       { surveyId: 'survey-1', questionId: 'q1', textValue: 'x' },
     ]);
@@ -242,11 +276,8 @@ describe('processEntry — success', () => {
     mockInstrumentCacheGet.mockResolvedValue(makeInstrument());
     mockBuildResponsesPayload.mockReturnValue([{ surveyId: 'survey-1', questionId: 'q1' }]);
 
-    // Simulate a prior failure
-    // (We can only verify this indirectly by checking that processAll runs after)
     await SyncQueueService.processAll();
 
-    // If no threshold was hit, processAll would have run through normally
     expect(mockMarkSynced).toHaveBeenCalledWith(entry.id);
   });
 
@@ -284,7 +315,7 @@ describe('processEntry — empty payload', () => {
   it('marks synced directly when draft is not found', async () => {
     const entry = makeEntry();
     mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
-    mockLoadDraft.mockResolvedValue(null); // draft missing
+    mockLoadDraft.mockResolvedValue(null);
 
     await SyncQueueService.processAll();
 
@@ -352,13 +383,63 @@ describe('processEntry — ServerError', () => {
 
     await SyncQueueService.processAll();
 
-    // After a ServerError, the service resets consecutiveNetworkFailures to 0.
-    // The next processAll call should work (not bail out due to threshold).
+    // After a ServerError, the failure counter is reset to 0.
+    // The next processAll call should NOT bail out early.
     mockDequeueNextPending.mockResolvedValueOnce(makeEntry({ id: 'e2' })).mockResolvedValue(null);
     mockBuildResponsesPayload.mockReturnValue([]);
 
-    await SyncQueueService.processAll(); // should NOT bail out early
+    await SyncQueueService.processAll();
     expect(mockMarkSynced).toHaveBeenCalledWith('e2');
+  });
+});
+
+// ─── processEntry: S2 crop extraction ────────────────────────────────────────
+
+describe('processEntry — S2 crop extraction', () => {
+  it('calls extractCrops and saves crops to sessionCropsStorage after syncing an S2 survey', async () => {
+    const entry = makeEntry();
+    const crops = [{ cropId: 'crop-1', name: 'café' }];
+
+    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
+    mockLoadDraft.mockResolvedValue(makeDraft('inst-s2'));
+    mockInstrumentCacheGet.mockResolvedValue(makeInstrument({ code: 'S2' }));
+    mockBuildResponsesPayload.mockReturnValue([{ surveyId: 'survey-1', questionId: 'q1', textValue: 'x' }]);
+    mockExtractCrops.mockResolvedValue({ crops });
+
+    await SyncQueueService.processAll();
+
+    expect(mockExtractCrops).toHaveBeenCalledWith('survey-1');
+    expect(mockSessionCropsSave).toHaveBeenCalledWith('session-1', crops);
+  });
+
+  it('does not call sessionCropsStorage.save when entry has no campaignSessionId', async () => {
+    const entry = makeEntry({ campaignSessionId: undefined });
+    const crops = [{ cropId: 'crop-1', name: 'café' }];
+
+    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
+    mockLoadDraft.mockResolvedValue(makeDraft('inst-s2'));
+    mockInstrumentCacheGet.mockResolvedValue(makeInstrument({ code: 'S2' }));
+    mockBuildResponsesPayload.mockReturnValue([{ surveyId: 'survey-1', questionId: 'q1', textValue: 'x' }]);
+    mockExtractCrops.mockResolvedValue({ crops });
+
+    await SyncQueueService.processAll();
+
+    expect(mockExtractCrops).toHaveBeenCalledWith('survey-1');
+    expect(mockSessionCropsSave).not.toHaveBeenCalled();
+  });
+
+  it('does not call extractCrops for non-S2 instruments', async () => {
+    const entry = makeEntry();
+
+    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
+    mockLoadDraft.mockResolvedValue(makeDraft());
+    mockInstrumentCacheGet.mockResolvedValue(makeInstrument()); // no code property
+    mockBuildResponsesPayload.mockReturnValue([{ surveyId: 'survey-1', questionId: 'q1', textValue: 'x' }]);
+
+    await SyncQueueService.processAll();
+
+    expect(mockExtractCrops).not.toHaveBeenCalled();
+    expect(mockSessionCropsSave).not.toHaveBeenCalled();
   });
 });
 
@@ -366,15 +447,11 @@ describe('processEntry — ServerError', () => {
 
 describe('resetNetworkFailures', () => {
   it('allows processAll to run again after resetting the failure counter', async () => {
-    // Indirectly test: if we had 5 failures and then call reset, processAll should run
-    const entry = makeEntry();
-    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
     mockLoadDraft.mockResolvedValue(makeDraft());
     mockInstrumentCacheGet.mockResolvedValue(makeInstrument());
     mockBuildResponsesPayload.mockReturnValue([{ surveyId: 'survey-1', questionId: 'q1' }]);
     mockSubmitResponsesBatch.mockRejectedValue(new NetworkError());
 
-    // Accumulate failures manually (5 rounds)
     for (let i = 0; i < 5; i++) {
       mockDequeueNextPending.mockResolvedValueOnce(makeEntry({ id: `fail-${i}` }));
       await SyncQueueService.processAll();

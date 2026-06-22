@@ -65,7 +65,9 @@ export default function CampaignListScreen() {
             <Text style={styles.progressPhase}>
               {downloadProgress.phase === "campaigns"
                 ? "Descargando campañas"
-                : "Descargando instrumentos"}
+                : downloadProgress.phase === "instruments"
+                ? "Descargando instrumentos"
+                : "Guardando encuestados"}
             </Text>
             <Text style={styles.progressCount}>
               {downloadProgress.done}/{downloadProgress.total}

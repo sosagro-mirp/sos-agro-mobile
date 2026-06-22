@@ -41,5 +41,10 @@ yarn-error.*
 # generated native folders
 /ios
 /android
-.agents
+
+# Claude Code agent internals
+.agents/
 skills-lock.json
+
+# Internal testing docs
+docs/testing/

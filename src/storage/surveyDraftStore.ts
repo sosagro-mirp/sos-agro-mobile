@@ -7,6 +7,7 @@ export interface SurveyDraft {
   surveyId: string;
   instrumentId: string;
   campaignSessionId?: string;
+  farmerId?: string;
   answers: Record<string, InstrumentDraftAnswer>;
   updatedAt: Date;
 }
@@ -16,12 +17,16 @@ export const surveyDraftStore = {
     surveyId: string;
     instrumentId: string;
     campaignSessionId?: string;
+    farmerId?: string;
   }): Promise<void> {
     const now = new Date();
     await db.insert(surveys).values({
       id: params.surveyId,
       instrumentId: params.instrumentId,
       campaignSessionId: params.campaignSessionId ?? null,
+      // Only include farmerId when present — omitting it entirely avoids
+      // referencing the column on devices where m0001 hasn't applied yet.
+      ...(params.farmerId != null ? { farmerId: params.farmerId } : {}),
       status: 'draft',
       createdAt: now,
       updatedAt: now,
@@ -147,6 +152,7 @@ export const surveyDraftStore = {
       surveyId: survey.id,
       instrumentId: survey.instrumentId,
       campaignSessionId: survey.campaignSessionId ?? undefined,
+      farmerId: survey.farmerId ?? undefined,
       answers,
       updatedAt: survey.updatedAt,
     };
