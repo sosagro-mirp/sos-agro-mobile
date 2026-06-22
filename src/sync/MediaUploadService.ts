@@ -1,4 +1,4 @@
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { mediaUploadQueueStorage } from '../storage/mediaUploadQueueStorage';
 import { httpClient, NetworkError } from '../api/httpClient';
 import { endpoints } from '../api/endpoints';
