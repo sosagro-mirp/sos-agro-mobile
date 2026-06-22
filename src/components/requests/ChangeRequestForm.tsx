@@ -14,6 +14,7 @@ import { changeRequestStorage } from '../../storage/changeRequestStorage';
 import { useChangeRequestStore } from '../../store/useChangeRequestStore';
 import { Fonts } from '../../theme/fonts';
 import { generateUUID } from '../../lib/generateLocalId';
+import { SyncQueueService } from '../../sync/SyncQueueService';
 
 interface Props {
   farmerId?: string;
@@ -49,6 +50,7 @@ export const ChangeRequestForm: React.FC<Props> = ({ farmerId, farmerName, onSub
 
       setDescription('');
       setShowSuccess(true);
+      SyncQueueService.processAll().catch(console.error);
     } finally {
       setSaving(false);
     }
