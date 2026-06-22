@@ -35,6 +35,10 @@ export const endpoints = {
   surveyOverwrite: '/api/surveys/overwrite',
   surveySkipStep: '/api/surveys/skip-step',
 
+  // Media attachments
+  mediaAttachmentsPresignedUrl: '/api/media-attachments/presigned-url',
+  mediaAttachmentsConfirm: (id: string) => `/api/media-attachments/${id}/confirm`,
+
   // Telemetry
   telemetrySync: '/api/telemetry/sync',
 

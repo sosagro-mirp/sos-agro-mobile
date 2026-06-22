@@ -30,13 +30,39 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         foregroundImage: './assets/android-icon-foreground.png',
         backgroundImage: './assets/android-icon-background.png',
       },
-      permissions: ['INTERNET', 'ACCESS_NETWORK_STATE'],
+      permissions: [
+        'INTERNET',
+        'ACCESS_NETWORK_STATE',
+        'CAMERA',
+        'MICROPHONE',
+        'READ_MEDIA_IMAGES',
+        'READ_MEDIA_VIDEO',
+        'READ_MEDIA_AUDIO',
+        'READ_EXTERNAL_STORAGE',
+      ],
       versionCode,
     },
     web: {
       favicon: './assets/favicon.png',
     },
-    plugins: ['expo-router', 'expo-sqlite', 'expo-background-task'],
+    plugins: [
+      'expo-router',
+      'expo-sqlite',
+      'expo-background-task',
+      [
+        'expo-image-picker',
+        {
+          photosPermission: 'SOSAgro necesita acceso a tu galería para adjuntar imágenes a las encuestas.',
+          cameraPermission: 'SOSAgro necesita acceso a la cámara para fotografiar cultivos y evidencias.',
+        },
+      ],
+      [
+        'expo-av',
+        {
+          microphonePermission: 'SOSAgro necesita acceso al micrófono para grabar respuestas de voz en campo.',
+        },
+      ],
+    ],
     extra: {
       apiBaseUrl: process.env.EXPO_PUBLIC_API_BASE_URL,
     },

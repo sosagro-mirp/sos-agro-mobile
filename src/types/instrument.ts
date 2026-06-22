@@ -6,6 +6,10 @@ export type QuestionTypeName =
   | "multiple_choice"
   | "likert"
   | "compliance"
+  | "image"
+  | "voice_recording"
+  | "document"
+  | "video"
   | (string & {});
 
 export interface InstrumentType {
@@ -41,10 +45,13 @@ export interface InstrumentDraftAnswer {
   numericValue?: number;
   booleanValue?: boolean;
   otherText?: string;
+  mediaLocalPath?: string;
+  mimeType?: string;
 }
 
 export interface CreateResponsePayload extends InstrumentDraftAnswer {
   surveyId: string;
+  attachmentId?: string;
 }
 
 export interface InstrumentSection {

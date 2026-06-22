@@ -20,6 +20,7 @@ import { endpoints } from '../api/endpoints';
 import { logger } from '../lib/logger';
 import { sessionCropsStorage } from '../storage/sessionCropsStorage';
 import { captureError } from '../lib/sentry';
+import { MediaUploadService } from './MediaUploadService';
 import { changeRequestStorage } from '../storage/changeRequestStorage';
 import { postChangeRequest, fetchMyResolved } from '../api/changeRequests';
 import { useChangeRequestStore } from '../store/useChangeRequestStore';
@@ -74,6 +75,9 @@ class SyncQueueServiceClass {
         logger.error('[Sync] pullResolvedChangeRequests failed, continuing anyway', err);
       }
     } finally {
+      // Reset any entries left in_flight (e.g., deferred due to unresolved session)
+      // so they're retried on the next sync run.
+      await syncQueueStorage.resetInFlightToRetry();
       this.isProcessing = false;
       setSyncingId(null);
       markSyncCompleted();
@@ -174,6 +178,14 @@ class SyncQueueServiceClass {
     await syncQueueStorage.markInFlight(entry.id);
 
     try {
+      // If the campaign session is still provisional (resolveLocalSessions failed earlier),
+      // leave the entry in_flight so this run's dequeue loop skips it.
+      // resetInFlightToRetry() in the finally block resets it to pending for the next sync run.
+      if (entry.campaignSessionId && isLocalId(entry.campaignSessionId)) {
+        logger.warn(`[Sync] campaign session not yet resolved for entry ${entry.id}, deferring`);
+        return;
+      }
+
       // If the survey was created offline, it doesn't exist on the backend yet.
       // Create it now to obtain a real surveyId before sending responses.
       let realSurveyId = entry.surveyId;
@@ -312,8 +324,10 @@ class SyncQueueServiceClass {
     const instrument = await instrumentCacheStorage.get(draft.instrumentId);
     if (!instrument) return [];
 
+    const attachmentIds = await MediaUploadService.processPendingForSurvey(entry.surveyId);
+
     const flattenedQuestions = flattenSections(instrument.sections);
-    return buildResponsesPayload(realSurveyId, flattenedQuestions, draft.answers);
+    return buildResponsesPayload(realSurveyId, flattenedQuestions, draft.answers, attachmentIds);
   }
 
   private async handleNetworkError(entry: SyncQueueEntry): Promise<void> {

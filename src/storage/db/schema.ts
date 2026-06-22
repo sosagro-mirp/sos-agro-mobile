@@ -24,6 +24,25 @@ export const responses = sqliteTable('responses', {
   numericValue: real('numeric_value'),
   booleanValue: integer('boolean_value', { mode: 'boolean' }),
   otherText: text('other_text'),
+  mediaLocalPath: text('media_local_path'), // path local del archivo capturado offline
+  mimeType: text('mime_type'),
+});
+
+export const mediaUploadQueue = sqliteTable('media_upload_queue', {
+  id: text('id').primaryKey(),
+  surveyId: text('survey_id').notNull(),
+  questionId: text('question_id').notNull(),
+  attachmentId: text('attachment_id'), // UUID retornado por el backend al crear el placeholder
+  localPath: text('local_path').notNull(),
+  mimeType: text('mime_type').notNull(),
+  fileSizeBytes: integer('file_size_bytes'),
+  originalFilename: text('original_filename'),
+  status: text('status', { enum: ['pending', 'in_flight', 'uploaded', 'failed'] })
+    .notNull()
+    .default('pending'),
+  attempts: integer('attempts').notNull().default(0),
+  errorDetail: text('error_detail'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
 });
 
 export const syncQueue = sqliteTable('sync_queue', {
