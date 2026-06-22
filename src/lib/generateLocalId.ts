@@ -20,6 +20,8 @@ function uuidv4(): string {
   return `${p1}-${p2}-${p3}-${p4}-${p5}`;
 }
 
+export { uuidv4 as generateUUID };
+
 export function generateLocalId(prefix: 'session' | 'survey' | 'farmer'): string {
   return `local_${prefix}_${uuidv4()}`;
 }

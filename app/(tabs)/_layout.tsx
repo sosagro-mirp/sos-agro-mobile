@@ -1,5 +1,5 @@
 import { Tabs } from "expo-router";
-import { Map, FileText, RefreshCw } from "lucide-react-native";
+import { Map, FileText, RefreshCw, MessageSquare } from "lucide-react-native";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuthStore } from "../../src/store/useAuthStore";
@@ -96,6 +96,15 @@ export default function TabsLayout() {
             title: "Sincronización",
             tabBarIcon: ({ color, size }) => (
               <RefreshCw size={size} color={color} />
+            ),
+          }}
+        />
+        <Tabs.Screen
+          name="requests/index"
+          options={{
+            title: "Solicitudes",
+            tabBarIcon: ({ color, size }) => (
+              <MessageSquare size={size} color={color} />
             ),
           }}
         />

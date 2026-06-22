@@ -20,6 +20,9 @@ import { endpoints } from '../api/endpoints';
 import { logger } from '../lib/logger';
 import { sessionCropsStorage } from '../storage/sessionCropsStorage';
 import { captureError } from '../lib/sentry';
+import { changeRequestStorage } from '../storage/changeRequestStorage';
+import { postChangeRequest, fetchMyResolved } from '../api/changeRequests';
+import { useChangeRequestStore } from '../store/useChangeRequestStore';
 
 const MAX_CONSECUTIVE_NETWORK_FAILURES = 5;
 const BACKOFF_BASE_MS = 1000;
@@ -45,6 +48,13 @@ class SyncQueueServiceClass {
         logger.error('[Sync] resolveLocalSessions failed, continuing anyway', err);
       }
 
+      // Flush pending change requests before processing surveys.
+      try {
+        await this.flushPendingChangeRequests();
+      } catch (err) {
+        logger.error('[Sync] flushPendingChangeRequests failed, continuing anyway', err);
+      }
+
       let entry = await syncQueueStorage.dequeueNextPending();
 
       while (entry) {
@@ -53,11 +63,56 @@ class SyncQueueServiceClass {
         await refreshPendingCount();
         entry = await syncQueueStorage.dequeueNextPending();
       }
+      // Pull resolved change requests after the survey loop.
+      try {
+        const { lastSyncAt } = useSyncStatusStore.getState();
+        // Fall back to epoch when lastSyncAt is null (first sync or after app restart)
+        // so we always catch any resolved tickets.
+        const since = lastSyncAt ?? new Date(0);
+        await this.pullResolvedChangeRequests(since);
+      } catch (err) {
+        logger.error('[Sync] pullResolvedChangeRequests failed, continuing anyway', err);
+      }
     } finally {
       this.isProcessing = false;
       setSyncingId(null);
       markSyncCompleted();
       await refreshPendingCount();
+    }
+  }
+
+  private async flushPendingChangeRequests(): Promise<void> {
+    const pending = await changeRequestStorage.listPendingSync();
+    if (pending.length === 0) return;
+
+    for (const cr of pending) {
+      await postChangeRequest({
+        description: cr.description,
+        farmerId: cr.farmerId,
+        localId: cr.id,
+      });
+      await changeRequestStorage.markSynced(cr.id);
+      logger.info(`[Sync] change request ${cr.id} synced`);
+    }
+
+    await useChangeRequestStore.getState().loadAll();
+  }
+
+  private async pullResolvedChangeRequests(since: Date): Promise<void> {
+    const resolved = await fetchMyResolved(since);
+    if (resolved.length === 0) return;
+
+    let newCount = 0;
+    for (const item of resolved) {
+      if (!item.localId) continue;
+      await changeRequestStorage.markResolved(item.localId, new Date(item.resolvedAt));
+      newCount++;
+    }
+
+    if (newCount > 0) {
+      useChangeRequestStore.getState().setHasNewResolved(true);
+      await useChangeRequestStore.getState().loadAll();
+      logger.info(`[Sync] ${newCount} change request(s) marked as resolved`);
     }
   }
 
