@@ -30,16 +30,15 @@ export function VoiceRecordingInput({ questionId, value, onChange }: Props): Rea
 
       await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
 
-      const rec = new Audio.Recording();
-      await rec.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      const { recording: rec } = await Audio.Recording.createAsync(
+        Audio.RecordingOptionsPresets.HIGH_QUALITY,
+        (status) => {
+          if (status.isRecording) {
+            setDuration(Math.floor((status.durationMillis ?? 0) / 1000));
+          }
+        },
+      );
 
-      rec.setOnRecordingStatusUpdate((status) => {
-        if (status.isRecording) {
-          setDuration(Math.floor((status.durationMillis ?? 0) / 1000));
-        }
-      });
-
-      await rec.startAsync();
       setRecording(rec);
       setState('recording');
     } catch {
