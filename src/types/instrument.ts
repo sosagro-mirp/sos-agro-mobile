@@ -29,6 +29,7 @@ export interface InstrumentQuestion {
   text: string;
   isRequired: boolean;
   isSelectionCriteria?: boolean;
+  isKeyQuestion?: boolean;
   order: number;
   systemField?: string | null;
   type: InstrumentType;
