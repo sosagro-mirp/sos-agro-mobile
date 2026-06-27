@@ -22,6 +22,8 @@ export interface InstrumentOption {
   text: string;
   value: string | number | boolean | null;
   isOther?: boolean;
+  metadataId?: string | null;
+  departmentId?: string | null;
 }
 
 export interface InstrumentQuestion {
