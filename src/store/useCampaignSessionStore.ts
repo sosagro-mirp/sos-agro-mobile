@@ -1,9 +1,7 @@
 import { create } from 'zustand';
-import { secureStorage } from '../storage/secureStorage';
 import type {
   CampaignRender,
   CampaignSessionResponse,
-  LastFarmerResult,
   NextStepResponse,
 } from '../types';
 import type { LocalFarmerDraft } from '../lib/extractFarmerLocally';
@@ -37,9 +35,6 @@ interface CampaignSessionState {
   s1SurveyId: string | null;
   s2SurveyId: string | null;
 
-  // Last identified farmer (persisted in SecureStorage)
-  lastFarmer: LastFarmerResult;
-
   // Offline session tracking
   isOfflineSession: boolean;
   localSessionId: string | null;
@@ -60,9 +55,6 @@ interface CampaignSessionState {
   setInjectionS2SurveyId: (surveyId: string) => void;
   completeS1Injection: (farmerId: string, farmerName: string) => void;
   completeS2Injection: () => void;
-  setLastFarmer: (farmer: LastFarmerResult) => void;
-  loadLastFarmer: () => Promise<void>;
-
   // Offline session actions
   applyOfflineSession: (localSessionId: string) => void;
   resolveSession: (realSessionId: string) => void;
@@ -82,7 +74,6 @@ const initialState = {
   injectionPhase: 'none' as InjectionPhase,
   s1SurveyId: null,
   s2SurveyId: null,
-  lastFarmer: null as LastFarmerResult,
   isOfflineSession: false,
   localSessionId: null,
   localFarmerId: null,
@@ -92,8 +83,7 @@ export const useCampaignSessionStore = create<CampaignSessionState>((set, get) =
   ...initialState,
 
   startSession(campaign) {
-    const { lastFarmer } = get();
-    set({ ...initialState, campaign, phase: 'pre_survey', lastFarmer });
+    set({ ...initialState, campaign, phase: 'pre_survey' });
   },
 
   applySessionResponse(response) {
@@ -164,16 +154,6 @@ export const useCampaignSessionStore = create<CampaignSessionState>((set, get) =
 
   completeS2Injection() {
     set({ injectionPhase: 'none' });
-  },
-
-  setLastFarmer(farmer) {
-    set({ lastFarmer: farmer });
-    secureStorage.saveLastFarmer(farmer).catch(console.error);
-  },
-
-  async loadLastFarmer() {
-    const farmer = await secureStorage.getLastFarmer();
-    set({ lastFarmer: farmer });
   },
 
   applyOfflineSession(localSessionId) {

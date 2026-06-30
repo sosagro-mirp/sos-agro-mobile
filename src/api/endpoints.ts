@@ -27,9 +27,6 @@ export const endpoints = {
   // Instruments by code
   instrumentByCode: (code: string) => `/api/instruments/by-code/${code}`,
 
-  // Last farmer for current user
-  campaignSessionLastFarmer: '/api/campaign-sessions/last-farmer',
-
   // Duplicate survey detection
   surveyCheckDuplicate: '/api/surveys/check-duplicate',
   surveyOverwrite: '/api/surveys/overwrite',

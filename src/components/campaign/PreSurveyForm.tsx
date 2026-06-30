@@ -10,22 +10,18 @@ import {
 import { Fonts } from "../../theme/fonts";
 import { searchFarmers } from "../../api/farmers";
 import { farmerCacheStorage } from "../../storage/farmerCache";
-import type { FarmerSearchResult, LastFarmerResult } from "../../types";
+import type { FarmerSearchResult } from "../../types";
 
 interface PreSurveyFormProps {
-  lastFarmer: LastFarmerResult;
   isOnline: boolean;
   onSearchSelect: (farmerId: string, farmerName: string, farmer?: FarmerSearchResult) => void;
   onNewFarmer: () => void;
-  onContinueLast: (farmerId: string, farmerName: string) => void;
 }
 
 export const PreSurveyForm: React.FC<PreSurveyFormProps> = ({
-  lastFarmer,
   isOnline,
   onSearchSelect,
   onNewFarmer,
-  onContinueLast,
 }) => {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<FarmerSearchResult[]>([]);
@@ -137,19 +133,6 @@ export const PreSurveyForm: React.FC<PreSurveyFormProps> = ({
         </View>
       ) : null}
 
-      {lastFarmer ? (
-        <Pressable
-          style={[styles.actionButton, styles.actionButtonLast]}
-          onPress={() => {
-            const fullName = [lastFarmer.name, lastFarmer.lastName].filter(Boolean).join(" ");
-            onContinueLast(lastFarmer.farmerId, fullName);
-          }}
-        >
-          <Text style={[styles.actionButtonText, styles.actionButtonLastText]}>
-            Continuar con {lastFarmer.name}
-          </Text>
-        </Pressable>
-      ) : null}
     </View>
   );
 };
@@ -168,25 +151,6 @@ const styles = StyleSheet.create({
     fontSize: 18,
     color: "#111827",
     marginBottom: 4,
-  },
-  actionButton: {
-    backgroundColor: GREEN,
-    borderRadius: 12,
-    paddingVertical: 18,
-    alignItems: "center",
-  },
-  actionButtonLast: {
-    backgroundColor: "#fff",
-    borderWidth: 1.5,
-    borderColor: GREEN,
-  },
-  actionButtonText: {
-    fontFamily: Fonts.semiBold,
-    fontSize: 16,
-    color: "#fff",
-  },
-  actionButtonLastText: {
-    color: GREEN,
   },
   offlineSearchHint: {
     fontFamily: Fonts.regular,

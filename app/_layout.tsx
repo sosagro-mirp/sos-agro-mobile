@@ -11,7 +11,6 @@ import {
 } from "@expo-google-fonts/jetbrains-mono";
 import * as SplashScreen from "expo-splash-screen";
 import { useAuthStore } from "../src/store/useAuthStore";
-import { useCampaignSessionStore } from "../src/store/useCampaignSessionStore";
 import { useCachedInstrumentsStore } from "../src/store/useCachedInstrumentsStore";
 import { runMigrations } from "../src/storage/db/db";
 import { syncQueueStorage } from "../src/storage/syncQueue";
@@ -61,7 +60,6 @@ function AuthGuard() {
 
 export default function RootLayout() {
   const { isRestoring, restoreSession } = useAuthStore();
-  const { loadLastFarmer } = useCampaignSessionStore();
   const loadInstrumentCache = useCachedInstrumentsStore((s) => s.loadFromCache);
   const [dbReady, setDbReady] = useState(false);
 
@@ -78,7 +76,6 @@ export default function RootLayout() {
       .then(async () => {
         setDbReady(true);
         await restoreSession();
-        loadLastFarmer().catch(console.error);
         loadInstrumentCache().catch(console.error);
       })
       .catch((err) => { captureError(err); console.error(err); });

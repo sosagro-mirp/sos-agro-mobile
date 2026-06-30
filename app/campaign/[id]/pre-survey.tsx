@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { StyleSheet, Text, View, Pressable } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -26,18 +26,12 @@ export default function PreSurveyScreen() {
     applyOfflineSession,
     setSelectedFarmer,
     setNewFarmerMode,
-    loadLastFarmer,
-    lastFarmer,
   } = useCampaignSessionStore();
   const { isOnline } = useSyncStatusStore();
   const { user } = useAuthStore();
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    loadLastFarmer();
-  }, []);
 
   if (!campaign) {
     return (
@@ -146,10 +140,6 @@ export default function PreSurveyScreen() {
     await startSession_({ isNew: true });
   };
 
-  const handleContinueLast = async (farmerId: string, farmerName: string) => {
-    await startSession_({ farmerId, farmerName });
-  };
-
   return (
     <SafeAreaView style={styles.root}>
       <OfflineBanner />
@@ -175,11 +165,9 @@ export default function PreSurveyScreen() {
         </View>
       ) : (
         <PreSurveyForm
-          lastFarmer={lastFarmer}
           isOnline={isOnline}
           onSearchSelect={handleSearchSelect}
           onNewFarmer={handleNewFarmer}
-          onContinueLast={handleContinueLast}
         />
       )}
     </SafeAreaView>

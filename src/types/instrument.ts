@@ -139,13 +139,6 @@ export interface ExtractCropsResult {
   crops: CropSummary[];
 }
 
-export type LastFarmerResult = {
-  farmerId: string;
-  name: string;
-  lastName: string | null;
-  farm?: { name: string };
-} | null;
-
 export interface DuplicateCheckResult {
   hasDuplicate: boolean;
   surveyId?: string;

@@ -239,12 +239,6 @@ export default function OrchestratorScreen() {
           await SyncQueueService.processSurveyNow(s1SurveyId);
           const { farmer } = await extractFarmer(s1SurveyId);
           store.completeS1Injection(farmer.farmerId, farmer.name);
-          store.setLastFarmer({
-            farmerId: farmer.farmerId,
-            name: farmer.name,
-            lastName: farmer.lastName,
-            ...(farmer.farm ? { farm: { name: farmer.farm.name } } : {}),
-          });
           await injectInstrument('S2');
         } else {
           // Offline: extract farmer locally from S1 responses
@@ -262,12 +256,6 @@ export default function OrchestratorScreen() {
             }
             store.applyLocalFarmer(draft);
             store.completeS1Injection(draft.farmerId, draft.name);
-            store.setLastFarmer({
-              farmerId: draft.farmerId,
-              name: draft.name,
-              lastName: draft.lastName,
-              ...(draft.farmName ? { farm: { name: draft.farmName } } : {}),
-            });
             await injectInstrument('S2');
           } else {
             setScreenState('offline_extraction_pending');
