@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Alert, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Camera, Images, X } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import type { InstrumentDraftAnswer } from '../../types/instrument';
@@ -76,10 +77,12 @@ export function ImageCaptureInput({ questionId, value, onChange }: Props): React
         <Image source={{ uri: localUri }} style={styles.preview} resizeMode="cover" />
         <View style={styles.actions}>
           <TouchableOpacity style={styles.secondaryButton} onPress={pickFromCamera}>
-            <Text style={styles.secondaryButtonText}>📷 Reemplazar</Text>
+            <Camera size={16} color="#374151" />
+            <Text style={styles.secondaryButtonText}>Reemplazar</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.secondaryButton} onPress={removeImage}>
-            <Text style={[styles.secondaryButtonText, styles.deleteText]}>✕ Eliminar</Text>
+            <X size={16} color="#DC2626" />
+            <Text style={[styles.secondaryButtonText, styles.deleteText]}>Eliminar</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -89,11 +92,12 @@ export function ImageCaptureInput({ questionId, value, onChange }: Props): React
   return (
     <View style={styles.container}>
       <TouchableOpacity style={styles.primaryButton} onPress={pickFromCamera}>
-        <Text style={styles.buttonIcon}>📷</Text>
+        <Camera size={22} color="#FFFFFF" />
         <Text style={styles.primaryButtonText}>Tomar foto</Text>
       </TouchableOpacity>
       <TouchableOpacity style={styles.secondaryButton} onPress={pickFromGallery}>
-        <Text style={styles.secondaryButtonText}>🖼 Elegir de galería</Text>
+        <Images size={16} color="#374151" />
+        <Text style={styles.secondaryButtonText}>Elegir de galería</Text>
       </TouchableOpacity>
     </View>
   );
@@ -116,16 +120,18 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     gap: 10,
   },
-  buttonIcon: { fontSize: 22 },
   primaryButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
   actions: { flexDirection: 'row', gap: 10 },
   secondaryButton: {
     flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 1.5,
     borderColor: '#D1D5DB',
     borderRadius: 10,
     paddingVertical: 12,
-    alignItems: 'center',
+    gap: 6,
   },
   secondaryButtonText: { fontSize: 14, color: '#374151' },
   deleteText: { color: '#DC2626' },
