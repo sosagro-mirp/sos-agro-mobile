@@ -1,5 +1,5 @@
-import React from "react";
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import React, { useState } from "react";
+import { StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { Fonts } from "../../theme/fonts";
 import type { InstrumentDraftAnswer, InstrumentOption } from "../../types/instrument";
 
@@ -7,6 +7,7 @@ interface Props {
   questionId: string;
   options: InstrumentOption[];
   value: string | undefined;
+  otherText?: string;
   booleanValue?: boolean;
   onChange: (answer: InstrumentDraftAnswer) => void;
 }
@@ -15,32 +16,59 @@ export function SingleChoiceList({
   questionId,
   options,
   value,
+  otherText,
   onChange,
 }: Props): React.JSX.Element {
+  const [otherFocused, setOtherFocused] = useState(false);
+
   function handlePress(option: InstrumentOption): void {
-    onChange({ questionId, optionId: option.optionId });
+    if (option.isOther) {
+      onChange({ questionId, optionId: option.optionId, otherText: otherText ?? "" });
+    } else {
+      onChange({ questionId, optionId: option.optionId, otherText: undefined });
+    }
+  }
+
+  function handleOtherText(text: string): void {
+    onChange({ questionId, optionId: value, otherText: text });
   }
 
   return (
     <View style={styles.container}>
       {options.map((option) => {
         const selected = value === option.optionId;
+        const showOtherInput = option.isOther === true && selected;
         return (
-          <TouchableOpacity
-            key={option.optionId}
-            style={[styles.row, selected && styles.rowSelected]}
-            onPress={() => handlePress(option)}
-            activeOpacity={0.7}
-            accessibilityRole="radio"
-            accessibilityState={{ checked: selected }}
-          >
-            <View style={[styles.radio, selected && styles.radioSelected]}>
-              {selected && <View style={styles.radioDot} />}
-            </View>
-            <Text style={[styles.label, selected && styles.labelSelected]}>
-              {option.text}
-            </Text>
-          </TouchableOpacity>
+          <View key={option.optionId}>
+            <TouchableOpacity
+              style={[styles.row, selected && styles.rowSelected]}
+              onPress={() => handlePress(option)}
+              activeOpacity={0.7}
+              accessibilityRole="radio"
+              accessibilityState={{ checked: selected }}
+            >
+              <View style={[styles.radio, selected && styles.radioSelected]}>
+                {selected && <View style={styles.radioDot} />}
+              </View>
+              <Text style={[styles.label, selected && styles.labelSelected]}>
+                {option.text}
+              </Text>
+            </TouchableOpacity>
+            {showOtherInput && (
+              <TextInput
+                style={[styles.otherInput, otherFocused && styles.otherInputFocused]}
+                value={otherText ?? ""}
+                onChangeText={handleOtherText}
+                onFocus={() => setOtherFocused(true)}
+                onBlur={() => setOtherFocused(false)}
+                placeholder="Especifica aquí..."
+                placeholderTextColor="#9CA3AF"
+                multiline
+                numberOfLines={2}
+                textAlignVertical="top"
+              />
+            )}
+          </View>
         );
       })}
     </View>
@@ -99,5 +127,22 @@ const styles = StyleSheet.create({
   labelSelected: {
     fontFamily: Fonts.semiBold,
     color: "#14532D",
+  },
+  otherInput: {
+    fontFamily: Fonts.regular,
+    fontSize: 18,
+    lineHeight: 26,
+    color: "#111827",
+    backgroundColor: "#FFFFFF",
+    borderWidth: 2,
+    borderColor: "#D1D5DB",
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    minHeight: 72,
+    marginTop: 4,
+  },
+  otherInputFocused: {
+    borderColor: "#1B6B3A",
   },
 });

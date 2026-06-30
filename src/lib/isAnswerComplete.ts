@@ -28,7 +28,14 @@ export function isAnswerComplete(
       }
       return true;
     }
-    case "single_choice":
+    case "single_choice": {
+      if (!answer.optionId) return false;
+      const otherOption = question.options.find((o) => o.isOther);
+      if (otherOption && answer.optionId === otherOption.optionId) {
+        return Boolean(answer.otherText?.trim());
+      }
+      return true;
+    }
     case "likert":
       return Boolean(answer.optionId);
     default:

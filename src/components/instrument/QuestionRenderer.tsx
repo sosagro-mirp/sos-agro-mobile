@@ -123,6 +123,7 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
           questionId={questionId}
           options={displayOptions}
           value={answer?.optionId}
+          otherText={answer?.otherText}
           onChange={onChange}
         />
       );

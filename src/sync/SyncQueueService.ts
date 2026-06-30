@@ -12,6 +12,7 @@ import { markSessionAsSynced, createCampaignSession } from '../api/campaignSessi
 import { extractFarmer, extractCrops } from '../api/farmers';
 import { buildResponsesPayload } from '../lib/buildResponsesPayload';
 import { flattenSections } from '../lib/flattenSections';
+import { resolveOtherOptions } from '../lib/resolveOtherOptions';
 import { isLocalId } from '../lib/isLocalId';
 import { useSyncStatusStore } from '../store/useSyncStatusStore';
 import { useCampaignSessionStore } from '../store/useCampaignSessionStore';
@@ -327,7 +328,25 @@ class SyncQueueServiceClass {
     const attachmentIds = await MediaUploadService.processPendingForSurvey(entry.surveyId);
 
     const flattenedQuestions = flattenSections(instrument.sections);
-    return buildResponsesPayload(realSurveyId, flattenedQuestions, draft.answers, attachmentIds);
+
+    const resolvedAnswers = await resolveOtherOptions(flattenedQuestions, draft.answers);
+
+    // Persist resolved answers so a retry doesn't create the same dynamic option twice.
+    const hasChanges = Object.keys(resolvedAnswers).some(
+      (qId) => resolvedAnswers[qId] !== draft.answers[qId],
+    );
+    if (hasChanges) {
+      await surveyDraftStore.saveMultipleAnswers(entry.surveyId, resolvedAnswers);
+      for (const [qId, answer] of Object.entries(resolvedAnswers)) {
+        if (answer !== draft.answers[qId]) {
+          logger.info(
+            `[Sync] resolved other option — questionId: ${qId}, newOptionId: ${answer.optionId}`,
+          );
+        }
+      }
+    }
+
+    return buildResponsesPayload(realSurveyId, flattenedQuestions, resolvedAnswers, attachmentIds);
   }
 
   private async handleNetworkError(entry: SyncQueueEntry): Promise<void> {
