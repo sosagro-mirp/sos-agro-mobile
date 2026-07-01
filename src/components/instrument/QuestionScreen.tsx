@@ -7,6 +7,8 @@ import {
   TouchableOpacity,
   Modal,
   Pressable,
+  KeyboardAvoidingView,
+  Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -104,66 +106,72 @@ export const QuestionScreen: React.FC<QuestionScreenProps> = ({
     <SafeAreaView style={styles.root} edges={["top", "bottom"]}>
       <OfflineBanner />
 
-      {/* 1. Header: marca + botón salir */}
-      <View style={styles.header}>
-        <View style={styles.brand}>
-          <Text style={styles.brandTitle}>SosAgro 4.C</Text>
-          <Text style={styles.brandSubtitle}>Plataforma de Caracterización Agrícola</Text>
-        </View>
-        <TouchableOpacity
-          onPress={() => setShowExitConfirm(true)}
-          style={styles.exitButton}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          accessibilityLabel="Salir de la encuesta"
-        >
-          <Text style={styles.exitIcon}>✕</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* 2. Sección */}
-      <View style={styles.sectionCard}>
-        <View style={styles.sectionAccent} />
-        <Text style={styles.sectionName} numberOfLines={2}>
-          {currentItem.sectionName}
-        </Text>
-      </View>
-
-      {/* 3. Pregunta + input */}
-      {needsOwnScroll ? (
-        <View style={[styles.scrollView, styles.ownScrollContainer]}>
-          {questionContent}
-        </View>
-      ) : (
-        <ScrollView
-          style={styles.scrollView}
-          contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          {questionContent}
-        </ScrollView>
-      )}
-
-      {/* 4. Barra de progreso */}
-      <View style={styles.progressContainer}>
-        <ProgressBar current={currentIndex + 1} total={total} />
-      </View>
-
-      {/* 5. Footer: navegación */}
-      <View style={styles.footer}>
-        {!isFirst && (
-          <View style={styles.prevButtonWrapper}>
-            <SecondaryButton label="Anterior" onPress={handlePrev} />
+      <KeyboardAvoidingView
+        style={styles.kavContainer}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "android" ? -24 : 0}
+      >
+        {/* 1. Header: marca + botón salir */}
+        <View style={styles.header}>
+          <View style={styles.brand}>
+            <Text style={styles.brandTitle}>SosAgro 4.C</Text>
+            <Text style={styles.brandSubtitle}>Plataforma de Caracterización Agrícola</Text>
           </View>
-        )}
-        <View style={[styles.nextButtonWrapper, isFirst && styles.nextButtonFull]}>
-          <PrimaryButton
-            label={isLast ? "Finalizar" : "Siguiente"}
-            onPress={handleNext}
-            disabled={!canAdvance()}
-          />
+          <TouchableOpacity
+            onPress={() => setShowExitConfirm(true)}
+            style={styles.exitButton}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityLabel="Salir de la encuesta"
+          >
+            <Text style={styles.exitIcon}>✕</Text>
+          </TouchableOpacity>
         </View>
-      </View>
+
+        {/* 2. Sección */}
+        <View style={styles.sectionCard}>
+          <View style={styles.sectionAccent} />
+          <Text style={styles.sectionName} numberOfLines={2}>
+            {currentItem.sectionName}
+          </Text>
+        </View>
+
+        {/* 3. Pregunta + input */}
+        {needsOwnScroll ? (
+          <View style={[styles.scrollView, styles.ownScrollContainer]}>
+            {questionContent}
+          </View>
+        ) : (
+          <ScrollView
+            style={styles.scrollView}
+            contentContainerStyle={styles.scrollContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            {questionContent}
+          </ScrollView>
+        )}
+
+        {/* 4. Barra de progreso */}
+        <View style={styles.progressContainer}>
+          <ProgressBar current={currentIndex + 1} total={total} />
+        </View>
+
+        {/* 5. Footer: navegación */}
+        <View style={styles.footer}>
+          {!isFirst && (
+            <View style={styles.prevButtonWrapper}>
+              <SecondaryButton label="Anterior" onPress={handlePrev} />
+            </View>
+          )}
+          <View style={[styles.nextButtonWrapper, isFirst && styles.nextButtonFull]}>
+            <PrimaryButton
+              label={isLast ? "Finalizar" : "Siguiente"}
+              onPress={handleNext}
+              disabled={!canAdvance()}
+            />
+          </View>
+        </View>
+      </KeyboardAvoidingView>
 
       {/* Modal de confirmación de salida */}
       <Modal
@@ -209,6 +217,9 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: "#F9FAFB",
+  },
+  kavContainer: {
+    flex: 1,
   },
   emptyState: {
     flex: 1,
