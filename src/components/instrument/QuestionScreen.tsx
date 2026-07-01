@@ -18,7 +18,10 @@ import { QuestionRenderer } from "./QuestionRenderer";
 import { PrimaryButton } from "../common/PrimaryButton";
 import { SecondaryButton } from "../common/SecondaryButton";
 import { Fonts } from "../../theme/fonts";
+import { OPTION_SEARCH_THRESHOLD } from "../../lib/optionSearch";
 import type { InstrumentDraftAnswer } from "../../types";
+
+const SEARCHABLE_TYPES = new Set(["single_choice", "multiple_choice"]);
 
 interface QuestionScreenProps {
   instrumentId: string;
@@ -79,6 +82,24 @@ export const QuestionScreen: React.FC<QuestionScreenProps> = ({
 
   const currentAnswer = answers[currentItem.question.questionId];
 
+  // Cuando la pregunta tiene buscador (más opciones que el umbral), el
+  // FlatList interno de la lista de opciones debe ser el único contenedor de
+  // scroll — anidarlo dentro del ScrollView externo rompe la virtualización
+  // (RN lo advierte explícitamente) y reintroduce el lag que se busca evitar.
+  const needsOwnScroll =
+    SEARCHABLE_TYPES.has(currentItem.question.type?.name) &&
+    currentItem.question.options.length > OPTION_SEARCH_THRESHOLD;
+
+  const questionContent = (
+    <QuestionContainer question={currentItem.question} fillHeight={needsOwnScroll}>
+      <QuestionRenderer
+        item={currentItem}
+        answer={currentAnswer}
+        onChange={handleChange}
+      />
+    </QuestionContainer>
+  );
+
   return (
     <SafeAreaView style={styles.root} edges={["top", "bottom"]}>
       <OfflineBanner />
@@ -108,20 +129,20 @@ export const QuestionScreen: React.FC<QuestionScreenProps> = ({
       </View>
 
       {/* 3. Pregunta + input */}
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
-        <QuestionContainer question={currentItem.question}>
-          <QuestionRenderer
-            item={currentItem}
-            answer={currentAnswer}
-            onChange={handleChange}
-          />
-        </QuestionContainer>
-      </ScrollView>
+      {needsOwnScroll ? (
+        <View style={[styles.scrollView, styles.ownScrollContainer]}>
+          {questionContent}
+        </View>
+      ) : (
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {questionContent}
+        </ScrollView>
+      )}
 
       {/* 4. Barra de progreso */}
       <View style={styles.progressContainer}>
@@ -336,6 +357,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 8,
     paddingBottom: 24,
+  },
+  ownScrollContainer: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 8,
   },
 
   // Footer
