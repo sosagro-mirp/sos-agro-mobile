@@ -1,7 +1,8 @@
-import React, { useState } from "react";
-import { StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import React, { useMemo, useState } from "react";
+import { FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { Fonts } from "../../theme/fonts";
 import type { InstrumentDraftAnswer, InstrumentOption } from "../../types/instrument";
+import { OPTION_SEARCH_THRESHOLD, normalizeSearchText } from "../../lib/optionSearch";
 
 interface Props {
   questionId: string;
@@ -9,6 +10,7 @@ interface Props {
   selectedIds: string[];
   otherText: string | undefined;
   onChange: (answer: InstrumentDraftAnswer) => void;
+  searchThreshold?: number;
 }
 
 export function MultipleChoiceList({
@@ -17,8 +19,25 @@ export function MultipleChoiceList({
   selectedIds,
   otherText,
   onChange,
+  searchThreshold = OPTION_SEARCH_THRESHOLD,
 }: Props): React.JSX.Element {
   const [otherFocused, setOtherFocused] = useState(false);
+  const [query, setQuery] = useState("");
+  const isSearchable = options.length > searchThreshold;
+
+  const visibleOptions = useMemo(() => {
+    if (!isSearchable || !query.trim()) return options;
+    const normalizedQuery = normalizeSearchText(query);
+    return options.filter(
+      (option) => option.isOther || normalizeSearchText(option.text).includes(normalizedQuery),
+    );
+  }, [isSearchable, options, query]);
+
+  const hasMatches = visibleOptions.some((option) => !option.isOther);
+  const selectedOptions = useMemo(
+    () => options.filter((option) => selectedIds.includes(option.optionId)),
+    [options, selectedIds],
+  );
 
   function handleToggle(option: InstrumentOption): void {
     const isSelected = selectedIds.includes(option.optionId);
@@ -44,44 +63,97 @@ export function MultipleChoiceList({
     onChange({ questionId, optionIds: selectedIds, otherText: text });
   }
 
+  function renderOption(option: InstrumentOption): React.JSX.Element {
+    const selected = selectedIds.includes(option.optionId);
+    const showOtherInput = option.isOther === true && selected;
+    return (
+      <View>
+        <TouchableOpacity
+          style={[styles.row, selected && styles.rowSelected]}
+          onPress={() => handleToggle(option)}
+          activeOpacity={0.7}
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: selected }}
+        >
+          <View style={[styles.checkbox, selected && styles.checkboxSelected]}>
+            {selected && <Text style={styles.checkmark}>✓</Text>}
+          </View>
+          <Text style={[styles.label, selected && styles.labelSelected]}>
+            {option.text}
+          </Text>
+        </TouchableOpacity>
+        {showOtherInput && (
+          <TextInput
+            style={[styles.otherInput, otherFocused && styles.otherInputFocused]}
+            value={otherText ?? ""}
+            onChangeText={handleOtherText}
+            onFocus={() => setOtherFocused(true)}
+            onBlur={() => setOtherFocused(false)}
+            placeholder="Especifica aquí..."
+            placeholderTextColor="#9CA3AF"
+            multiline
+            numberOfLines={2}
+            textAlignVertical="top"
+          />
+        )}
+      </View>
+    );
+  }
+
   return (
-    <View style={styles.container}>
-      {options.map((option) => {
-        const selected = selectedIds.includes(option.optionId);
-        const showOtherInput = option.isOther === true && selected;
-        return (
-          <View key={option.optionId}>
+    <View style={[styles.container, isSearchable && styles.containerFill]}>
+      {isSearchable && selectedOptions.length > 0 && (
+        <View style={styles.chipsRow}>
+          {selectedOptions.map((option) => (
             <TouchableOpacity
-              style={[styles.row, selected && styles.rowSelected]}
+              key={option.optionId}
+              style={styles.chip}
               onPress={() => handleToggle(option)}
               activeOpacity={0.7}
-              accessibilityRole="checkbox"
-              accessibilityState={{ checked: selected }}
             >
-              <View style={[styles.checkbox, selected && styles.checkboxSelected]}>
-                {selected && <Text style={styles.checkmark}>✓</Text>}
-              </View>
-              <Text style={[styles.label, selected && styles.labelSelected]}>
+              <Text style={styles.chipText} numberOfLines={1}>
                 {option.text}
               </Text>
+              <Text style={styles.chipRemove}>×</Text>
             </TouchableOpacity>
-            {showOtherInput && (
-              <TextInput
-                style={[styles.otherInput, otherFocused && styles.otherInputFocused]}
-                value={otherText ?? ""}
-                onChangeText={handleOtherText}
-                onFocus={() => setOtherFocused(true)}
-                onBlur={() => setOtherFocused(false)}
-                placeholder="Especifica aquí..."
-                placeholderTextColor="#9CA3AF"
-                multiline
-                numberOfLines={2}
-                textAlignVertical="top"
-              />
-            )}
-          </View>
-        );
-      })}
+          ))}
+        </View>
+      )}
+      {isSearchable && (
+        <TextInput
+          style={styles.searchInput}
+          value={query}
+          onChangeText={setQuery}
+          placeholder="Buscar opción..."
+          placeholderTextColor="#9CA3AF"
+          returnKeyType="search"
+          autoCapitalize="none"
+        />
+      )}
+      {isSearchable && !hasMatches && (
+        <Text style={styles.noResults}>
+          Sin resultados{options.some((o) => o.isOther) ? ". Puedes usar la opción \"Otros\"." : "."}
+        </Text>
+      )}
+      {isSearchable ? (
+        <FlatList
+          data={visibleOptions}
+          keyExtractor={(option) => option.optionId}
+          renderItem={({ item }) => renderOption(item)}
+          ItemSeparatorComponent={() => <View style={styles.separator} />}
+          style={styles.virtualizedList}
+          contentContainerStyle={styles.virtualizedListContent}
+          keyboardShouldPersistTaps="handled"
+          initialNumToRender={15}
+          maxToRenderPerBatch={15}
+          windowSize={7}
+          removeClippedSubviews
+        />
+      ) : (
+        visibleOptions.map((option) => (
+          <View key={option.optionId}>{renderOption(option)}</View>
+        ))
+      )}
     </View>
   );
 }
@@ -90,6 +162,63 @@ const styles = StyleSheet.create({
   container: {
     width: "100%",
     gap: 8,
+  },
+  containerFill: {
+    flex: 1,
+  },
+  searchInput: {
+    fontFamily: Fonts.regular,
+    fontSize: 18,
+    color: "#111827",
+    backgroundColor: "#FFFFFF",
+    borderWidth: 2,
+    borderColor: "#D1D5DB",
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    height: 52,
+  },
+  noResults: {
+    fontFamily: Fonts.regular,
+    fontSize: 15,
+    color: "#6B7280",
+    paddingHorizontal: 4,
+  },
+  chipsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  chip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    maxWidth: "100%",
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#1B6B3A",
+    backgroundColor: "#F0FDF4",
+  },
+  chipText: {
+    fontFamily: Fonts.regular,
+    fontSize: 14,
+    color: "#14532D",
+    flexShrink: 1,
+  },
+  chipRemove: {
+    fontFamily: Fonts.bold,
+    fontSize: 14,
+    color: "#1B6B3A",
+  },
+  virtualizedList: {
+    flex: 1,
+  },
+  virtualizedListContent: {
+    paddingBottom: 8,
+  },
+  separator: {
+    height: 8,
   },
   row: {
     flexDirection: "row",
