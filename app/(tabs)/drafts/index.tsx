@@ -33,9 +33,7 @@ async function enrichDraft(draft: SurveyDraft): Promise<EnrichedDraft> {
     draft.farmerId ? farmerCacheStorage.get(draft.farmerId).catch(() => null) : Promise.resolve(null),
   ]);
 
-  const farmerName = farmer
-    ? [farmer.name, farmer.lastName].filter(Boolean).join(" ")
-    : null;
+  const farmerName = farmer ? farmer.name : null;
 
   return {
     ...draft,

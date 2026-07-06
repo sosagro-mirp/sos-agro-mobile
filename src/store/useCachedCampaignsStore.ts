@@ -161,7 +161,6 @@ export const useCachedCampaignsStore = create<CachedCampaignsState>((set, get) =
           await farmerCacheStorage.upsert({
             farmerId: farmer.farmerId,
             name: farmer.name,
-            lastName: farmer.lastName ?? undefined,
             documentId: farmer.documentId ?? undefined,
             phone: farmer.phone ?? undefined,
             farmName: farmer.farm?.name ?? undefined,

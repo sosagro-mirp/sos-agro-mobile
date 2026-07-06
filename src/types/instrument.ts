@@ -124,7 +124,6 @@ export interface CropSummary {
 export interface FarmerSearchResult {
   farmerId: string;
   name: string;
-  lastName: string | null;
   documentId: string | null;
   phone?: string | null;
   farm?: { name: string } | null;

@@ -303,7 +303,6 @@ class SyncQueueServiceClass {
       await farmerCacheStorage.upsert({
         farmerId: farmer.farmerId,
         name: farmer.name,
-        lastName: farmer.lastName ?? undefined,
         documentId: farmer.documentId ?? undefined,
         cachedAt: new Date(),
       });
