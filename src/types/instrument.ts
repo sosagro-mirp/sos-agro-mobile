@@ -22,6 +22,8 @@ export interface InstrumentOption {
   text: string;
   value: string | number | boolean | null;
   isOther?: boolean;
+  metadataId?: string | null;
+  departmentId?: string | null;
 }
 
 export interface InstrumentQuestion {
@@ -29,6 +31,7 @@ export interface InstrumentQuestion {
   text: string;
   isRequired: boolean;
   isSelectionCriteria?: boolean;
+  isKeyQuestion?: boolean;
   order: number;
   systemField?: string | null;
   type: InstrumentType;
@@ -121,7 +124,6 @@ export interface CropSummary {
 export interface FarmerSearchResult {
   farmerId: string;
   name: string;
-  lastName: string | null;
   documentId: string | null;
   phone?: string | null;
   farm?: { name: string } | null;
@@ -135,13 +137,6 @@ export interface ExtractFarmerResult {
 export interface ExtractCropsResult {
   crops: CropSummary[];
 }
-
-export type LastFarmerResult = {
-  farmerId: string;
-  name: string;
-  lastName: string | null;
-  farm?: { name: string };
-} | null;
 
 export interface DuplicateCheckResult {
   hasDuplicate: boolean;

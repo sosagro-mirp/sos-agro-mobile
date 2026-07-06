@@ -3,7 +3,6 @@ import { endpoints } from "./endpoints";
 import type {
   CampaignSessionResponse,
   CreateCampaignSessionPayload,
-  LastFarmerResult,
   NextStepResponse,
 } from "../types";
 
@@ -15,6 +14,3 @@ export const getNextStep = (sessionId: string) =>
 
 export const markSessionAsSynced = (sessionId: string) =>
   httpClient.patch<void>(endpoints.campaignSessionSync(sessionId));
-
-export const getLastFarmer = (): Promise<LastFarmerResult> =>
-  httpClient.get(endpoints.campaignSessionLastFarmer);

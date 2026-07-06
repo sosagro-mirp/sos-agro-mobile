@@ -73,26 +73,25 @@ declare module 'expo-file-system' {
     MULTIPART = 1,
   }
 
-  export interface FileSystemUploadOptions {
-    uploadType?: FileSystemUploadType;
-    httpMethod?: 'POST' | 'PUT' | 'PATCH';
+  export interface UploadOptions {
     headers?: Record<string, string>;
+    httpMethod?: 'POST' | 'PUT' | 'PATCH';
+    uploadType?: FileSystemUploadType;
     fieldName?: string;
     mimeType?: string;
     parameters?: Record<string, string>;
   }
 
-  export interface FileSystemUploadResult {
+  export interface UploadResult {
     body: string;
     headers: Record<string, string>;
     mimeType: string | null;
     status: number;
-    url: string;
   }
 
   export function uploadAsync(
     url: string,
     fileUri: string,
-    options?: FileSystemUploadOptions
-  ): Promise<FileSystemUploadResult>;
+    options?: UploadOptions,
+  ): Promise<UploadResult>;
 }

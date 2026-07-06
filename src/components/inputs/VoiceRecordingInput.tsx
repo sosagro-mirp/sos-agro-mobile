@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Mic, Square, Play, X } from 'lucide-react-native';
 import { Audio } from 'expo-av';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import type { InstrumentDraftAnswer } from '../../types/instrument';
 
 interface Props {
@@ -30,16 +31,15 @@ export function VoiceRecordingInput({ questionId, value, onChange }: Props): Rea
 
       await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
 
-      const rec = new Audio.Recording();
-      await rec.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      const { recording: rec } = await Audio.Recording.createAsync(
+        Audio.RecordingOptionsPresets.HIGH_QUALITY,
+        (status) => {
+          if (status.isRecording) {
+            setDuration(Math.floor((status.durationMillis ?? 0) / 1000));
+          }
+        },
+      );
 
-      rec.setOnRecordingStatusUpdate((status) => {
-        if (status.isRecording) {
-          setDuration(Math.floor((status.durationMillis ?? 0) / 1000));
-        }
-      });
-
-      await rec.startAsync();
       setRecording(rec);
       setState('recording');
     } catch {
@@ -98,7 +98,7 @@ export function VoiceRecordingInput({ questionId, value, onChange }: Props): Rea
     return (
       <View style={styles.container}>
         <TouchableOpacity style={styles.recordButton} onPress={startRecording}>
-          <Text style={styles.micIcon}>🎙</Text>
+          <Mic size={22} color="#FFFFFF" />
           <Text style={styles.recordButtonText}>Iniciar grabación</Text>
         </TouchableOpacity>
       </View>
@@ -113,7 +113,7 @@ export function VoiceRecordingInput({ questionId, value, onChange }: Props): Rea
           <Text style={styles.recordingText}>Grabando... {duration}s</Text>
         </View>
         <TouchableOpacity style={[styles.recordButton, styles.stopButton]} onPress={stopRecording}>
-          <Text style={styles.micIcon}>⏹</Text>
+          <Square size={22} color="#FFFFFF" />
           <Text style={styles.recordButtonText}>Detener</Text>
         </TouchableOpacity>
       </View>
@@ -126,10 +126,12 @@ export function VoiceRecordingInput({ questionId, value, onChange }: Props): Rea
         <Text style={styles.recordedLabel}>Grabación lista</Text>
         <View style={styles.actions}>
           <TouchableOpacity style={styles.secondaryButton} onPress={playPreview}>
-            <Text style={styles.secondaryButtonText}>▶ Reproducir</Text>
+            <Play size={16} color="#374151" />
+            <Text style={styles.secondaryButtonText}>Reproducir</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.secondaryButton} onPress={deleteRecording}>
-            <Text style={[styles.secondaryButtonText, styles.deleteText]}>✕ Eliminar</Text>
+            <X size={16} color="#DC2626" />
+            <Text style={[styles.secondaryButtonText, styles.deleteText]}>Eliminar</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -149,7 +151,6 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   stopButton: { backgroundColor: '#DC2626' },
-  micIcon: { fontSize: 22 },
   recordButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
   recordingBadge: {
     flexDirection: 'row',
@@ -175,11 +176,14 @@ const styles = StyleSheet.create({
   actions: { flexDirection: 'row', gap: 10 },
   secondaryButton: {
     flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 1.5,
     borderColor: '#D1D5DB',
     borderRadius: 8,
     paddingVertical: 10,
-    alignItems: 'center',
+    gap: 6,
   },
   secondaryButtonText: { fontSize: 14, color: '#374151' },
   deleteText: { color: '#DC2626' },

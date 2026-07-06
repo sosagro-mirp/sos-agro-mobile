@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  FlatList,
   Pressable,
   StyleSheet,
   Text,
@@ -10,26 +9,20 @@ import {
 } from "react-native";
 import { Fonts } from "../../theme/fonts";
 import { searchFarmers } from "../../api/farmers";
-import type { FarmerSearchResult, LastFarmerResult } from "../../types";
+import { farmerCacheStorage } from "../../storage/farmerCache";
+import type { FarmerSearchResult } from "../../types";
 
 interface PreSurveyFormProps {
-  lastFarmer: LastFarmerResult;
   isOnline: boolean;
-  onSearchSelect: (farmerId: string, farmerName: string) => void;
+  onSearchSelect: (farmerId: string, farmerName: string, farmer?: FarmerSearchResult) => void;
   onNewFarmer: () => void;
-  onContinueLast: (farmerId: string, farmerName: string) => void;
-  onSkip: () => void;
 }
 
 export const PreSurveyForm: React.FC<PreSurveyFormProps> = ({
-  lastFarmer,
   isOnline,
   onSearchSelect,
   onNewFarmer,
-  onContinueLast,
-  onSkip,
 }) => {
-  const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<FarmerSearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -38,7 +31,7 @@ export const PreSurveyForm: React.FC<PreSurveyFormProps> = ({
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (!query.trim() || !isOnline) {
+    if (!query.trim()) {
       setResults([]);
       return;
     }
@@ -46,10 +39,25 @@ export const PreSurveyForm: React.FC<PreSurveyFormProps> = ({
       setIsSearching(true);
       setSearchError(null);
       try {
-        const data = await searchFarmers(query.trim());
-        setResults(data);
+        if (isOnline) {
+          const data = await searchFarmers(query.trim());
+          setResults(data);
+        } else {
+          const cached = await farmerCacheStorage.search(query.trim());
+          setResults(
+            cached.map((c) => ({
+              farmerId: c.farmerId,
+              name: c.name,
+              documentId: c.documentId ?? null,
+              phone: c.phone ?? null,
+              farm: c.farmName ? { name: c.farmName } : null,
+            }))
+          );
+        }
       } catch {
-        setSearchError("No se pudo buscar. Verifica la conexión.");
+        if (isOnline) {
+          setSearchError("No se pudo buscar. Verifica la conexión.");
+        }
       } finally {
         setIsSearching(false);
       }
@@ -60,108 +68,69 @@ export const PreSurveyForm: React.FC<PreSurveyFormProps> = ({
   }, [query, isOnline]);
 
   const handleSelect = (farmer: FarmerSearchResult) => {
-    const fullName = [farmer.name, farmer.lastName].filter(Boolean).join(" ");
-    onSearchSelect(farmer.farmerId, fullName);
+    onSearchSelect(farmer.farmerId, farmer.name, farmer);
   };
+
+  const showNewFarmerOption = query.trim().length > 0 && !isSearching && results.length === 0;
 
   return (
     <View style={styles.container}>
       <Text style={styles.heading}>¿Quién es el encuestado?</Text>
 
-      {/* Search section */}
-      {!searchOpen ? (
-        <Pressable
-          style={[styles.actionButton, !isOnline && styles.actionButtonDisabled]}
-          onPress={() => { if (isOnline) setSearchOpen(true); }}
-          disabled={!isOnline}
-        >
-          <Text style={styles.actionButtonText}>Buscar encuestado</Text>
-        </Pressable>
-      ) : (
-        <View style={styles.searchBox}>
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Nombre o número de documento"
-            placeholderTextColor="#9CA3AF"
-            value={query}
-            onChangeText={setQuery}
-            autoFocus
-            returnKeyType="search"
-          />
-          {isSearching ? (
-            <ActivityIndicator size="small" color={GREEN} style={styles.searchSpinner} />
-          ) : null}
-          {searchError ? (
-            <Text style={styles.searchError}>{searchError}</Text>
-          ) : null}
-          {results.length > 0 ? (
-            <FlatList
-              data={results}
-              keyExtractor={(item) => item.farmerId}
-              style={styles.resultsList}
-              keyboardShouldPersistTaps="handled"
-              renderItem={({ item }) => (
-                <Pressable
-                  style={styles.resultItem}
-                  onPress={() => handleSelect(item)}
-                >
-                  <Text style={styles.resultName}>
-                    {item.name} {item.lastName ?? ""}
-                  </Text>
-                  {item.documentId ? (
-                    <Text style={styles.resultDetail}>Doc: {item.documentId}</Text>
-                  ) : null}
-                  {item.farm?.name ? (
-                    <Text style={styles.resultDetail}>Finca: {item.farm.name}</Text>
-                  ) : null}
-                </Pressable>
-              )}
-            />
-          ) : query.trim() && !isSearching ? (
-            <Text style={styles.noResults}>Sin resultados para "{query}"</Text>
-          ) : null}
-          <Pressable onPress={() => { setSearchOpen(false); setQuery(""); setResults([]); }}>
-            <Text style={styles.cancelLink}>Cancelar búsqueda</Text>
-          </Pressable>
-        </View>
-      )}
-
-      {/* New farmer */}
-      <Pressable
-        style={[styles.actionButton, !isOnline && styles.actionButtonDisabled]}
-        onPress={() => { if (isOnline) onNewFarmer(); }}
-        disabled={!isOnline}
-      >
-        <Text style={styles.actionButtonText}>+ Nuevo encuestado</Text>
-      </Pressable>
+      <TextInput
+        style={styles.searchInput}
+        placeholder="Nombre o número de documento"
+        placeholderTextColor="#9CA3AF"
+        value={query}
+        onChangeText={setQuery}
+        autoFocus
+        returnKeyType="search"
+      />
 
       {!isOnline ? (
-        <Text style={styles.offlineHint}>
-          Buscar y registrar encuestados requiere conexión.
+        <Text style={styles.offlineSearchHint}>
+          Buscando en agricultores guardados localmente
         </Text>
       ) : null}
 
-      {/* Continue with last farmer */}
-      {lastFarmer ? (
-        <Pressable
-          style={[styles.actionButton, styles.actionButtonLast]}
-          onPress={() => {
-            const fullName = [lastFarmer.name, lastFarmer.lastName].filter(Boolean).join(" ");
-            onContinueLast(lastFarmer.farmerId, fullName);
-          }}
-        >
-          <Text style={[styles.actionButtonText, styles.actionButtonLastText]}>
-            Continuar con {lastFarmer.name}
-          </Text>
-        </Pressable>
+      {isSearching ? (
+        <ActivityIndicator size="small" color={GREEN} style={styles.searchSpinner} />
       ) : null}
 
-      <View style={styles.divider} />
+      {searchError ? (
+        <Text style={styles.searchError}>{searchError}</Text>
+      ) : null}
 
-      {/* Skip link */}
-      <Pressable style={styles.skipLink} onPress={onSkip}>
-        <Text style={styles.skipText}>Continuar sin identificar encuestado</Text>
-      </Pressable>
+      {(results.length > 0 || showNewFarmerOption) ? (
+        <View style={styles.resultsList}>
+          {results.slice(0, 5).map((item, index) => (
+            <Pressable
+              key={item.farmerId ?? `r-${index}`}
+              style={styles.resultItem}
+              onPress={() => handleSelect(item)}
+            >
+              <Text style={styles.resultName}>
+                {item.name}
+              </Text>
+              {item.documentId ? (
+                <Text style={styles.resultDetail}>Doc: {item.documentId}</Text>
+              ) : null}
+              {item.farm?.name ? (
+                <Text style={styles.resultDetail}>Finca: {item.farm.name}</Text>
+              ) : null}
+            </Pressable>
+          ))}
+          {showNewFarmerOption ? (
+            <Pressable style={[styles.resultItem, styles.newFarmerItem]} onPress={onNewFarmer}>
+              <Text style={styles.newFarmerText}>+ Nuevo encuestado</Text>
+              {!isOnline ? (
+                <Text style={styles.resultDetail}>Los datos se sincronizarán al reconectar</Text>
+              ) : null}
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
+
     </View>
   );
 };
@@ -181,36 +150,10 @@ const styles = StyleSheet.create({
     color: "#111827",
     marginBottom: 4,
   },
-  actionButton: {
-    backgroundColor: GREEN,
-    borderRadius: 12,
-    paddingVertical: 18,
-    alignItems: "center",
-  },
-  actionButtonDisabled: {
-    backgroundColor: "#9CA3AF",
-  },
-  actionButtonLast: {
-    backgroundColor: "#fff",
-    borderWidth: 1.5,
-    borderColor: GREEN,
-  },
-  actionButtonText: {
-    fontFamily: Fonts.semiBold,
-    fontSize: 16,
-    color: "#fff",
-  },
-  actionButtonLastText: {
-    color: GREEN,
-  },
-  offlineHint: {
+  offlineSearchHint: {
     fontFamily: Fonts.regular,
-    fontSize: 13,
+    fontSize: 12,
     color: "#6B7280",
-    textAlign: "center",
-  },
-  searchBox: {
-    gap: 8,
   },
   searchInput: {
     height: 48,
@@ -232,7 +175,6 @@ const styles = StyleSheet.create({
     color: "#DC2626",
   },
   resultsList: {
-    maxHeight: 220,
     borderWidth: 1,
     borderColor: "#E5E7EB",
     borderRadius: 8,
@@ -255,33 +197,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#6B7280",
   },
-  noResults: {
-    fontFamily: Fonts.regular,
-    fontSize: 13,
-    color: "#6B7280",
-    textAlign: "center",
-    paddingVertical: 8,
+  newFarmerItem: {
+    borderBottomWidth: 0,
   },
-  cancelLink: {
-    fontFamily: Fonts.medium,
+  newFarmerText: {
+    fontFamily: Fonts.semiBold,
     fontSize: 14,
-    color: "#6B7280",
-    textAlign: "center",
-    paddingVertical: 4,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: "#E5E7EB",
-    marginTop: 4,
-  },
-  skipLink: {
-    alignItems: "center",
-    paddingVertical: 8,
-  },
-  skipText: {
-    fontFamily: Fonts.medium,
-    fontSize: 14,
-    color: "#9CA3AF",
-    textDecorationLine: "underline",
+    color: GREEN,
   },
 });

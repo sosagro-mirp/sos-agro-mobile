@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { FolderOpen, FileText, X } from 'lucide-react-native';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import type { InstrumentDraftAnswer } from '../../types/instrument';
 
 interface Props {
@@ -50,15 +51,17 @@ export function DocumentPickerInput({ questionId, value, filename, onChange }: P
     return (
       <View style={styles.container}>
         <View style={styles.fileCard}>
-          <Text style={styles.fileIcon}>📄</Text>
+          <FileText size={28} color="#1B6B3A" />
           <Text style={styles.filename} numberOfLines={2}>{localFilename ?? 'documento.pdf'}</Text>
         </View>
         <View style={styles.actions}>
           <TouchableOpacity style={styles.secondaryButton} onPress={pickDocument}>
-            <Text style={styles.secondaryButtonText}>📂 Reemplazar</Text>
+            <FolderOpen size={16} color="#374151" />
+            <Text style={styles.secondaryButtonText}>Reemplazar</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.secondaryButton} onPress={removeDocument}>
-            <Text style={[styles.secondaryButtonText, styles.deleteText]}>✕ Eliminar</Text>
+            <X size={16} color="#DC2626" />
+            <Text style={[styles.secondaryButtonText, styles.deleteText]}>Eliminar</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -68,7 +71,7 @@ export function DocumentPickerInput({ questionId, value, filename, onChange }: P
   return (
     <View style={styles.container}>
       <TouchableOpacity style={styles.primaryButton} onPress={pickDocument}>
-        <Text style={styles.buttonIcon}>📂</Text>
+        <FolderOpen size={22} color="#FFFFFF" />
         <Text style={styles.primaryButtonText}>Seleccionar PDF</Text>
       </TouchableOpacity>
     </View>
@@ -86,7 +89,6 @@ const styles = StyleSheet.create({
     padding: 16,
     gap: 12,
   },
-  fileIcon: { fontSize: 28 },
   filename: { flex: 1, fontSize: 14, color: '#111827' },
   primaryButton: {
     flexDirection: 'row',
@@ -97,16 +99,18 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     gap: 10,
   },
-  buttonIcon: { fontSize: 22 },
   primaryButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
   actions: { flexDirection: 'row', gap: 10 },
   secondaryButton: {
     flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 1.5,
     borderColor: '#D1D5DB',
     borderRadius: 10,
     paddingVertical: 12,
-    alignItems: 'center',
+    gap: 6,
   },
   secondaryButtonText: { fontSize: 14, color: '#374151' },
   deleteText: { color: '#DC2626' },

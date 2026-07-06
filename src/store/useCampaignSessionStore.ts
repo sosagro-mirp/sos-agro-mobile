@@ -1,11 +1,10 @@
 import { create } from 'zustand';
-import { secureStorage } from '../storage/secureStorage';
 import type {
   CampaignRender,
   CampaignSessionResponse,
-  LastFarmerResult,
   NextStepResponse,
 } from '../types';
+import type { LocalFarmerDraft } from '../lib/extractFarmerLocally';
 
 type SessionPhase = 'idle' | 'pre_survey' | 'in_step' | 'completed';
 type InjectionPhase = 'none' | 's1' | 's2';
@@ -36,8 +35,10 @@ interface CampaignSessionState {
   s1SurveyId: string | null;
   s2SurveyId: string | null;
 
-  // Last identified farmer (persisted in SecureStorage)
-  lastFarmer: LastFarmerResult;
+  // Offline session tracking
+  isOfflineSession: boolean;
+  localSessionId: string | null;
+  localFarmerId: string | null;
 
   startSession: (campaign: CampaignRender) => void;
   applySessionResponse: (response: CampaignSessionResponse) => void;
@@ -54,8 +55,11 @@ interface CampaignSessionState {
   setInjectionS2SurveyId: (surveyId: string) => void;
   completeS1Injection: (farmerId: string, farmerName: string) => void;
   completeS2Injection: () => void;
-  setLastFarmer: (farmer: LastFarmerResult) => void;
-  loadLastFarmer: () => Promise<void>;
+  // Offline session actions
+  applyOfflineSession: (localSessionId: string) => void;
+  resolveSession: (realSessionId: string) => void;
+  applyLocalFarmer: (draft: LocalFarmerDraft) => void;
+  resolveFarmer: (realFarmerId: string) => void;
 }
 
 const initialState = {
@@ -70,7 +74,9 @@ const initialState = {
   injectionPhase: 'none' as InjectionPhase,
   s1SurveyId: null,
   s2SurveyId: null,
-  lastFarmer: null as LastFarmerResult,
+  isOfflineSession: false,
+  localSessionId: null,
+  localFarmerId: null,
 };
 
 export const useCampaignSessionStore = create<CampaignSessionState>((set, get) => ({
@@ -150,13 +156,23 @@ export const useCampaignSessionStore = create<CampaignSessionState>((set, get) =
     set({ injectionPhase: 'none' });
   },
 
-  setLastFarmer(farmer) {
-    set({ lastFarmer: farmer });
-    secureStorage.saveLastFarmer(farmer).catch(console.error);
+  applyOfflineSession(localSessionId) {
+    set({ sessionId: localSessionId, isOfflineSession: true, localSessionId });
   },
 
-  async loadLastFarmer() {
-    const farmer = await secureStorage.getLastFarmer();
-    set({ lastFarmer: farmer });
+  resolveSession(realSessionId) {
+    set({ sessionId: realSessionId, isOfflineSession: false });
+  },
+
+  applyLocalFarmer(draft) {
+    set({
+      farmerId: draft.farmerId,
+      farmerName: draft.name,
+      localFarmerId: draft.isProvisional ? draft.farmerId : null,
+    });
+  },
+
+  resolveFarmer(realFarmerId) {
+    set({ farmerId: realFarmerId, localFarmerId: null });
   },
 }));

@@ -19,6 +19,7 @@ export const endpoints = {
   campaignSessionSync: (id: string) => `/api/campaign-sessions/${id}/sync`,
 
   // Farmers
+  farmers: '/api/farmers',
   farmersSearch: '/api/farmers/search',
   surveyExtractFarmer: (id: string) => `/api/surveys/${id}/extract-farmer`,
   surveyExtractCrops: (id: string) => `/api/surveys/${id}/extract-crops`,
@@ -26,13 +27,22 @@ export const endpoints = {
   // Instruments by code
   instrumentByCode: (code: string) => `/api/instruments/by-code/${code}`,
 
-  // Last farmer for current user
-  campaignSessionLastFarmer: '/api/campaign-sessions/last-farmer',
+  // Duplicate survey detection
+  surveyCheckDuplicate: '/api/surveys/check-duplicate',
+  surveyOverwrite: '/api/surveys/overwrite',
+  surveySkipStep: '/api/surveys/skip-step',
+
+  // Media attachments
+  mediaAttachmentsPresignedUrl: '/api/media-attachments/presigned-url',
+  mediaAttachmentsConfirm: (id: string) => `/api/media-attachments/${id}/confirm`,
 
   // Telemetry
   telemetrySync: '/api/telemetry/sync',
 
-  // Media attachments
-  mediaPresignedUrl: '/api/media-attachments/presigned-url',
-  mediaConfirmUpload: (id: string) => `/api/media-attachments/${id}/confirm`,
+  // Change requests
+  changeRequests: '/api/change-requests',
+  changeRequestsMyResolved: '/api/change-requests/my-resolved',
+
+  // Question options (dynamic creation)
+  questionOptions: (questionId: string) => `/api/questions/${questionId}/options`,
 } as const;

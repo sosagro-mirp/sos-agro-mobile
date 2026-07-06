@@ -1,5 +1,6 @@
-import React from "react";
-import type { FlattenedQuestionItem, InstrumentDraftAnswer } from "../../types";
+import React, { useEffect, useMemo, useRef } from "react";
+import type { FlattenedQuestionItem, InstrumentDraftAnswer, InstrumentOption } from "../../types";
+import { useInstrumentSurveyStore } from "../../store/useInstrumentSurveyStore";
 import { OpenTextInput } from "../inputs/OpenTextInput";
 import { NumericInput } from "../inputs/NumericInput";
 import { GpsCoordinateInput } from "../inputs/GpsCoordinateInput";
@@ -29,6 +30,46 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
   const { question } = item;
   const { questionId, options, type } = question;
 
+  const { flattenedQuestions, answers, setAnswer } = useInstrumentSurveyStore();
+
+  // Preguntas geográficas para filtrado de municipios
+  const deptQuestion = useMemo(
+    () => flattenedQuestions.find((fq) => fq.question.systemField === "farm.department")?.question ?? null,
+    [flattenedQuestions],
+  );
+  const townQuestion = useMemo(
+    () => flattenedQuestions.find((fq) => fq.question.systemField === "farm.town")?.question ?? null,
+    [flattenedQuestions],
+  );
+
+  const selectedDeptOptionId = deptQuestion ? (answers[deptQuestion.questionId]?.optionId ?? null) : null;
+
+  const selectedDepartmentId = useMemo(() => {
+    if (!deptQuestion || !selectedDeptOptionId) return null;
+    const opt = (deptQuestion.options as InstrumentOption[]).find((o) => o.optionId === selectedDeptOptionId);
+    return opt?.departmentId ?? null;
+  }, [deptQuestion, selectedDeptOptionId]);
+
+  // Limpiar respuesta de Municipio cuando cambia la de Departamento
+  const prevDeptOptionIdRef = useRef<string | null | undefined>(selectedDeptOptionId);
+  useEffect(() => {
+    if (prevDeptOptionIdRef.current !== selectedDeptOptionId && townQuestion) {
+      if (prevDeptOptionIdRef.current !== undefined) {
+        setAnswer(townQuestion.questionId, { questionId: townQuestion.questionId });
+      }
+    }
+    prevDeptOptionIdRef.current = selectedDeptOptionId;
+  }, [selectedDeptOptionId, townQuestion, setAnswer]);
+
+  // Opciones filtradas para farm.town
+  const displayOptions = useMemo<InstrumentOption[]>(() => {
+    if (question.systemField !== "farm.town") return options as InstrumentOption[];
+    if (!selectedDepartmentId) return options as InstrumentOption[];
+    return (options as InstrumentOption[]).filter((o) => o.departmentId === selectedDepartmentId);
+  }, [question.systemField, options, selectedDepartmentId]);
+
+  // Auto-llenado GPS para latitud/longitud (spec28). Va después de los hooks
+  // para no romper las reglas de hooks de React con un return temprano.
   if (question.systemField && GPS_SYSTEM_FIELDS.has(question.systemField)) {
     return (
       <GpsCoordinateInput
@@ -37,6 +78,16 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
         value={answer?.numericValue}
         onChange={onChange}
         onAltitudeObtained={onAltitudeObtained}
+      />
+    );
+  }
+
+  if (!type) {
+    return (
+      <OpenTextInput
+        questionId={questionId}
+        value={answer?.textValue}
+        onChange={onChange}
       />
     );
   }
@@ -60,23 +111,38 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
         />
       );
 
-    case "yes_no":
+    case "yes_no": {
+      const YES_NO_OPTIONS = [
+        { optionId: "yes", text: "Sí", value: 1, isOther: false },
+        { optionId: "no", text: "No", value: 0, isOther: false },
+      ];
+      const selectedId = answer?.booleanValue === true
+        ? "yes"
+        : answer?.booleanValue === false
+          ? "no"
+          : undefined;
       return (
         <SingleChoiceList
           questionId={questionId}
-          options={options}
-          value={answer?.optionId}
-          booleanValue={answer?.booleanValue}
-          onChange={onChange}
+          options={YES_NO_OPTIONS}
+          value={selectedId}
+          onChange={(a) =>
+            onChange({
+              questionId,
+              booleanValue: a.optionId === "yes",
+            })
+          }
         />
       );
+    }
 
     case "single_choice":
       return (
         <SingleChoiceList
           questionId={questionId}
-          options={options}
+          options={displayOptions}
           value={answer?.optionId}
+          otherText={answer?.otherText}
           onChange={onChange}
         />
       );

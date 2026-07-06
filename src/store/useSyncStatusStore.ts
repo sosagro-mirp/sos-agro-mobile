@@ -36,7 +36,7 @@ export const useSyncStatusStore = create<SyncStatusState>((set) => ({
   },
 
   async refreshPendingMediaCount() {
-    const count = await mediaUploadQueueStorage.countPendingTotal();
+    const count = await mediaUploadQueueStorage.countPending();
     set({ pendingMediaCount: count });
   },
 

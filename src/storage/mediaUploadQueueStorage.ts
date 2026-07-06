@@ -1,10 +1,10 @@
-import { and, asc, eq } from 'drizzle-orm';
+import { eq, and, asc, isNotNull } from 'drizzle-orm';
 import { db } from './db/db';
-import { mediaUploadQueue } from './db/schema';
+import { mediaUploadQueue, responses } from './db/schema';
 
 export type MediaUploadStatus = 'pending' | 'in_flight' | 'uploaded' | 'failed';
 
-export interface MediaUploadQueueEntry {
+export interface MediaUploadEntry {
   id: string;
   surveyId: string;
   questionId: string;
@@ -30,27 +30,37 @@ export interface EnqueueMediaParams {
 }
 
 export const mediaUploadQueueStorage = {
-  async enqueue(params: EnqueueMediaParams): Promise<void> {
-    await db
-      .insert(mediaUploadQueue)
-      .values({
-        id: params.id,
-        surveyId: params.surveyId,
-        questionId: params.questionId,
-        attachmentId: null,
-        localPath: params.localPath,
-        mimeType: params.mimeType,
-        fileSizeBytes: params.fileSizeBytes ?? null,
-        originalFilename: params.originalFilename ?? null,
-        status: 'pending',
-        attempts: 0,
-        errorDetail: null,
-        createdAt: new Date(),
-      })
-      .onConflictDoNothing();
+  async enqueueIfAbsent(params: EnqueueMediaParams): Promise<void> {
+    const existing = await db
+      .select({ id: mediaUploadQueue.id })
+      .from(mediaUploadQueue)
+      .where(
+        and(
+          eq(mediaUploadQueue.surveyId, params.surveyId),
+          eq(mediaUploadQueue.questionId, params.questionId),
+        ),
+      )
+      .get();
+
+    if (existing) return;
+
+    await db.insert(mediaUploadQueue).values({
+      id: params.id,
+      surveyId: params.surveyId,
+      questionId: params.questionId,
+      attachmentId: null,
+      localPath: params.localPath,
+      mimeType: params.mimeType,
+      fileSizeBytes: params.fileSizeBytes ?? null,
+      originalFilename: params.originalFilename ?? null,
+      status: 'pending',
+      attempts: 0,
+      errorDetail: null,
+      createdAt: new Date(),
+    });
   },
 
-  async dequeueNextPending(surveyId: string): Promise<MediaUploadQueueEntry | null> {
+  async dequeueNextPending(surveyId: string): Promise<MediaUploadEntry | null> {
     const row = await db
       .select()
       .from(mediaUploadQueue)
@@ -63,6 +73,7 @@ export const mediaUploadQueueStorage = {
       .orderBy(asc(mediaUploadQueue.createdAt))
       .limit(1)
       .get();
+
     return row ? mapRow(row) : null;
   },
 
@@ -89,78 +100,71 @@ export const mediaUploadQueueStorage = {
 
     await db
       .update(mediaUploadQueue)
-      .set({ status: 'failed', errorDetail, attempts: (row?.attempts ?? 0) + 1 })
+      .set({
+        status: 'failed',
+        errorDetail,
+        attempts: (row?.attempts ?? 0) + 1,
+      })
       .where(eq(mediaUploadQueue.id, id));
   },
 
-  async incrementAttempts(id: string): Promise<void> {
-    const row = await db
-      .select({ attempts: mediaUploadQueue.attempts })
-      .from(mediaUploadQueue)
-      .where(eq(mediaUploadQueue.id, id))
-      .get();
-
-    if (!row) return;
-
-    await db
-      .update(mediaUploadQueue)
-      .set({ attempts: row.attempts + 1, status: 'pending' })
-      .where(eq(mediaUploadQueue.id, id));
-  },
-
-  async getPendingCountForSurvey(surveyId: string): Promise<number> {
+  async getUploadedForSurvey(surveyId: string): Promise<MediaUploadEntry[]> {
     const rows = await db
-      .select({ id: mediaUploadQueue.id })
+      .select()
       .from(mediaUploadQueue)
       .where(
         and(
           eq(mediaUploadQueue.surveyId, surveyId),
-          eq(mediaUploadQueue.status, 'pending'),
-        ),
-      )
-      .all();
-    return rows.length;
-  },
-
-  async getUploadedAttachmentId(
-    surveyId: string,
-    questionId: string,
-  ): Promise<string | null> {
-    const row = await db
-      .select({ attachmentId: mediaUploadQueue.attachmentId })
-      .from(mediaUploadQueue)
-      .where(
-        and(
-          eq(mediaUploadQueue.surveyId, surveyId),
-          eq(mediaUploadQueue.questionId, questionId),
           eq(mediaUploadQueue.status, 'uploaded'),
         ),
       )
-      .get();
-    return row?.attachmentId ?? null;
+      .all();
+
+    return rows.map(mapRow);
   },
 
-  async isQueued(surveyId: string, questionId: string): Promise<boolean> {
-    const row = await db
-      .select({ id: mediaUploadQueue.id })
-      .from(mediaUploadQueue)
-      .where(
-        and(
-          eq(mediaUploadQueue.surveyId, surveyId),
-          eq(mediaUploadQueue.questionId, questionId),
-        ),
-      )
-      .get();
-    return !!row;
-  },
-
-  async countPendingTotal(): Promise<number> {
+  async countPending(): Promise<number> {
     const rows = await db
       .select({ id: mediaUploadQueue.id })
       .from(mediaUploadQueue)
       .where(eq(mediaUploadQueue.status, 'pending'))
       .all();
+
     return rows.length;
+  },
+
+  // Returns rows where mediaLocalPath is set in responses but no queue entry exists yet
+  async findUnenqueued(surveyId: string): Promise<Array<{ questionId: string; localPath: string; mimeType: string }>> {
+    const responseRows = await db
+      .select({
+        questionId: responses.questionId,
+        mediaLocalPath: responses.mediaLocalPath,
+        mimeType: responses.mimeType,
+      })
+      .from(responses)
+      .where(
+        and(
+          eq(responses.surveyId, surveyId),
+          isNotNull(responses.mediaLocalPath),
+        ),
+      )
+      .all();
+
+    const queued = await db
+      .select({ questionId: mediaUploadQueue.questionId })
+      .from(mediaUploadQueue)
+      .where(eq(mediaUploadQueue.surveyId, surveyId))
+      .all();
+
+    const queuedSet = new Set(queued.map((r) => r.questionId));
+
+    return responseRows
+      .filter((r) => r.mediaLocalPath && !queuedSet.has(r.questionId))
+      .map((r) => ({
+        questionId: r.questionId,
+        localPath: r.mediaLocalPath as string,
+        mimeType: r.mimeType ?? 'application/octet-stream',
+      }));
   },
 
   async resetInFlightToRetry(): Promise<void> {
@@ -171,7 +175,7 @@ export const mediaUploadQueueStorage = {
   },
 };
 
-function mapRow(row: typeof mediaUploadQueue.$inferSelect): MediaUploadQueueEntry {
+function mapRow(row: typeof mediaUploadQueue.$inferSelect): MediaUploadEntry {
   return {
     id: row.id,
     surveyId: row.surveyId,
