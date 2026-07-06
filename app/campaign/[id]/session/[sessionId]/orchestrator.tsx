@@ -248,7 +248,6 @@ export default function OrchestratorScreen() {
               await farmerCacheStorage.upsert({
                 farmerId: draft.farmerId,
                 name: draft.name,
-                lastName: draft.lastName ?? undefined,
                 documentId: draft.documentId ?? undefined,
                 phone: draft.phone ?? undefined,
                 cachedAt: new Date(),

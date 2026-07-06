@@ -5,7 +5,6 @@ import { farmerCache } from './db/schema';
 export interface FarmerCacheEntry {
   farmerId: string;
   name: string;
-  lastName?: string;
   documentId?: string;
   phone?: string;
   farmName?: string;
@@ -16,7 +15,6 @@ function mapRow(row: typeof farmerCache.$inferSelect): FarmerCacheEntry {
   return {
     farmerId: row.farmerId,
     name: row.name,
-    lastName: row.lastName ?? undefined,
     documentId: row.documentId ?? undefined,
     phone: row.phone ?? undefined,
     farmName: row.farmName ?? undefined,
@@ -31,7 +29,6 @@ export const farmerCacheStorage = {
       .values({
         farmerId: entry.farmerId,
         name: entry.name,
-        lastName: entry.lastName ?? null,
         documentId: entry.documentId ?? null,
         phone: entry.phone ?? null,
         farmName: entry.farmName ?? null,
@@ -41,7 +38,6 @@ export const farmerCacheStorage = {
         target: farmerCache.farmerId,
         set: {
           name: entry.name,
-          lastName: entry.lastName ?? null,
           documentId: entry.documentId ?? null,
           phone: entry.phone ?? null,
           farmName: entry.farmName ?? null,
@@ -60,7 +56,6 @@ export const farmerCacheStorage = {
       .where(
         or(
           like(farmerCache.name, pattern),
-          like(farmerCache.lastName, pattern),
           like(farmerCache.documentId, pattern),
         )
       )

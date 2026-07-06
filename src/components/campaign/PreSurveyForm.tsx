@@ -48,7 +48,6 @@ export const PreSurveyForm: React.FC<PreSurveyFormProps> = ({
             cached.map((c) => ({
               farmerId: c.farmerId,
               name: c.name,
-              lastName: c.lastName ?? null,
               documentId: c.documentId ?? null,
               phone: c.phone ?? null,
               farm: c.farmName ? { name: c.farmName } : null,
@@ -69,8 +68,7 @@ export const PreSurveyForm: React.FC<PreSurveyFormProps> = ({
   }, [query, isOnline]);
 
   const handleSelect = (farmer: FarmerSearchResult) => {
-    const fullName = [farmer.name, farmer.lastName].filter(Boolean).join(" ");
-    onSearchSelect(farmer.farmerId, fullName, farmer);
+    onSearchSelect(farmer.farmerId, farmer.name, farmer);
   };
 
   const showNewFarmerOption = query.trim().length > 0 && !isSearching && results.length === 0;
@@ -112,7 +110,7 @@ export const PreSurveyForm: React.FC<PreSurveyFormProps> = ({
               onPress={() => handleSelect(item)}
             >
               <Text style={styles.resultName}>
-                {item.name} {item.lastName ?? ""}
+                {item.name}
               </Text>
               {item.documentId ? (
                 <Text style={styles.resultDetail}>Doc: {item.documentId}</Text>

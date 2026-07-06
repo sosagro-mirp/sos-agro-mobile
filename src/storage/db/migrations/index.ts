@@ -9,9 +9,15 @@ const migrations = {
       { idx: 3, when: 3, tag: 'm0003', breakpoints: true },
       { idx: 4, when: 4, tag: 'm0004', breakpoints: true },
       { idx: 5, when: 5, tag: 'm0005', breakpoints: true },
+      { idx: 6, when: 6, tag: 'm0006', breakpoints: true },
     ],
   },
   migrations: {
+    m0006: [
+      'ALTER TABLE `farmer_cache` DROP COLUMN `last_name`',
+    ].join('\n'),
+
+
     m0004: [
       "CREATE TABLE IF NOT EXISTS `change_requests` (`id` text PRIMARY KEY NOT NULL, `description` text NOT NULL, `farmer_id` text, `status` text NOT NULL DEFAULT 'pending_sync', `resolved_at` integer, `created_at` integer NOT NULL, `synced_at` integer)",
     ].join('\n'),

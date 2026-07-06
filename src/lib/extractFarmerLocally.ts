@@ -7,7 +7,6 @@ import { generateLocalId } from './generateLocalId';
 export interface LocalFarmerDraft {
   farmerId: string;
   name: string;
-  lastName: string | null;
   documentId: string | null;
   phone: string | null;
   farmName: string | null;
@@ -24,7 +23,6 @@ export async function extractFarmerLocally(s1SurveyId: string): Promise<LocalFar
   const flatQuestions = flattenSections(instrument.sections);
 
   let respondentName: string | null = null;
-  let respondentLastName: string | null = null;
   let respondentDocumentId: string | null = null;
   let respondentPhone: string | null = null;
   let producerName: string | null = null;
@@ -45,9 +43,6 @@ export async function extractFarmerLocally(s1SurveyId: string): Promise<LocalFar
     switch (question.systemField) {
       case 'farmer.name':
         respondentName = answer.textValue ?? null;
-        break;
-      case 'farmer.lastName':
-        respondentLastName = answer.textValue ?? null;
         break;
       case 'farmer.documentId':
         respondentDocumentId = textOrNumeric;
@@ -76,18 +71,15 @@ export async function extractFarmerLocally(s1SurveyId: string): Promise<LocalFar
   const respondentIsProducer = isRespondent !== false;
 
   let farmerName: string | null;
-  let farmerLastName: string | null;
   let farmerDocumentId: string | null;
   let farmerPhone: string | null;
 
   if (respondentIsProducer) {
     farmerName = respondentName;
-    farmerLastName = respondentLastName;
     farmerDocumentId = respondentDocumentId;
     farmerPhone = respondentPhone;
   } else {
     farmerName = producerName || respondentName;
-    farmerLastName = null;
     farmerDocumentId = producerDocumentId || respondentDocumentId;
     farmerPhone = producerPhone;
   }
@@ -100,7 +92,6 @@ export async function extractFarmerLocally(s1SurveyId: string): Promise<LocalFar
       return {
         farmerId: cached.farmerId,
         name: cached.name,
-        lastName: cached.lastName ?? null,
         documentId: cached.documentId ?? null,
         phone: cached.phone ?? null,
         farmName,
@@ -112,7 +103,6 @@ export async function extractFarmerLocally(s1SurveyId: string): Promise<LocalFar
   return {
     farmerId: generateLocalId('farmer'),
     name: farmerName,
-    lastName: farmerLastName,
     documentId: farmerDocumentId,
     phone: farmerPhone,
     farmName,

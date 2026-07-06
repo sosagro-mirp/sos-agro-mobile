@@ -108,7 +108,6 @@ export const changeRequests = sqliteTable('change_requests', {
 export const farmerCache = sqliteTable('farmer_cache', {
   farmerId: text('farmer_id').primaryKey(),
   name: text('name').notNull(),
-  lastName: text('last_name'),
   documentId: text('document_id'),
   phone: text('phone'),
   farmName: text('farm_name'),
