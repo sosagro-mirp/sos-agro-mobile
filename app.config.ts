@@ -39,6 +39,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         'READ_MEDIA_VIDEO',
         'READ_MEDIA_AUDIO',
         'READ_EXTERNAL_STORAGE',
+        'ACCESS_FINE_LOCATION',
+        'ACCESS_COARSE_LOCATION',
       ],
       versionCode,
     },
@@ -60,6 +62,14 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         'expo-av',
         {
           microphonePermission: 'SOSAgro necesita acceso al micrófono para grabar respuestas de voz en campo.',
+        },
+      ],
+      [
+        'expo-location',
+        {
+          locationAlwaysAndWhenInUsePermission: 'SOSAgro necesita acceso a tu ubicación GPS para registrar las coordenadas de la unidad productiva.',
+          locationWhenInUsePermission: 'SOSAgro necesita acceso a tu ubicación GPS para registrar las coordenadas de la unidad productiva.',
+          isIosBackgroundLocationEnabled: false,
         },
       ],
     ],

@@ -3,6 +3,7 @@ import type { FlattenedQuestionItem, InstrumentDraftAnswer, InstrumentOption } f
 import { useInstrumentSurveyStore } from "../../store/useInstrumentSurveyStore";
 import { OpenTextInput } from "../inputs/OpenTextInput";
 import { NumericInput } from "../inputs/NumericInput";
+import { GpsCoordinateInput } from "../inputs/GpsCoordinateInput";
 import { SingleChoiceList } from "../inputs/SingleChoiceList";
 import { MultipleChoiceList } from "../inputs/MultipleChoiceList";
 import { LikertScale } from "../inputs/LikertScale";
@@ -11,16 +12,20 @@ import { ImageCaptureInput } from "../inputs/ImageCaptureInput";
 import { VoiceRecordingInput } from "../inputs/VoiceRecordingInput";
 import { DocumentPickerInput } from "../inputs/DocumentPickerInput";
 
+const GPS_SYSTEM_FIELDS = new Set(["farm.latitude", "farm.longitude"]);
+
 interface QuestionRendererProps {
   item: FlattenedQuestionItem;
   answer: InstrumentDraftAnswer | undefined;
   onChange: (answer: InstrumentDraftAnswer) => void;
+  onAltitudeObtained?: (altitude: number) => void;
 }
 
 export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
   item,
   answer,
   onChange,
+  onAltitudeObtained,
 }) => {
   const { question } = item;
   const { questionId, options, type } = question;
@@ -62,6 +67,20 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
     if (!selectedDepartmentId) return options as InstrumentOption[];
     return (options as InstrumentOption[]).filter((o) => o.departmentId === selectedDepartmentId);
   }, [question.systemField, options, selectedDepartmentId]);
+
+  // Auto-llenado GPS para latitud/longitud (spec28). Va después de los hooks
+  // para no romper las reglas de hooks de React con un return temprano.
+  if (question.systemField && GPS_SYSTEM_FIELDS.has(question.systemField)) {
+    return (
+      <GpsCoordinateInput
+        questionId={questionId}
+        fieldType={question.systemField === "farm.latitude" ? "latitude" : "longitude"}
+        value={answer?.numericValue}
+        onChange={onChange}
+        onAltitudeObtained={onAltitudeObtained}
+      />
+    );
+  }
 
   if (!type) {
     return (
