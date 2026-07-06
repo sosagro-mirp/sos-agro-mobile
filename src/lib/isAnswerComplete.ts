@@ -16,6 +16,8 @@ export function isAnswerComplete(
     case "open_text":
       return Boolean(answer.textValue?.trim());
     case "numeric":
+      // GPS-backed questions (systemField farm.latitude/longitude) also go through this
+      // case: GpsCoordinateInput reports numericValue with the same contract as NumericInput.
       return answer.numericValue !== undefined;
     case "yes_no":
       return answer.booleanValue !== undefined;

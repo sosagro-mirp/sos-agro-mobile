@@ -8,10 +8,34 @@ import {
   View,
 } from "react-native";
 import * as Location from "expo-location";
+import { MapPin } from "lucide-react-native";
 import { Fonts } from "../../theme/fonts";
 import type { InstrumentDraftAnswer } from "../../types/instrument";
 
 type GpsState = "idle" | "requesting" | "obtained" | "error";
+
+const GPS_TIMEOUT_MS = 20_000;
+
+class GpsTimeoutError extends Error {}
+
+function getCurrentPositionWithTimeout(
+  options: Location.LocationOptions,
+  timeoutMs: number,
+): Promise<Location.LocationObject> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new GpsTimeoutError()), timeoutMs);
+    Location.getCurrentPositionAsync(options).then(
+      (location) => {
+        clearTimeout(timer);
+        resolve(location);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
 
 interface Props {
   questionId: string;
@@ -65,10 +89,10 @@ export function GpsCoordinateInput({
         }
       }
 
-      const location = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.High,
-        timeInterval: 15_000,
-      });
+      const location = await getCurrentPositionWithTimeout(
+        { accuracy: Location.Accuracy.High },
+        GPS_TIMEOUT_MS,
+      );
 
       const coord =
         fieldType === "latitude"
@@ -85,9 +109,13 @@ export function GpsCoordinateInput({
       }
 
       setGpsState("obtained");
-    } catch {
+    } catch (error) {
       setGpsState("error");
-      setErrorMessage("No se pudo obtener la ubicación. Verifica que el GPS esté activo.");
+      setErrorMessage(
+        error instanceof GpsTimeoutError
+          ? "La búsqueda de señal GPS tardó demasiado. Intenta de nuevo en un lugar con mejor visibilidad al cielo."
+          : "No se pudo obtener la ubicación. Verifica que el GPS esté activo.",
+      );
     }
   }
 
@@ -117,7 +145,10 @@ export function GpsCoordinateInput({
         {isRequesting ? (
           <ActivityIndicator size="small" color="#FFFFFF" />
         ) : (
-          <Text style={styles.gpsButtonText}>📍 {buttonLabel}</Text>
+          <View style={styles.gpsButtonContent}>
+            <MapPin size={16} color="#FFFFFF" />
+            <Text style={styles.gpsButtonText}>{buttonLabel}</Text>
+          </View>
         )}
       </TouchableOpacity>
 
@@ -164,6 +195,11 @@ const styles = StyleSheet.create({
   },
   gpsButtonDisabled: {
     backgroundColor: "#9CA3AF",
+  },
+  gpsButtonContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
   gpsButtonText: {
     fontFamily: Fonts.semiBold,

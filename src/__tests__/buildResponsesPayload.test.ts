@@ -1,12 +1,12 @@
-import { buildResponsesPayload } from '../../lib/buildResponsesPayload';
-import { flattenSections } from '../../lib/flattenSections';
-import { isAnswerComplete } from '../../lib/isAnswerComplete';
-import { isQuestionVisible } from '../../lib/isQuestionVisible';
+import { buildResponsesPayload } from '../lib/buildResponsesPayload';
+import { flattenSections } from '../lib/flattenSections';
+import { isAnswerComplete } from '../lib/isAnswerComplete';
+import { isQuestionVisible } from '../lib/isQuestionVisible';
 import type {
   InstrumentDraftAnswer,
   InstrumentQuestion,
   InstrumentSection,
-} from '../../types';
+} from '../types';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -243,12 +243,6 @@ describe('isAnswerComplete', () => {
 });
 
 // ─── buildResponsesPayload ────────────────────────────────────────────────────
-
-jest.mock('../../storage/mediaUploadQueueStorage', () => ({
-  mediaUploadQueueStorage: {
-    getUploadedAttachmentId: jest.fn().mockResolvedValue(null),
-  },
-}));
 
 describe('buildResponsesPayload', () => {
   const surveyId = 'survey-abc';
