@@ -10,6 +10,7 @@ const migrations = {
       { idx: 4, when: 4, tag: 'm0004', breakpoints: true },
       { idx: 5, when: 5, tag: 'm0005', breakpoints: true },
       { idx: 6, when: 6, tag: 'm0006', breakpoints: true },
+      { idx: 7, when: 7, tag: 'm0007', breakpoints: true },
     ],
   },
   migrations: {
@@ -55,7 +56,7 @@ const migrations = {
       '--> statement-breakpoint',
       "CREATE TABLE IF NOT EXISTS `campaign_cache` (`id` text PRIMARY KEY NOT NULL, `data` text NOT NULL, `cached_at` integer NOT NULL)",
     ].join('\n'),
-    m0001: [
+    m0007: [
       "ALTER TABLE `sync_queue` ADD COLUMN `item_type` text NOT NULL DEFAULT 'survey'",
       '--> statement-breakpoint',
       "CREATE TABLE IF NOT EXISTS `farm_plots` (`id` text PRIMARY KEY NOT NULL, `farm_id` text NOT NULL, `name` text NOT NULL, `description` text, `area` real, `polygon` text NOT NULL, `status` text NOT NULL DEFAULT 'draft', `captured_offline` integer NOT NULL DEFAULT 1, `created_at` integer NOT NULL, `updated_at` integer NOT NULL)",
