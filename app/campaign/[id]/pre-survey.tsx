@@ -10,6 +10,10 @@ import { useAuthStore } from "../../../src/store/useAuthStore";
 import { PreSurveyForm } from "../../../src/components/campaign/PreSurveyForm";
 import { OfflineBanner } from "../../../src/components/network/OfflineBanner";
 import { Fonts } from "../../../src/theme/fonts";
+import { generateLocalId } from "../../../src/lib/generateLocalId";
+import { pendingSessionStorage } from "../../../src/storage/pendingSessions";
+import { farmerCacheStorage } from "../../../src/storage/farmerCache";
+import type { FarmerSearchResult } from "../../../src/types";
 
 export default function PreSurveyScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -19,9 +23,9 @@ export default function PreSurveyScreen() {
   const {
     startSession,
     applySessionResponse,
+    applyOfflineSession,
     setSelectedFarmer,
     setNewFarmerMode,
-    lastFarmer,
   } = useCampaignSessionStore();
   const { isOnline } = useSyncStatusStore();
   const { user } = useAuthStore();
@@ -40,16 +44,26 @@ export default function PreSurveyScreen() {
     );
   }
 
-  const startAndNavigate = async (farmerId?: string) => {
+  const startSessionOnline = async (options?: {
+    farmerId?: string;
+    farmerName?: string;
+    isNew?: boolean;
+  }) => {
     setError(null);
     setIsLoading(true);
     startSession(campaign);
+
+    if (options?.isNew) {
+      setNewFarmerMode();
+    } else if (options?.farmerId && options?.farmerName) {
+      setSelectedFarmer(options.farmerId, options.farmerName);
+    }
 
     try {
       const sessionResponse = await createCampaignSession({
         campaignId: campaign.campaignId,
         userId: user?.userId,
-        ...(farmerId ? { farmerId } : {}),
+        ...(options?.farmerId ? { farmerId: options.farmerId } : {}),
       });
 
       applySessionResponse(sessionResponse);
@@ -61,23 +75,68 @@ export default function PreSurveyScreen() {
     }
   };
 
-  const handleSearchSelect = async (farmerId: string, farmerName: string) => {
-    setSelectedFarmer(farmerId, farmerName);
-    await startAndNavigate(farmerId);
+  const startSessionOffline = async (options?: {
+    farmerId?: string;
+    farmerName?: string;
+    isNew?: boolean;
+  }) => {
+    setError(null);
+    setIsLoading(true);
+
+    const localSessionId = generateLocalId('session');
+    startSession(campaign);
+
+    if (options?.isNew) {
+      setNewFarmerMode();
+    } else if (options?.farmerId && options?.farmerName) {
+      setSelectedFarmer(options.farmerId, options.farmerName);
+    }
+
+    try {
+      await pendingSessionStorage.create({
+        localSessionId,
+        campaignId: campaign.campaignId,
+        farmerId: options?.farmerId,
+        userId: user?.userId,
+      });
+
+      applyOfflineSession(localSessionId);
+      router.push(`/campaign/${id}/session/${localSessionId}/orchestrator`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al iniciar sesión offline");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const startSession_ = async (options?: {
+    farmerId?: string;
+    farmerName?: string;
+    isNew?: boolean;
+  }) => {
+    if (isOnline) {
+      await startSessionOnline(options);
+    } else {
+      await startSessionOffline(options);
+    }
+  };
+
+  const handleSearchSelect = async (farmerId: string, farmerName: string, farmer?: FarmerSearchResult) => {
+    if (isOnline && farmer) {
+      await farmerCacheStorage.upsert({
+        farmerId: farmer.farmerId,
+        name: farmer.name,
+        documentId: farmer.documentId ?? undefined,
+        phone: farmer.phone ?? undefined,
+        farmName: farmer.farm?.name ?? undefined,
+        cachedAt: new Date(),
+      });
+    }
+    await startSession_({ farmerId, farmerName });
   };
 
   const handleNewFarmer = async () => {
-    setNewFarmerMode();
-    await startAndNavigate();
-  };
-
-  const handleContinueLast = async (farmerId: string, farmerName: string) => {
-    setSelectedFarmer(farmerId, farmerName);
-    await startAndNavigate(farmerId);
-  };
-
-  const handleSkip = async () => {
-    await startAndNavigate();
+    await startSession_({ isNew: true });
   };
 
   return (
@@ -105,12 +164,9 @@ export default function PreSurveyScreen() {
         </View>
       ) : (
         <PreSurveyForm
-          lastFarmer={lastFarmer}
           isOnline={isOnline}
           onSearchSelect={handleSearchSelect}
           onNewFarmer={handleNewFarmer}
-          onContinueLast={handleContinueLast}
-          onSkip={handleSkip}
         />
       )}
     </SafeAreaView>

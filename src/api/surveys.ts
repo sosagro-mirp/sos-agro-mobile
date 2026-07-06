@@ -19,3 +19,30 @@ export const createSurvey = (payload: CreateSurveyPayload) =>
 
 export const markSurveyAsSynced = (surveyId: string) =>
   httpClient.patch<void>(endpoints.surveySync(surveyId));
+
+export interface OverwriteSurveyPayload {
+  surveyId: string;
+  sessionId: string;
+  instrumentId: string;
+  stepOrder: number;
+}
+
+export interface OverwriteSurveyResponse {
+  surveyId: string;
+}
+
+export const overwriteSurvey = (payload: OverwriteSurveyPayload) =>
+  httpClient.post<OverwriteSurveyResponse>(endpoints.surveyOverwrite, payload);
+
+export interface SkipStepPayload {
+  sessionId: string;
+  instrumentId: string;
+  stepOrder: number;
+}
+
+export interface SkipStepResponse {
+  surveyId: string;
+}
+
+export const skipStepApi = (payload: SkipStepPayload) =>
+  httpClient.post<SkipStepResponse>(endpoints.surveySkipStep, payload);

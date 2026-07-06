@@ -1,12 +1,12 @@
-import { buildResponsesPayload } from '../../lib/buildResponsesPayload';
-import { flattenSections } from '../../lib/flattenSections';
-import { isAnswerComplete } from '../../lib/isAnswerComplete';
-import { isQuestionVisible } from '../../lib/isQuestionVisible';
+import { buildResponsesPayload } from '../lib/buildResponsesPayload';
+import { flattenSections } from '../lib/flattenSections';
+import { isAnswerComplete } from '../lib/isAnswerComplete';
+import { isQuestionVisible } from '../lib/isQuestionVisible';
 import type {
   InstrumentDraftAnswer,
   InstrumentQuestion,
   InstrumentSection,
-} from '../../types';
+} from '../types';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -252,79 +252,94 @@ describe('buildResponsesPayload', () => {
     return { sectionId: 's1', sectionName: 'S1', sectionOrder: 1, question: q };
   }
 
-  it('returns empty array when there are no answered questions', () => {
+  it('returns empty array when there are no answered questions', async () => {
     const questions = [item({ questionId: 'q1' })];
-    expect(buildResponsesPayload(surveyId, questions, {})).toEqual([]);
+    expect(await buildResponsesPayload(surveyId, questions, {})).toEqual([]);
   });
 
-  it('builds payload for open_text answer', () => {
+  it('builds payload for open_text answer', async () => {
     const questions = [item({ questionId: 'q1', typeName: 'open_text' })];
     const answers = { q1: { questionId: 'q1', textValue: '  hello  ' } };
-    const result = buildResponsesPayload(surveyId, questions, answers);
+    const result = await buildResponsesPayload(surveyId, questions, answers);
 
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({ surveyId, questionId: 'q1', textValue: 'hello' });
   });
 
-  it('trims whitespace from textValue', () => {
+  it('trims whitespace from textValue', async () => {
     const questions = [item({ questionId: 'q1', typeName: 'open_text' })];
     const answers = { q1: { questionId: 'q1', textValue: '   ' } };
-    const result = buildResponsesPayload(surveyId, questions, answers);
+    const result = await buildResponsesPayload(surveyId, questions, answers);
 
-    // empty textValue after trim → excluded, but surveyId+questionId still included?
-    // per implementation: trimmedText falsy → textValue not included; hasValue check
     expect(result).toHaveLength(0);
   });
 
-  it('builds payload for numeric answer', () => {
+  it('builds payload for numeric answer', async () => {
     const questions = [item({ questionId: 'q1', typeName: 'numeric' })];
     const answers = { q1: { questionId: 'q1', numericValue: 42 } };
-    const result = buildResponsesPayload(surveyId, questions, answers);
+    const result = await buildResponsesPayload(surveyId, questions, answers);
 
     expect(result[0]).toMatchObject({ surveyId, questionId: 'q1', numericValue: 42 });
   });
 
-  it('includes numericValue: 0', () => {
+  it('includes numericValue: 0', async () => {
     const questions = [item({ questionId: 'q1', typeName: 'numeric' })];
     const answers = { q1: { questionId: 'q1', numericValue: 0 } };
-    const result = buildResponsesPayload(surveyId, questions, answers);
+    const result = await buildResponsesPayload(surveyId, questions, answers);
 
     expect(result[0]).toMatchObject({ numericValue: 0 });
   });
 
-  it('builds payload for yes_no answer', () => {
+  it('builds payload for numeric GPS coordinate with decimal precision', async () => {
+    // GPS questions use type=numeric and are sent as numericValue — same path as any numeric.
+    const latQuestion = makeQuestion({
+      questionId: 'q-lat',
+      typeName: 'numeric',
+      systemField: 'farm.latitude',
+    });
+    const questions = [
+      { sectionId: 's1', sectionName: 'S1', sectionOrder: 1, question: latQuestion },
+    ];
+    const answers = { 'q-lat': { questionId: 'q-lat', numericValue: 3.8612 } };
+    const result = await buildResponsesPayload(surveyId, questions, answers);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ surveyId, questionId: 'q-lat', numericValue: 3.8612 });
+  });
+
+  it('builds payload for yes_no answer', async () => {
     const questions = [item({ questionId: 'q1', typeName: 'yes_no' })];
     const answers = { q1: { questionId: 'q1', booleanValue: false } };
-    const result = buildResponsesPayload(surveyId, questions, answers);
+    const result = await buildResponsesPayload(surveyId, questions, answers);
 
     expect(result[0]).toMatchObject({ surveyId, questionId: 'q1', booleanValue: false });
   });
 
-  it('builds payload for single_choice answer', () => {
+  it('builds payload for single_choice answer', async () => {
     const questions = [item({ questionId: 'q1', typeName: 'single_choice' })];
     const answers = { q1: { questionId: 'q1', optionId: 'opt-x' } };
-    const result = buildResponsesPayload(surveyId, questions, answers);
+    const result = await buildResponsesPayload(surveyId, questions, answers);
 
     expect(result[0]).toMatchObject({ surveyId, questionId: 'q1', optionId: 'opt-x' });
   });
 
-  it('builds one payload item per selected option for multiple_choice', () => {
+  it('builds one payload item per selected option for multiple_choice', async () => {
     const questions = [item({ questionId: 'q1', typeName: 'multiple_choice' })];
     const answers = { q1: { questionId: 'q1', optionIds: ['opt-a', 'opt-b', 'opt-c'] } };
-    const result = buildResponsesPayload(surveyId, questions, answers);
+    const result = await buildResponsesPayload(surveyId, questions, answers);
 
     expect(result).toHaveLength(3);
     expect(result.map((r) => r.optionId)).toEqual(['opt-a', 'opt-b', 'opt-c']);
     result.forEach((r) => expect(r.surveyId).toBe(surveyId));
   });
 
-  it('returns empty array for multiple_choice with no selected options', () => {
+  it('returns empty array for multiple_choice with no selected options', async () => {
     const questions = [item({ questionId: 'q1', typeName: 'multiple_choice' })];
     const answers = { q1: { questionId: 'q1', optionIds: [] } };
-    expect(buildResponsesPayload(surveyId, questions, answers)).toHaveLength(0);
+    expect(await buildResponsesPayload(surveyId, questions, answers)).toHaveLength(0);
   });
 
-  it('excludes invisible questions (conditioned and trigger not answered)', () => {
+  it('excludes invisible questions (conditioned and trigger not answered)', async () => {
     const trigger = makeQuestion({
       questionId: 'q1',
       typeName: 'yes_no',
@@ -341,19 +356,18 @@ describe('buildResponsesPayload', () => {
       { sectionId: 's1', sectionName: 'S1', sectionOrder: 1, question: trigger },
       { sectionId: 's1', sectionName: 'S1', sectionOrder: 1, question: dependent },
     ];
-    // q1 answered "false", so q2 (conditionValue='true') should be invisible
     const answers = {
       q1: { questionId: 'q1', booleanValue: false },
       q2: { questionId: 'q2', textValue: 'should be excluded' },
     };
-    const result = buildResponsesPayload(surveyId, questions, answers);
+    const result = await buildResponsesPayload(surveyId, questions, answers);
     const questionIds = result.map((r) => r.questionId);
 
     expect(questionIds).not.toContain('q2');
     expect(questionIds).toContain('q1');
   });
 
-  it('includes visible conditioned question when condition is met', () => {
+  it('includes visible conditioned question when condition is met', async () => {
     const trigger = makeQuestion({
       questionId: 'q1',
       typeName: 'yes_no',
@@ -374,18 +388,17 @@ describe('buildResponsesPayload', () => {
       q1: { questionId: 'q1', booleanValue: true },
       q2: { questionId: 'q2', textValue: 'visible answer' },
     };
-    const result = buildResponsesPayload(surveyId, questions, answers);
+    const result = await buildResponsesPayload(surveyId, questions, answers);
     const questionIds = result.map((r) => r.questionId);
 
     expect(questionIds).toContain('q1');
     expect(questionIds).toContain('q2');
   });
 
-  it('does not include items with no meaningful value', () => {
-    // answer has no optionId, no textValue, no numericValue, no booleanValue
+  it('does not include items with no meaningful value', async () => {
     const questions = [item({ questionId: 'q1', typeName: 'open_text' })];
     const answers = { q1: { questionId: 'q1' } };
-    const result = buildResponsesPayload(surveyId, questions, answers);
+    const result = await buildResponsesPayload(surveyId, questions, answers);
     expect(result).toHaveLength(0);
   });
 });

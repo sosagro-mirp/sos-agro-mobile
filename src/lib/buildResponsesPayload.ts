@@ -9,6 +9,7 @@ export function buildResponsesPayload(
   surveyId: string,
   flattenedQuestions: FlattenedQuestionItem[],
   answers: Record<string, InstrumentDraftAnswer>,
+  attachmentIds: Record<string, string> = {},
 ): CreateResponsePayload[] {
   const payload: CreateResponsePayload[] = [];
 
@@ -28,20 +29,27 @@ export function buildResponsesPayload(
       }
 
       const trimmedText = answer.textValue?.trim();
-      const item = {
+      const attachmentId = attachmentIds[question.questionId];
+
+      const item: CreateResponsePayload = {
         surveyId,
         questionId: answer.questionId,
         ...(answer.optionId !== undefined && { optionId: answer.optionId }),
         ...(trimmedText ? { textValue: trimmedText } : {}),
         ...(answer.numericValue !== undefined && { numericValue: answer.numericValue }),
         ...(answer.booleanValue !== undefined && { booleanValue: answer.booleanValue }),
+        ...(attachmentId ? { attachmentId } : {}),
       };
+
+      // Skip multimedia responses whose upload hasn't completed yet
+      if (answer.mediaLocalPath && !attachmentId) return;
 
       const hasValue =
         "optionId" in item ||
         "textValue" in item ||
         "numericValue" in item ||
-        "booleanValue" in item;
+        "booleanValue" in item ||
+        "attachmentId" in item;
 
       if (hasValue) payload.push(item);
     });

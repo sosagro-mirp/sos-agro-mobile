@@ -11,14 +11,16 @@ import {
 } from "@expo-google-fonts/jetbrains-mono";
 import * as SplashScreen from "expo-splash-screen";
 import { useAuthStore } from "../src/store/useAuthStore";
-import { useCampaignSessionStore } from "../src/store/useCampaignSessionStore";
+import { useCachedInstrumentsStore } from "../src/store/useCachedInstrumentsStore";
 import { runMigrations } from "../src/storage/db/db";
 import { syncQueueStorage } from "../src/storage/syncQueue";
 import { surveyDraftStore } from "../src/storage/surveyDraftStore";
+import { pendingSessionStorage } from "../src/storage/pendingSessions";
 import { NetworkMonitor } from "../src/sync/NetworkMonitor";
 import { BackgroundSync } from "../src/sync/BackgroundSync";
 import { initSentry, captureError } from "../src/lib/sentry";
 import { logger } from "../src/lib/logger";
+import { ChangeRequestBanner } from "../src/components/requests/ChangeRequestBanner";
 
 initSentry();
 
@@ -58,7 +60,7 @@ function AuthGuard() {
 
 export default function RootLayout() {
   const { isRestoring, restoreSession } = useAuthStore();
-  const { loadLastFarmer } = useCampaignSessionStore();
+  const loadInstrumentCache = useCachedInstrumentsStore((s) => s.loadFromCache);
   const [dbReady, setDbReady] = useState(false);
 
   const [fontsLoaded] = useFonts({
@@ -74,7 +76,7 @@ export default function RootLayout() {
       .then(async () => {
         setDbReady(true);
         await restoreSession();
-        loadLastFarmer().catch(console.error);
+        loadInstrumentCache().catch(console.error);
       })
       .catch((err) => { captureError(err); console.error(err); });
   }, []);
@@ -86,6 +88,15 @@ export default function RootLayout() {
 
     // Reset any entries that were in_flight when the app was last killed.
     syncQueueStorage.resetInFlightToRetry().catch(console.error);
+
+    // Log how many offline sessions are pending resolution.
+    pendingSessionStorage.listPending()
+      .then((pending) => {
+        if (pending.length > 0) {
+          logger.info(`[App] ${pending.length} offline session(s) pending sync`);
+        }
+      })
+      .catch(console.error);
 
     // Purge synced surveys older than 30 days to keep local DB lean.
     surveyDraftStore.purgeSyncedSurveys()
@@ -115,6 +126,7 @@ export default function RootLayout() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthGuard />
+      <ChangeRequestBanner />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="login" />
         <Stack.Screen name="index" />

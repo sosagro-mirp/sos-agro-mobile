@@ -7,6 +7,7 @@ export interface SurveyDraft {
   surveyId: string;
   instrumentId: string;
   campaignSessionId?: string;
+  farmerId?: string;
   answers: Record<string, InstrumentDraftAnswer>;
   updatedAt: Date;
 }
@@ -16,12 +17,16 @@ export const surveyDraftStore = {
     surveyId: string;
     instrumentId: string;
     campaignSessionId?: string;
+    farmerId?: string;
   }): Promise<void> {
     const now = new Date();
     await db.insert(surveys).values({
       id: params.surveyId,
       instrumentId: params.instrumentId,
       campaignSessionId: params.campaignSessionId ?? null,
+      // Only include farmerId when present — omitting it entirely avoids
+      // referencing the column on devices where m0001 hasn't applied yet.
+      ...(params.farmerId != null ? { farmerId: params.farmerId } : {}),
       status: 'draft',
       createdAt: now,
       updatedAt: now,
@@ -47,6 +52,8 @@ export const surveyDraftStore = {
         numericValue: answer.numericValue ?? null,
         booleanValue: answer.booleanValue ?? null,
         otherText: answer.otherText ?? null,
+        mediaLocalPath: answer.mediaLocalPath ?? null,
+        mimeType: answer.mimeType ?? null,
       })
       .onConflictDoUpdate({
         target: responses.id,
@@ -57,6 +64,8 @@ export const surveyDraftStore = {
           numericValue: answer.numericValue ?? null,
           booleanValue: answer.booleanValue ?? null,
           otherText: answer.otherText ?? null,
+          mediaLocalPath: answer.mediaLocalPath ?? null,
+          mimeType: answer.mimeType ?? null,
         },
       });
 
@@ -85,6 +94,8 @@ export const surveyDraftStore = {
             numericValue: answer.numericValue ?? null,
             booleanValue: answer.booleanValue ?? null,
             otherText: answer.otherText ?? null,
+            mediaLocalPath: answer.mediaLocalPath ?? null,
+            mimeType: answer.mimeType ?? null,
           })
           .onConflictDoUpdate({
             target: responses.id,
@@ -95,6 +106,8 @@ export const surveyDraftStore = {
               numericValue: answer.numericValue ?? null,
               booleanValue: answer.booleanValue ?? null,
               otherText: answer.otherText ?? null,
+              mediaLocalPath: answer.mediaLocalPath ?? null,
+              mimeType: answer.mimeType ?? null,
             },
           });
       }
@@ -130,6 +143,8 @@ export const surveyDraftStore = {
         numericValue: row.numericValue ?? undefined,
         booleanValue: row.booleanValue ?? undefined,
         otherText: row.otherText ?? undefined,
+        mediaLocalPath: row.mediaLocalPath ?? undefined,
+        mimeType: row.mimeType ?? undefined,
       };
     }
 
@@ -137,6 +152,7 @@ export const surveyDraftStore = {
       surveyId: survey.id,
       instrumentId: survey.instrumentId,
       campaignSessionId: survey.campaignSessionId ?? undefined,
+      farmerId: survey.farmerId ?? undefined,
       answers,
       updatedAt: survey.updatedAt,
     };

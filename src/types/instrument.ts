@@ -6,6 +6,10 @@ export type QuestionTypeName =
   | "multiple_choice"
   | "likert"
   | "compliance"
+  | "image"
+  | "voice_recording"
+  | "document"
+  | "video"
   | (string & {});
 
 export interface InstrumentType {
@@ -18,6 +22,8 @@ export interface InstrumentOption {
   text: string;
   value: string | number | boolean | null;
   isOther?: boolean;
+  metadataId?: string | null;
+  departmentId?: string | null;
 }
 
 export interface InstrumentQuestion {
@@ -25,6 +31,7 @@ export interface InstrumentQuestion {
   text: string;
   isRequired: boolean;
   isSelectionCriteria?: boolean;
+  isKeyQuestion?: boolean;
   order: number;
   systemField?: string | null;
   type: InstrumentType;
@@ -41,10 +48,13 @@ export interface InstrumentDraftAnswer {
   numericValue?: number;
   booleanValue?: boolean;
   otherText?: string;
+  mediaLocalPath?: string;
+  mimeType?: string;
 }
 
 export interface CreateResponsePayload extends InstrumentDraftAnswer {
   surveyId: string;
+  attachmentId?: string;
 }
 
 export interface InstrumentSection {
@@ -114,7 +124,6 @@ export interface CropSummary {
 export interface FarmerSearchResult {
   farmerId: string;
   name: string;
-  lastName: string | null;
   documentId: string | null;
   phone?: string | null;
   farm?: { farmId: string; name: string } | null;
@@ -128,13 +137,6 @@ export interface ExtractFarmerResult {
 export interface ExtractCropsResult {
   crops: CropSummary[];
 }
-
-export type LastFarmerResult = {
-  farmerId: string;
-  name: string;
-  lastName: string | null;
-  farm?: { name: string };
-} | null;
 
 export interface DuplicateCheckResult {
   hasDuplicate: boolean;

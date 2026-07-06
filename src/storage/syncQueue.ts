@@ -136,6 +136,36 @@ export const syncQueueStorage = {
       .set({ status: 'pending' })
       .where(eq(syncQueue.status, 'in_flight'));
   },
+
+  async clearFailed(): Promise<number> {
+    const result = await db
+      .delete(syncQueue)
+      .where(eq(syncQueue.status, 'failed_validation'));
+    return result.changes ?? 0;
+  },
+
+  async deleteBySurveyId(surveyId: string): Promise<void> {
+    await db.delete(syncQueue).where(eq(syncQueue.surveyId, surveyId));
+  },
+
+  async getPendingBySurveyId(surveyId: string): Promise<SyncQueueEntry | null> {
+    const row = await db
+      .select()
+      .from(syncQueue)
+      .where(and(eq(syncQueue.surveyId, surveyId), eq(syncQueue.status, 'pending')))
+      .get();
+    return row ? mapRow(row) : null;
+  },
+
+  async getActiveBySurveyId(surveyId: string): Promise<SyncQueueEntry | null> {
+    const rows = await db
+      .select()
+      .from(syncQueue)
+      .where(eq(syncQueue.surveyId, surveyId))
+      .all();
+    const active = rows.find((r) => r.status === 'pending' || r.status === 'in_flight');
+    return active ? mapRow(active) : null;
+  },
 };
 
 function mapRow(row: typeof syncQueue.$inferSelect): SyncQueueEntry {

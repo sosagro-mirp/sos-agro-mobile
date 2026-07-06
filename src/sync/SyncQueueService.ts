@@ -1,21 +1,30 @@
+import { eq } from 'drizzle-orm';
 import { db } from '../storage/db/db';
-import { responses, surveys } from '../storage/db/schema';
+import { surveys, syncQueue } from '../storage/db/schema';
 import { syncQueueStorage, type SyncQueueEntry } from '../storage/syncQueue';
 import { surveyDraftStore } from '../storage/surveyDraftStore';
-import { farmPlotStore } from '../storage/farmPlotStore';
+import { pendingSessionStorage } from '../storage/pendingSessions';
+import { farmerCacheStorage } from '../storage/farmerCache';
+import { instrumentCacheStorage } from '../storage/instrumentCache';
 import { submitResponsesBatch } from '../api/responses';
-import { markSurveyAsSynced } from '../api/surveys';
-import { markSessionAsSynced } from '../api/campaignSessions';
-import { createFarmPlot } from '../api/farmPlots';
+import { createSurvey, markSurveyAsSynced } from '../api/surveys';
+import { markSessionAsSynced, createCampaignSession } from '../api/campaignSessions';
+import { extractFarmer, extractCrops } from '../api/farmers';
 import { buildResponsesPayload } from '../lib/buildResponsesPayload';
 import { flattenSections } from '../lib/flattenSections';
-import { instrumentCacheStorage } from '../storage/instrumentCache';
+import { resolveOtherOptions } from '../lib/resolveOtherOptions';
+import { isLocalId } from '../lib/isLocalId';
 import { useSyncStatusStore } from '../store/useSyncStatusStore';
-import { eq } from 'drizzle-orm';
+import { useCampaignSessionStore } from '../store/useCampaignSessionStore';
 import { NetworkError, httpClient } from '../api/httpClient';
 import { endpoints } from '../api/endpoints';
 import { logger } from '../lib/logger';
+import { sessionCropsStorage } from '../storage/sessionCropsStorage';
 import { captureError } from '../lib/sentry';
+import { MediaUploadService } from './MediaUploadService';
+import { changeRequestStorage } from '../storage/changeRequestStorage';
+import { postChangeRequest, fetchMyResolved } from '../api/changeRequests';
+import { useChangeRequestStore } from '../store/useChangeRequestStore';
 
 const MAX_CONSECUTIVE_NETWORK_FAILURES = 5;
 const BACKOFF_BASE_MS = 1000;
@@ -34,6 +43,20 @@ class SyncQueueServiceClass {
       useSyncStatusStore.getState();
 
     try {
+      // Resolve any provisional sessions before processing the queue.
+      try {
+        await this.resolveLocalSessions();
+      } catch (err) {
+        logger.error('[Sync] resolveLocalSessions failed, continuing anyway', err);
+      }
+
+      // Flush pending change requests before processing surveys.
+      try {
+        await this.flushPendingChangeRequests();
+      } catch (err) {
+        logger.error('[Sync] flushPendingChangeRequests failed, continuing anyway', err);
+      }
+
       let entry = await syncQueueStorage.dequeueNextPending();
 
       while (entry) {
@@ -42,11 +65,113 @@ class SyncQueueServiceClass {
         await refreshPendingCount();
         entry = await syncQueueStorage.dequeueNextPending();
       }
+      // Pull resolved change requests after the survey loop.
+      try {
+        const { lastSyncAt } = useSyncStatusStore.getState();
+        // Fall back to epoch when lastSyncAt is null (first sync or after app restart)
+        // so we always catch any resolved tickets.
+        const since = lastSyncAt ?? new Date(0);
+        await this.pullResolvedChangeRequests(since);
+      } catch (err) {
+        logger.error('[Sync] pullResolvedChangeRequests failed, continuing anyway', err);
+      }
     } finally {
+      // Reset any entries left in_flight (e.g., deferred due to unresolved session)
+      // so they're retried on the next sync run.
+      await syncQueueStorage.resetInFlightToRetry();
       this.isProcessing = false;
       setSyncingId(null);
       markSyncCompleted();
       await refreshPendingCount();
+    }
+  }
+
+  private async flushPendingChangeRequests(): Promise<void> {
+    const pending = await changeRequestStorage.listPendingSync();
+    if (pending.length === 0) return;
+
+    for (const cr of pending) {
+      await postChangeRequest({
+        description: cr.description,
+        farmerId: cr.farmerId,
+        localId: cr.id,
+      });
+      await changeRequestStorage.markSynced(cr.id);
+      logger.info(`[Sync] change request ${cr.id} synced`);
+    }
+
+    await useChangeRequestStore.getState().loadAll();
+  }
+
+  private async pullResolvedChangeRequests(since: Date): Promise<void> {
+    const resolved = await fetchMyResolved(since);
+    if (resolved.length === 0) return;
+
+    let newCount = 0;
+    for (const item of resolved) {
+      if (!item.localId) continue;
+      await changeRequestStorage.markResolved(item.localId, new Date(item.resolvedAt));
+      newCount++;
+    }
+
+    if (newCount > 0) {
+      useChangeRequestStore.getState().setHasNewResolved(true);
+      await useChangeRequestStore.getState().loadAll();
+      logger.info(`[Sync] ${newCount} change request(s) marked as resolved`);
+    }
+  }
+
+  private async resolveLocalSessions(): Promise<void> {
+    const pending = await pendingSessionStorage.listPending();
+
+    for (const session of pending) {
+      try {
+        let farmerIdForBackend: string | undefined = session.farmerId;
+
+        // If the farmerId is provisional, don't send it — backend will assign after extractFarmer.
+        if (farmerIdForBackend && isLocalId(farmerIdForBackend)) {
+          farmerIdForBackend = undefined;
+        }
+
+        const sessionResponse = await createCampaignSession({
+          campaignId: session.campaignId,
+          userId: session.userId,
+          ...(farmerIdForBackend ? { farmerId: farmerIdForBackend } : {}),
+        });
+
+        const realSessionId = sessionResponse.sessionId;
+        const localSessionId = session.localSessionId;
+
+        // Remap all surveys and syncQueue entries that reference the provisional session.
+        await db
+          .update(surveys)
+          .set({ campaignSessionId: realSessionId })
+          .where(eq(surveys.campaignSessionId, localSessionId));
+
+        await db
+          .update(syncQueue)
+          .set({ campaignSessionId: realSessionId })
+          .where(eq(syncQueue.campaignSessionId, localSessionId));
+
+        await pendingSessionStorage.resolve(localSessionId, realSessionId);
+
+        // Update the active store if this session is still open.
+        const storeState = useCampaignSessionStore.getState();
+        if (storeState.localSessionId === localSessionId) {
+          storeState.resolveSession(realSessionId);
+        }
+
+        logger.info(`[Sync] resolved local session ${localSessionId} → ${realSessionId}`);
+      } catch (err) {
+        if (err instanceof NetworkError) {
+          logger.error('[Sync] network error resolving session, will retry later', err);
+          break;
+        } else {
+          logger.error(`[Sync] failed to resolve session ${session.localSessionId}`, err);
+          captureError(err, { localSessionId: session.localSessionId });
+          await pendingSessionStorage.markFailed(session.localSessionId);
+        }
+      }
     }
   }
 
@@ -62,17 +187,44 @@ class SyncQueueServiceClass {
     await syncQueueStorage.markInFlight(entry.id);
 
     try {
-      const payload = await this.buildPayload(entry);
+      // If the campaign session is still provisional (resolveLocalSessions failed earlier),
+      // leave the entry in_flight so this run's dequeue loop skips it.
+      // resetInFlightToRetry() in the finally block resets it to pending for the next sync run.
+      if (entry.campaignSessionId && isLocalId(entry.campaignSessionId)) {
+        logger.warn(`[Sync] campaign session not yet resolved for entry ${entry.id}, deferring`);
+        return;
+      }
+
+      // If the survey was created offline, it doesn't exist on the backend yet.
+      // Create it now to obtain a real surveyId before sending responses.
+      let realSurveyId = entry.surveyId;
+      if (isLocalId(entry.surveyId)) {
+        realSurveyId = await this.materializeSurvey(entry);
+      }
+
+      const payload = await this.buildPayload(entry, realSurveyId);
 
       if (!payload || payload.length === 0) {
-        // Nothing to send — survey may have had no answers; remove from queue.
         await syncQueueStorage.markSynced(entry.id);
         await surveyDraftStore.markSynced(entry.surveyId);
         return;
       }
 
+      // Log any response items with suspicious optionId values before sending.
+      const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      for (const item of payload) {
+        if (item.optionId !== undefined && !UUID_RE.test(item.optionId)) {
+          const msg = `[Sync] NON-UUID optionId detected before submit — questionId: ${item.questionId}, optionId: "${item.optionId}", surveyId: ${realSurveyId}`;
+          logger.error(msg);
+          console.error(msg);
+        }
+      }
+
       await submitResponsesBatch(payload);
-      await markSurveyAsSynced(entry.surveyId);
+      await markSurveyAsSynced(realSurveyId);
+
+      // After responses are on the backend, run deferred extraction for S1/S2.
+      await this.maybeExtractFarmerAndCrops(entry, realSurveyId);
 
       if (entry.campaignSessionId) {
         await markSessionAsSynced(entry.campaignSessionId);
@@ -80,7 +232,7 @@ class SyncQueueServiceClass {
 
       // Non-blocking telemetry — ignore errors
       httpClient.post(endpoints.telemetrySync, {
-        surveyId: entry.surveyId,
+        surveyId: realSurveyId,
         campaignSessionId: entry.campaignSessionId,
         attempts: entry.attempts,
       }).catch(() => {});
@@ -88,14 +240,13 @@ class SyncQueueServiceClass {
       await syncQueueStorage.markSynced(entry.id);
       await surveyDraftStore.markSynced(entry.surveyId);
 
-      logger.info(`[Sync] processed entry ${entry.id} for survey ${entry.surveyId}`);
+      logger.info(`[Sync] processed entry ${entry.id} for survey ${realSurveyId}`);
       this.consecutiveNetworkFailures = 0;
     } catch (error) {
       if (error instanceof NetworkError) {
         logger.error('[Sync] network error', error);
         await this.handleNetworkError(entry);
       } else {
-        // 4xx or unknown — mark as failed, do not retry
         logger.error('[Sync] validation error', error);
         captureError(error, { surveyId: entry.surveyId, entryId: entry.id });
         const detail = error instanceof Error ? error.message : String(error);
@@ -105,59 +256,104 @@ class SyncQueueServiceClass {
     }
   }
 
-  private async processFarmPlotEntry(entry: SyncQueueEntry): Promise<void> {
-    await syncQueueStorage.markInFlight(entry.id);
+  // Creates the survey on the backend for surveys that were started offline.
+  // Returns the real surveyId assigned by the backend.
+  private async materializeSurvey(entry: SyncQueueEntry): Promise<string> {
+    const draft = await surveyDraftStore.loadDraft(entry.surveyId);
+    if (!draft) throw new Error(`Draft not found for local survey ${entry.surveyId}`);
 
-    // entry.surveyId holds the farmPlotId (per spec29 decision D5)
-    const farmPlotId = entry.surveyId;
+    const { surveyId: realSurveyId } = await createSurvey({
+      instrumentIds: [draft.instrumentId],
+      campaignSessionId: entry.campaignSessionId,
+      ...(entry.stepOrder != null ? { stepOrder: entry.stepOrder } : {}),
+    });
 
-    try {
-      const draft = await farmPlotStore.loadDraft(farmPlotId);
+    logger.info(`[Sync] materialized local survey ${entry.surveyId} → ${realSurveyId}`);
+    return realSurveyId;
+  }
 
-      if (!draft) {
-        // Draft was deleted locally — nothing to sync, remove from queue
-        await syncQueueStorage.markSynced(entry.id);
-        return;
+  private async maybeExtractFarmerAndCrops(entry: SyncQueueEntry, realSurveyId: string): Promise<void> {
+    const draft = await surveyDraftStore.loadDraft(entry.surveyId);
+    if (!draft) return;
+
+    const instrument = await instrumentCacheStorage.get(draft.instrumentId);
+    if (!instrument) {
+      logger.warn(`[Sync] instrument not in cache for survey ${entry.surveyId}, skipping extraction`);
+      return;
+    }
+
+    const code = instrument.code;
+    if (code !== 'S1' && code !== 'S2') return;
+
+    if (code === 'S1') {
+      const { farmer } = await extractFarmer(realSurveyId);
+
+      // Remap provisional farmerId if one exists in farmerCache.
+      const allRecent = await farmerCacheStorage.listRecent(100);
+      const provisionalEntry = allRecent.find(
+        (f) => isLocalId(f.farmerId) && f.documentId && f.documentId === farmer.documentId
+      );
+
+      if (provisionalEntry) {
+        const localFarmerId = provisionalEntry.farmerId;
+
+        await db
+          .update(surveys)
+          .set({ farmerId: farmer.farmerId })
+          .where(eq(surveys.farmerId, localFarmerId));
+
+        const storeState = useCampaignSessionStore.getState();
+        if (storeState.localFarmerId === localFarmerId) {
+          storeState.resolveFarmer(farmer.farmerId);
+        }
       }
 
-      await createFarmPlot({
-        farmId: draft.farmId,
-        name: draft.name,
-        description: draft.description,
-        area: draft.area,
-        capturedOffline: draft.capturedOffline,
-        polygon: draft.polygon,
+      await farmerCacheStorage.upsert({
+        farmerId: farmer.farmerId,
+        name: farmer.name,
+        documentId: farmer.documentId ?? undefined,
+        cachedAt: new Date(),
       });
 
-      await farmPlotStore.markSynced(farmPlotId);
-      await syncQueueStorage.markSynced(entry.id);
-
-      logger.info(`[Sync] processed farm-plot entry ${entry.id} for plot ${farmPlotId}`);
-      this.consecutiveNetworkFailures = 0;
-    } catch (error) {
-      if (error instanceof NetworkError) {
-        logger.error('[Sync] network error (farm-plot)', error);
-        await this.handleNetworkError(entry);
-      } else {
-        // 4xx or unknown — mark as failed, do not retry
-        logger.error('[Sync] validation error (farm-plot)', error);
-        captureError(error, { farmPlotId, entryId: entry.id });
-        const detail = error instanceof Error ? error.message : String(error);
-        await syncQueueStorage.markFailedValidation(entry.id, detail);
-        this.consecutiveNetworkFailures = 0;
+      logger.info(`[Sync] extractFarmer completed for survey ${realSurveyId}`);
+    } else if (code === 'S2') {
+      const cropsResult = await extractCrops(realSurveyId);
+      logger.info(`[Sync] extractCrops completed for survey ${realSurveyId}`);
+      if (entry.campaignSessionId) {
+        await sessionCropsStorage.save(entry.campaignSessionId, cropsResult.crops);
       }
     }
   }
 
-  private async buildPayload(entry: SyncQueueEntry) {
+  private async buildPayload(entry: SyncQueueEntry, realSurveyId: string) {
     const draft = await surveyDraftStore.loadDraft(entry.surveyId);
     if (!draft) return [];
 
     const instrument = await instrumentCacheStorage.get(draft.instrumentId);
     if (!instrument) return [];
 
+    const attachmentIds = await MediaUploadService.processPendingForSurvey(entry.surveyId);
+
     const flattenedQuestions = flattenSections(instrument.sections);
-    return buildResponsesPayload(entry.surveyId, flattenedQuestions, draft.answers);
+
+    const resolvedAnswers = await resolveOtherOptions(flattenedQuestions, draft.answers);
+
+    // Persist resolved answers so a retry doesn't create the same dynamic option twice.
+    const hasChanges = Object.keys(resolvedAnswers).some(
+      (qId) => resolvedAnswers[qId] !== draft.answers[qId],
+    );
+    if (hasChanges) {
+      await surveyDraftStore.saveMultipleAnswers(entry.surveyId, resolvedAnswers);
+      for (const [qId, answer] of Object.entries(resolvedAnswers)) {
+        if (answer !== draft.answers[qId]) {
+          logger.info(
+            `[Sync] resolved other option — questionId: ${qId}, newOptionId: ${answer.optionId}`,
+          );
+        }
+      }
+    }
+
+    return buildResponsesPayload(realSurveyId, flattenedQuestions, resolvedAnswers, attachmentIds);
   }
 
   private async handleNetworkError(entry: SyncQueueEntry): Promise<void> {
@@ -172,7 +368,23 @@ class SyncQueueServiceClass {
     if (this.consecutiveNetworkFailures < MAX_CONSECUTIVE_NETWORK_FAILURES) {
       await sleep(delayMs);
     }
-    // If we hit the cap, processAll() will stop on the next iteration check.
+  }
+
+  async processSurveyNow(surveyId: string): Promise<void> {
+    const entry = await syncQueueStorage.getPendingBySurveyId(surveyId);
+
+    if (entry) {
+      await this.processEntry(entry);
+      return;
+    }
+
+    // Entry may be in_flight (processAll already picked it up); wait up to 10s.
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      const active = await syncQueueStorage.getActiveBySurveyId(surveyId);
+      if (!active) return;
+      await sleep(300);
+    }
   }
 
   resetNetworkFailures(): void {
