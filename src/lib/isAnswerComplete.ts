@@ -19,6 +19,8 @@ export function isAnswerComplete(
       // GPS-backed questions (systemField farm.latitude/longitude) also go through this
       // case: GpsCoordinateInput reports numericValue with the same contract as NumericInput.
       return answer.numericValue !== undefined;
+    case "numeric_with_unit":
+      return answer.numericValue !== undefined && Boolean(answer.optionId);
     case "yes_no":
       return answer.booleanValue !== undefined;
     case "multiple_choice": {

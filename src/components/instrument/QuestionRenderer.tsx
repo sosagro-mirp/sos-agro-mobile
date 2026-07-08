@@ -3,6 +3,7 @@ import type { FlattenedQuestionItem, InstrumentDraftAnswer, InstrumentOption } f
 import { useInstrumentSurveyStore } from "../../store/useInstrumentSurveyStore";
 import { OpenTextInput } from "../inputs/OpenTextInput";
 import { NumericInput } from "../inputs/NumericInput";
+import { NumericWithUnitInput } from "../inputs/NumericWithUnitInput";
 import { GpsCoordinateInput } from "../inputs/GpsCoordinateInput";
 import { SingleChoiceList } from "../inputs/SingleChoiceList";
 import { MultipleChoiceList } from "../inputs/MultipleChoiceList";
@@ -107,6 +108,17 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
         <NumericInput
           questionId={questionId}
           value={answer?.numericValue}
+          onChange={onChange}
+        />
+      );
+
+    case "numeric_with_unit":
+      return (
+        <NumericWithUnitInput
+          questionId={questionId}
+          numericValue={answer?.numericValue}
+          selectedUnitId={answer?.optionId}
+          units={question.options}
           onChange={onChange}
         />
       );
