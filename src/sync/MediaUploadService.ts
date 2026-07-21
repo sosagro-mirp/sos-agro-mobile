@@ -22,6 +22,10 @@ function generateId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
+// Caps a single attachment upload so a huge file can't stall the sync queue
+// (or a presigned-URL request) indefinitely over a poor field connection.
+const MAX_UPLOAD_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
+
 class MediaUploadServiceClass {
   // Uploads all pending media for a survey and returns a map of questionId → attachmentId.
   async processPendingForSurvey(surveyId: string): Promise<Record<string, string>> {
@@ -93,6 +97,15 @@ class MediaUploadServiceClass {
 
     const fileSizeBytes = info.size ?? entry.fileSizeBytes ?? 0;
 
+    if (fileSizeBytes > MAX_UPLOAD_SIZE_BYTES) {
+      // Validation error, not NetworkError: retrying won't shrink the file.
+      // Surfaces in the sync UI as a failed attachment instead of silently
+      // hanging or blocking the rest of the queue.
+      throw new Error(
+        `Archivo demasiado grande (${(fileSizeBytes / (1024 * 1024)).toFixed(1)} MB, máx 50 MB)`,
+      );
+    }
+
     // Request presigned URL from backend
     const { attachmentId, presignedUrl } = await httpClient.post<PresignedUrlResponse>(
       endpoints.mediaAttachmentsPresignedUrl,
@@ -123,6 +136,15 @@ class MediaUploadServiceClass {
 
     await mediaUploadQueueStorage.markUploaded(entry.id, attachmentId);
     logger.info(`[MediaUpload] uploaded ${entry.id} → attachmentId ${attachmentId}`);
+  }
+
+  // Manual retry for a `failed` attachment surfaced in the sync UI. The
+  // survey it belongs to may already be `synced` (see the `failed` status
+  // comment in mediaUploadQueueStorage), so this re-runs the upload directly
+  // instead of relying on SyncQueueService picking the survey up again.
+  async retryEntry(entryId: string, surveyId: string): Promise<void> {
+    await mediaUploadQueueStorage.resetToRetry(entryId);
+    await this.processPendingForSurvey(surveyId);
   }
 }
 
