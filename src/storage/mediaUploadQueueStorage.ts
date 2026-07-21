@@ -184,16 +184,6 @@ export const mediaUploadQueueStorage = {
     return rows.map(mapRow);
   },
 
-  async countFailed(): Promise<number> {
-    const rows = await db
-      .select({ id: mediaUploadQueue.id })
-      .from(mediaUploadQueue)
-      .where(eq(mediaUploadQueue.status, 'failed'))
-      .all();
-
-    return rows.length;
-  },
-
   // Un adjunto `failed` no vuelve a intentarse solo: dequeueNextPending()
   // solo toma entradas `pending`, y el survey que lo originó puede ya estar
   // `synced` (la respuesta de texto/opción se sincroniza aunque falle su

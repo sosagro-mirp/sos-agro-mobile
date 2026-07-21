@@ -6,7 +6,6 @@ interface SyncStatusState {
   isOnline: boolean;
   pendingCount: number;
   pendingMediaCount: number;
-  failedMediaCount: number;
   lastSyncAt: Date | null;
   currentlySyncingId: string | null;
   uploadingMediaId: string | null;
@@ -14,7 +13,6 @@ interface SyncStatusState {
   setOnline: (online: boolean) => void;
   refreshPendingCount: () => Promise<void>;
   refreshPendingMediaCount: () => Promise<void>;
-  refreshFailedMediaCount: () => Promise<void>;
   setSyncingId: (id: string | null) => void;
   setUploadingMediaId: (id: string | null) => void;
   markSyncCompleted: () => void;
@@ -24,7 +22,6 @@ export const useSyncStatusStore = create<SyncStatusState>((set) => ({
   isOnline: true,
   pendingCount: 0,
   pendingMediaCount: 0,
-  failedMediaCount: 0,
   lastSyncAt: null,
   currentlySyncingId: null,
   uploadingMediaId: null,
@@ -41,11 +38,6 @@ export const useSyncStatusStore = create<SyncStatusState>((set) => ({
   async refreshPendingMediaCount() {
     const count = await mediaUploadQueueStorage.countPending();
     set({ pendingMediaCount: count });
-  },
-
-  async refreshFailedMediaCount() {
-    const count = await mediaUploadQueueStorage.countFailed();
-    set({ failedMediaCount: count });
   },
 
   setSyncingId(id) {

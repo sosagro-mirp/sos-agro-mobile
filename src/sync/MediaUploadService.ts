@@ -3,7 +3,7 @@ import { mediaUploadQueueStorage } from '../storage/mediaUploadQueueStorage';
 import { surveyDraftStore } from '../storage/surveyDraftStore';
 import { httpClient, NetworkError } from '../api/httpClient';
 import { endpoints } from '../api/endpoints';
-import { submitResponsesBatch } from '../api/responses';
+import { createResponse } from '../api/responses';
 import { logger } from '../lib/logger';
 import { captureError } from '../lib/sentry';
 import { useSyncStatusStore } from '../store/useSyncStatusStore';
@@ -158,9 +158,14 @@ class MediaUploadServiceClass {
   // attachmentId resolves, so the *response* that links this question to an
   // attachment was never submitted in the original batch. Re-uploading the
   // file alone (what this method used to do) leaves the new attachment
-  // orphaned on the backend: nothing ever POSTs it into
-  // /responses/batch. So after a successful re-upload, submit a
-  // single-item batch for just this question to actually create that link.
+  // orphaned on the backend: nothing ever creates that link. So after a
+  // successful re-upload, POST it as a single response.
+  //
+  // This must use POST /api/responses (createResponse), not
+  // /responses/batch: ResponsesService.createMany is idempotent per survey
+  // — it no-ops (returns existing rows, inserts nothing) once the survey
+  // already has *any* response, which retryEntry's target survey always
+  // does by definition. The single-response endpoint has no such guard.
   async retryEntry(entryId: string, questionId: string, localSurveyId: string): Promise<void> {
     const realSurveyId = await surveyDraftStore.getBackendSurveyId(localSurveyId);
     if (!realSurveyId) {
@@ -179,7 +184,12 @@ class MediaUploadServiceClass {
       return;
     }
 
-    await submitResponsesBatch([{ surveyId: realSurveyId, questionId, attachmentId }]);
+    // Known gap: if the upload succeeds but this call fails (e.g. a network
+    // drop right here), the queue entry is already `uploaded` and drops out
+    // of the "failed" list the sync UI surfaces, so there's no retry
+    // affordance left for the still-unlinked attachment. Narrow window;
+    // recoverable today only via `GET /surveys/:id/media-attachments`.
+    await createResponse({ surveyId: realSurveyId, questionId, attachmentId });
   }
 }
 
