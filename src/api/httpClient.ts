@@ -42,7 +42,10 @@ async function attempt(url: string, options: RequestInit): Promise<Response> {
   try {
     return await fetchWithTimeout(url, options);
   } catch (e) {
-    if (e instanceof Error && e.name === "AbortError") {
+    // The abort timer rejects with a DOMException, not an Error subclass,
+    // so `instanceof Error` alone would miss it and always fall through to
+    // the generic message below.
+    if (e && typeof e === "object" && "name" in e && e.name === "AbortError") {
       throw new NetworkError("Tiempo de espera agotado");
     }
     throw new NetworkError();
