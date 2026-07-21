@@ -1,6 +1,7 @@
 import NetInfo, { type NetInfoState } from '@react-native-community/netinfo';
 import { useSyncStatusStore } from '../store/useSyncStatusStore';
 import { SyncQueueService } from './SyncQueueService';
+import { logger } from '../lib/logger';
 
 class NetworkMonitorClass {
   private unsubscribe: (() => void) | null = null;
@@ -25,7 +26,9 @@ class NetworkMonitorClass {
     // Trigger sync only when transitioning from offline → online
     if (isReachable && this.previouslyReachable === false) {
       SyncQueueService.resetNetworkFailures();
-      SyncQueueService.processAll().catch(console.error);
+      SyncQueueService.processAll().catch((err) =>
+        logger.error('[NetworkMonitor] processAll failed', err),
+      );
     }
 
     this.previouslyReachable = isReachable;

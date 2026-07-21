@@ -76,12 +76,20 @@ class SyncQueueServiceClass {
         logger.error('[Sync] pullResolvedChangeRequests failed, continuing anyway', err);
       }
     } finally {
-      // Reset any entries left in_flight (e.g., deferred due to unresolved session)
-      // so they're retried on the next sync run.
-      await syncQueueStorage.resetInFlightToRetry();
+      // isProcessing must clear even if the cleanup below throws, or every
+      // future processAll() call silently no-ops forever (see the guard at
+      // the top of this method).
       this.isProcessing = false;
       setSyncingId(null);
       markSyncCompleted();
+
+      // Reset any entries left in_flight (e.g., deferred due to unresolved session)
+      // so they're retried on the next sync run.
+      try {
+        await syncQueueStorage.resetInFlightToRetry();
+      } catch (err) {
+        logger.error('[Sync] resetInFlightToRetry failed', err);
+      }
       await refreshPendingCount();
     }
   }
@@ -192,6 +200,10 @@ class SyncQueueServiceClass {
       let realSurveyId = entry.surveyId;
       if (isLocalId(entry.surveyId)) {
         realSurveyId = await this.materializeSurvey(entry);
+        // Persisted so a failed media attachment can still be retried after
+        // this survey syncs and its local `id` (still the local one) is all
+        // that's left to look it up by — see surveyDraftStore.getBackendSurveyId.
+        await surveyDraftStore.setBackendSurveyId(entry.surveyId, realSurveyId);
       }
 
       const payload = await this.buildPayload(entry, realSurveyId);
@@ -208,7 +220,6 @@ class SyncQueueServiceClass {
         if (item.optionId !== undefined && !UUID_RE.test(item.optionId)) {
           const msg = `[Sync] NON-UUID optionId detected before submit — questionId: ${item.questionId}, optionId: "${item.optionId}", surveyId: ${realSurveyId}`;
           logger.error(msg);
-          console.error(msg);
         }
       }
 
@@ -324,7 +335,10 @@ class SyncQueueServiceClass {
     const instrument = await instrumentCacheStorage.get(draft.instrumentId);
     if (!instrument) return [];
 
-    const attachmentIds = await MediaUploadService.processPendingForSurvey(entry.surveyId);
+    const attachmentIds = await MediaUploadService.processPendingForSurvey(
+      entry.surveyId,
+      realSurveyId,
+    );
 
     const flattenedQuestions = flattenSections(instrument.sections);
 

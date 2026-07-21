@@ -20,4 +20,9 @@ export async function runMigrations(): Promise<void> {
   } catch {
     // Column already exists — ignore.
   }
+  try {
+    sqlite.execSync('ALTER TABLE surveys ADD COLUMN backend_survey_id text');
+  } catch {
+    // Column already exists — ignore.
+  }
 }

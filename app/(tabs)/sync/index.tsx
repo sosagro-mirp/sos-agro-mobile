@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -10,9 +11,15 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useSyncStatusStore } from "../../../src/store/useSyncStatusStore";
 import { syncQueueStorage, type SyncQueueEntry } from "../../../src/storage/syncQueue";
+import {
+  mediaUploadQueueStorage,
+  type MediaUploadEntry,
+} from "../../../src/storage/mediaUploadQueueStorage";
 import { surveyDraftStore } from "../../../src/storage/surveyDraftStore";
 import { NetworkMonitor } from "../../../src/sync/NetworkMonitor";
+import { MediaUploadService } from "../../../src/sync/MediaUploadService";
 import { Fonts } from "../../../src/theme/fonts";
+import { logger } from "../../../src/lib/logger";
 
 const GREEN = "#1B6B3A";
 
@@ -26,25 +33,30 @@ export default function SyncScreen() {
   } = useSyncStatusStore();
 
   const [failedEntries, setFailedEntries] = useState<SyncQueueEntry[]>([]);
+  const [failedMedia, setFailedMedia] = useState<MediaUploadEntry[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [retryingId, setRetryingId] = useState<string | null>(null);
+  const [retryingMediaId, setRetryingMediaId] = useState<string | null>(null);
   const [purgeResult, setPurgeResult] = useState<number | null>(null);
   const [isPurging, setIsPurging] = useState(false);
   const [isClearingFailed, setIsClearingFailed] = useState(false);
+  const [isClearingFailedMedia, setIsClearingFailedMedia] = useState(false);
 
   const refreshData = async () => {
     await refreshPendingCount();
     const failed = await syncQueueStorage.listFailed();
     setFailedEntries(failed);
+    const failedMediaEntries = await mediaUploadQueueStorage.listFailed();
+    setFailedMedia(failedMediaEntries);
   };
 
   useEffect(() => {
-    refreshData().catch(console.error);
+    refreshData().catch((err) => logger.error('[Sync] refreshData failed', err));
   }, []);
 
   useEffect(() => {
     if (lastSyncAt) {
-      refreshData().catch(console.error);
+      refreshData().catch((err) => logger.error('[Sync] refreshData failed', err));
     }
   }, [lastSyncAt]);
 
@@ -95,6 +107,31 @@ export default function SyncScreen() {
     }
   };
 
+  const handleClearFailedMedia = async () => {
+    if (isClearingFailedMedia) return;
+    setIsClearingFailedMedia(true);
+    try {
+      await mediaUploadQueueStorage.clearFailed();
+      setFailedMedia([]);
+    } finally {
+      setIsClearingFailedMedia(false);
+    }
+  };
+
+  const handleRetryMedia = async (entry: MediaUploadEntry) => {
+    if (!isOnline || retryingMediaId) return;
+    setRetryingMediaId(entry.id);
+    try {
+      await MediaUploadService.retryEntry(entry.id, entry.questionId, entry.surveyId);
+      await refreshData();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'No se pudo reintentar el adjunto.';
+      Alert.alert('Error', message);
+    } finally {
+      setRetryingMediaId(null);
+    }
+  };
+
   const isBusy = isSyncing || Boolean(currentlySyncingId);
   const statusColor = isOnline ? "#16A34A" : "#DC2626";
   const statusLabel = isOnline ? "En línea" : "Sin conexión";
@@ -132,6 +169,7 @@ export default function SyncScreen() {
         <View style={styles.countersRow}>
           <CounterCard label="Pendientes" value={pendingCount} color="#F59E0B" />
           <CounterCard label="Con error" value={failedEntries.length} color="#DC2626" />
+          <CounterCard label="Adjuntos" value={failedMedia.length} color="#DC2626" />
         </View>
 
         <Pressable
@@ -179,7 +217,7 @@ export default function SyncScreen() {
             </View>
             <Text style={styles.sectionHint}>
               Estos registros fueron rechazados por el servidor. Revisa el error
-              y toca "Reintentar" si crees que el problema fue temporal.
+              y toca &quot;Reintentar&quot; si crees que el problema fue temporal.
             </Text>
             {failedEntries.map((entry) => (
               <View key={entry.id} style={styles.failedCard}>
@@ -213,7 +251,56 @@ export default function SyncScreen() {
           </View>
         ) : null}
 
-        {pendingCount === 0 && failedEntries.length === 0 ? (
+        {failedMedia.length > 0 ? (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Adjuntos sin subir</Text>
+              <Pressable onPress={handleClearFailedMedia} disabled={isClearingFailedMedia}>
+                {isClearingFailedMedia ? (
+                  <ActivityIndicator size="small" color="#DC2626" />
+                ) : (
+                  <Text style={styles.clearFailedBtn}>Limpiar todo</Text>
+                )}
+              </Pressable>
+            </View>
+            <Text style={styles.sectionHint}>
+              Estas fotos o audios no se pudieron subir; la respuesta de texto
+              ya está sincronizada, pero el adjunto se perdería si no lo
+              reintentas.
+            </Text>
+            {failedMedia.map((entry) => (
+              <View key={entry.id} style={styles.failedCard}>
+                <Text style={styles.failedId} numberOfLines={1}>
+                  Survey: {entry.surveyId} · {entry.originalFilename ?? entry.mimeType}
+                </Text>
+                {entry.errorDetail ? (
+                  <Text style={styles.failedError}>{entry.errorDetail}</Text>
+                ) : null}
+                <View style={styles.failedFooter}>
+                  <Text style={styles.failedAttempts}>
+                    {entry.attempts} intento{entry.attempts !== 1 ? "s" : ""}
+                  </Text>
+                  <Pressable
+                    style={[
+                      styles.retryBtn,
+                      (!isOnline || Boolean(retryingMediaId)) && styles.retryBtnDisabled,
+                    ]}
+                    onPress={() => handleRetryMedia(entry)}
+                    disabled={!isOnline || Boolean(retryingMediaId)}
+                  >
+                    {retryingMediaId === entry.id ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <Text style={styles.retryBtnText}>Reintentar</Text>
+                    )}
+                  </Pressable>
+                </View>
+              </View>
+            ))}
+          </View>
+        ) : null}
+
+        {pendingCount === 0 && failedEntries.length === 0 && failedMedia.length === 0 ? (
           <View style={styles.allGood}>
             <Text style={styles.allGoodIcon}>✓</Text>
             <Text style={styles.allGoodText}>Todo sincronizado</Text>

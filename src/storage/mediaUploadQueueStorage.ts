@@ -173,6 +173,36 @@ export const mediaUploadQueueStorage = {
       .set({ status: 'pending' })
       .where(eq(mediaUploadQueue.status, 'in_flight'));
   },
+
+  async listFailed(): Promise<MediaUploadEntry[]> {
+    const rows = await db
+      .select()
+      .from(mediaUploadQueue)
+      .where(eq(mediaUploadQueue.status, 'failed'))
+      .all();
+
+    return rows.map(mapRow);
+  },
+
+  // Un adjunto `failed` no vuelve a intentarse solo: dequeueNextPending()
+  // solo toma entradas `pending`, y el survey que lo originó puede ya estar
+  // `synced` (la respuesta de texto/opción se sincroniza aunque falle su
+  // adjunto). Este método lo devuelve a `pending` para un reintento manual;
+  // el llamador es responsable de disparar el upload (ver
+  // MediaUploadService.retryEntry).
+  async resetToRetry(id: string): Promise<void> {
+    await db
+      .update(mediaUploadQueue)
+      .set({ status: 'pending', errorDetail: null })
+      .where(and(eq(mediaUploadQueue.id, id), eq(mediaUploadQueue.status, 'failed')));
+  },
+
+  async clearFailed(): Promise<number> {
+    const result = await db
+      .delete(mediaUploadQueue)
+      .where(eq(mediaUploadQueue.status, 'failed'));
+    return result.changes ?? 0;
+  },
 };
 
 function mapRow(row: typeof mediaUploadQueue.$inferSelect): MediaUploadEntry {

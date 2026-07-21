@@ -15,6 +15,7 @@ jest.mock('../storage/syncQueue', () => ({
     incrementAttempts: jest.fn(),
     getPendingBySurveyId: jest.fn(),
     getActiveBySurveyId: jest.fn(),
+    resetInFlightToRetry: jest.fn(),
   },
 }));
 
@@ -75,6 +76,59 @@ jest.mock('../storage/pendingSessions', () => ({
     listPending: jest.fn().mockResolvedValue([]),
     resolve: jest.fn(),
     markFailed: jest.fn(),
+  },
+}));
+
+jest.mock('../storage/farmerCache', () => ({
+  farmerCacheStorage: {
+    listRecent: jest.fn().mockResolvedValue([]),
+    upsert: jest.fn().mockResolvedValue(undefined),
+  },
+}));
+
+jest.mock('../storage/changeRequestStorage', () => ({
+  changeRequestStorage: {
+    listPendingSync: jest.fn().mockResolvedValue([]),
+    markSynced: jest.fn().mockResolvedValue(undefined),
+    markResolved: jest.fn().mockResolvedValue(undefined),
+  },
+}));
+
+jest.mock('../api/changeRequests', () => ({
+  postChangeRequest: jest.fn().mockResolvedValue(undefined),
+  fetchMyResolved: jest.fn().mockResolvedValue([]),
+}));
+
+jest.mock('../store/useChangeRequestStore', () => ({
+  useChangeRequestStore: {
+    getState: jest.fn().mockReturnValue({
+      loadAll: jest.fn().mockResolvedValue(undefined),
+      setHasNewResolved: jest.fn(),
+    }),
+  },
+}));
+
+jest.mock('../store/useCampaignSessionStore', () => ({
+  useCampaignSessionStore: {
+    getState: jest.fn().mockReturnValue({
+      localSessionId: null,
+      localFarmerId: null,
+      resolveSession: jest.fn(),
+      resolveFarmer: jest.fn(),
+    }),
+  },
+}));
+
+jest.mock('../lib/sentry', () => ({
+  captureError: jest.fn(),
+}));
+
+// Mocked as a whole (not just its storage collaborators) so SyncQueueService
+// tests stay isolated from MediaUploadService's own dependency graph
+// (mediaUploadQueueStorage, FileSystem, R2 presigned uploads).
+jest.mock('../sync/MediaUploadService', () => ({
+  MediaUploadService: {
+    processPendingForSurvey: jest.fn().mockResolvedValue({}),
   },
 }));
 

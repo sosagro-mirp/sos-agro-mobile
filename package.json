@@ -34,6 +34,8 @@
     "@types/jest": "^29.5.12",
     "@types/react": "~19.1.17",
     "drizzle-kit": "^0.31.10",
+    "eslint": "^9.39.5",
+    "eslint-config-expo": "^10.0.0",
     "jest-expo": "^54.0.0",
     "msw": "^2.4.9",
     "typescript": "~5.9.3"
@@ -43,18 +45,25 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "test": "jest"
+    "test": "jest",
+    "lint": "expo lint",
+    "typecheck": "tsc --noEmit"
   },
   "jest": {
     "preset": "jest-expo",
     "transformIgnorePatterns": [
-      "node_modules/(?!\\.pnpm)(?!((jest-)?react-native|@react-native(-community)?)|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|drizzle-orm)"
+      "node_modules/(?!\\.pnpm)(?!((jest-)?react-native|@react-native(-community)?)|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|drizzle-orm|rettime|@open-draft/.*|headers-polyfill|until-async)"
     ],
+    "transform": {
+      "\\.mjs$": "babel-jest"
+    },
     "setupFilesAfterEnv": [
       "./src/__tests__/setup.ts"
     ],
     "moduleNameMapper": {
-      "^expo-sqlite$": "<rootDir>/src/__tests__/__mocks__/expo-sqlite.ts"
+      "^expo-sqlite$": "<rootDir>/src/__tests__/__mocks__/expo-sqlite.ts",
+      "^expo-file-system/legacy$": "<rootDir>/src/__tests__/__mocks__/expo-file-system-legacy.ts",
+      "^msw/node$": "<rootDir>/node_modules/msw/lib/node/index.js"
     },
     "testPathIgnorePatterns": [
       "/node_modules/",

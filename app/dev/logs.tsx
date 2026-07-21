@@ -83,7 +83,7 @@ export default function DevLogsScreen() {
       setFarmerClearResult(`${count} agricultor${count !== 1 ? 'es' : ''} eliminado${count !== 1 ? 's' : ''}`);
     } catch (e) {
       setFarmerClearResult('Error al limpiar');
-      console.error("[DevLogs] clearFarmers error", e);
+      logger.error("[DevLogs] clearFarmers error", e);
     } finally {
       setClearingFarmers(false);
     }
@@ -102,7 +102,7 @@ export default function DevLogsScreen() {
       setSelectedLog(null);
       await loadFileList();
     } catch (e) {
-      console.error("[DevLogs] clear error", e);
+      logger.error("[DevLogs] clear error", e);
     }
   }
 

@@ -4,6 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { ChangeRequestForm } from "../../../src/components/requests/ChangeRequestForm";
 import { useChangeRequestStore } from "../../../src/store/useChangeRequestStore";
 import { Fonts } from "../../../src/theme/fonts";
+import { logger } from "../../../src/lib/logger";
 
 const GREEN = "#1B6B3A";
 
@@ -23,7 +24,7 @@ export default function RequestsScreen() {
   const { requests, loadAll } = useChangeRequestStore();
 
   useEffect(() => {
-    loadAll().catch(console.error);
+    loadAll().catch((err) => logger.error('[Requests] loadAll failed', err));
   }, []);
 
   return (

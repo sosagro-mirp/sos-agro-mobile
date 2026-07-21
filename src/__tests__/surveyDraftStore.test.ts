@@ -5,7 +5,47 @@
  * simulates the subset of the Drizzle query builder API used by surveyDraftStore.
  */
 
-import type { InstrumentDraftAnswer } from '../../types';
+import type { InstrumentDraftAnswer } from '../types';
+
+// surveyDraftStore builds its `where` conditions with real drizzle-orm
+// combinators (eq/and/lt), which produce SQL AST nodes meant for a real
+// driver. The in-memory mock below needs plain JS predicates instead, so we
+// replace just those three combinators with predicate-returning versions
+// that resolve each drizzle column back to the JS row key it maps to.
+jest.mock('drizzle-orm', () => {
+  const actual = jest.requireActual('drizzle-orm');
+  const { surveys, responses } = jest.requireActual('../storage/db/schema');
+
+  const columnToKey = new Map<unknown, string>();
+  for (const table of [surveys, responses]) {
+    for (const [key, column] of Object.entries(table as Record<string, unknown>)) {
+      columnToKey.set(column, key);
+    }
+  }
+  const keyFor = (column: unknown): string => {
+    const key = columnToKey.get(column);
+    if (!key) throw new Error('Unknown column in drizzle-orm mock');
+    return key;
+  };
+
+  return {
+    ...actual,
+    eq:
+      (column: unknown, value: unknown) =>
+      (row: Record<string, unknown>) =>
+        row[keyFor(column)] === value,
+    lt:
+      (column: unknown, value: unknown) =>
+      (row: Record<string, unknown>) =>
+        (row[keyFor(column)] as number | Date) < (value as number | Date),
+    and:
+      (...conds: Array<(row: Record<string, unknown>) => boolean>) =>
+      (row: Record<string, unknown>) =>
+        conds.every((cond) => cond(row)),
+  };
+});
+
+import { responses as responsesTable } from '../storage/db/schema';
 
 // ─── In-memory DB mock ────────────────────────────────────────────────────────
 
@@ -65,9 +105,10 @@ const createMockDb = () => {
       let _condition: ((row: SurveyRow | ResponseRow) => boolean) | null = null;
 
       const chain = {
-        from: jest.fn().mockImplementation((table: { _: { name?: string } } | unknown) => {
-          // Detect which table by inspecting Drizzle table object name or fallback
-          _table = String(table).includes('responses') ? 'responses' : 'surveys';
+        from: jest.fn().mockImplementation((table: unknown) => {
+          // Drizzle table objects don't stringify to their name, so match
+          // by reference against the real (unmocked) schema exports.
+          _table = table === responsesTable ? 'responses' : 'surveys';
           return chain;
         }),
         where: jest.fn().mockImplementation((cond: (row: SurveyRow | ResponseRow) => boolean) => {
@@ -119,14 +160,14 @@ const createMockDb = () => {
 
 let mockDb = createMockDb();
 
-jest.mock('../../storage/db/db', () => ({
+jest.mock('../storage/db/db', () => ({
   get db() {
     return mockDb;
   },
 }));
 
 // Import SUT after mock
-import { surveyDraftStore } from '../../storage/surveyDraftStore';
+import { surveyDraftStore } from '../storage/surveyDraftStore';
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────
 

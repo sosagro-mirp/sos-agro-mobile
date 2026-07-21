@@ -8,6 +8,12 @@ export const surveys = sqliteTable('surveys', {
   status: text('status', { enum: ['draft', 'completed', 'synced'] })
     .notNull()
     .default('draft'),
+  // `id` stays the local id forever (surveys always start offline with a
+  // generated id — see lib/generateLocalId.ts). Once SyncQueueService
+  // materializes the survey on the backend, the real id is persisted here
+  // so media attachments can still be retried after the survey is synced
+  // and out of the queue.
+  backendSurveyId: text('backend_survey_id'),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
 });

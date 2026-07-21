@@ -15,6 +15,7 @@ import { useChangeRequestStore } from '../../store/useChangeRequestStore';
 import { Fonts } from '../../theme/fonts';
 import { generateUUID } from '../../lib/generateLocalId';
 import { SyncQueueService } from '../../sync/SyncQueueService';
+import { logger } from '../../lib/logger';
 
 interface Props {
   farmerId?: string;
@@ -50,7 +51,9 @@ export const ChangeRequestForm: React.FC<Props> = ({ farmerId, farmerName, onSub
 
       setDescription('');
       setShowSuccess(true);
-      SyncQueueService.processAll().catch(console.error);
+      SyncQueueService.processAll().catch((err) =>
+        logger.error('[ChangeRequestForm] processAll failed', err),
+      );
     } finally {
       setSaving(false);
     }
