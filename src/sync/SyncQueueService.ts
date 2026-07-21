@@ -76,12 +76,20 @@ class SyncQueueServiceClass {
         logger.error('[Sync] pullResolvedChangeRequests failed, continuing anyway', err);
       }
     } finally {
-      // Reset any entries left in_flight (e.g., deferred due to unresolved session)
-      // so they're retried on the next sync run.
-      await syncQueueStorage.resetInFlightToRetry();
+      // isProcessing must clear even if the cleanup below throws, or every
+      // future processAll() call silently no-ops forever (see the guard at
+      // the top of this method).
       this.isProcessing = false;
       setSyncingId(null);
       markSyncCompleted();
+
+      // Reset any entries left in_flight (e.g., deferred due to unresolved session)
+      // so they're retried on the next sync run.
+      try {
+        await syncQueueStorage.resetInFlightToRetry();
+      } catch (err) {
+        logger.error('[Sync] resetInFlightToRetry failed', err);
+      }
       await refreshPendingCount();
     }
   }
@@ -208,7 +216,6 @@ class SyncQueueServiceClass {
         if (item.optionId !== undefined && !UUID_RE.test(item.optionId)) {
           const msg = `[Sync] NON-UUID optionId detected before submit — questionId: ${item.questionId}, optionId: "${item.optionId}", surveyId: ${realSurveyId}`;
           logger.error(msg);
-          console.error(msg);
         }
       }
 

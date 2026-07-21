@@ -76,9 +76,9 @@ export default function RootLayout() {
       .then(async () => {
         setDbReady(true);
         await restoreSession();
-        loadInstrumentCache().catch(console.error);
+        loadInstrumentCache().catch((err) => logger.error('[App] loadInstrumentCache failed', err));
       })
-      .catch((err) => { captureError(err); console.error(err); });
+      .catch((err) => { captureError(err); logger.error('[App] runMigrations failed', err); });
   }, []);
 
   useEffect(() => {
@@ -87,7 +87,9 @@ export default function RootLayout() {
     logger.init();
 
     // Reset any entries that were in_flight when the app was last killed.
-    syncQueueStorage.resetInFlightToRetry().catch(console.error);
+    syncQueueStorage.resetInFlightToRetry().catch((err) =>
+      logger.error('[App] resetInFlightToRetry failed', err),
+    );
 
     // Log how many offline sessions are pending resolution.
     pendingSessionStorage.listPending()
@@ -96,12 +98,12 @@ export default function RootLayout() {
           logger.info(`[App] ${pending.length} offline session(s) pending sync`);
         }
       })
-      .catch(console.error);
+      .catch((err) => logger.error('[App] listPending failed', err));
 
     // Purge synced surveys older than 30 days to keep local DB lean.
     surveyDraftStore.purgeSyncedSurveys()
       .then((count) => { if (count > 0) logger.info(`Purged ${count} old synced surveys`); })
-      .catch(console.error);
+      .catch((err) => logger.error('[App] purgeSyncedSurveys failed', err));
 
     NetworkMonitor.start();
     BackgroundSync.register().catch(() => {
@@ -111,7 +113,7 @@ export default function RootLayout() {
     // Cold start: process queue if network is available.
     NetworkMonitor.checkAndSync().catch((err) => {
       captureError(err);
-      console.error(err);
+      logger.error('[App] checkAndSync failed', err);
     });
 
     return () => NetworkMonitor.stop();

@@ -13,6 +13,21 @@ interface Props {
 
 const IMAGES_DIR = `${FileSystem.documentDirectory}media/images/`;
 
+const EXTENSION_MIME_TYPES: Record<string, string> = {
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  heic: 'image/heic',
+  heif: 'image/heif',
+  webp: 'image/webp',
+  gif: 'image/gif',
+};
+
+// Fallback for when ImagePicker doesn't report a mimeType (older platforms).
+function mimeTypeFromExtension(ext: string): string {
+  return EXTENSION_MIME_TYPES[ext.toLowerCase()] ?? 'image/jpeg';
+}
+
 export function ImageCaptureInput({ questionId, value, onChange }: Props): React.JSX.Element {
   const [localUri, setLocalUri] = useState<string | undefined>(value);
 
@@ -30,7 +45,7 @@ export function ImageCaptureInput({ questionId, value, onChange }: Props): React
     });
 
     if (!result.canceled && result.assets[0]) {
-      await saveImage(result.assets[0].uri);
+      await saveImage(result.assets[0].uri, result.assets[0].mimeType);
     }
   }
 
@@ -48,11 +63,11 @@ export function ImageCaptureInput({ questionId, value, onChange }: Props): React
     });
 
     if (!result.canceled && result.assets[0]) {
-      await saveImage(result.assets[0].uri);
+      await saveImage(result.assets[0].uri, result.assets[0].mimeType);
     }
   }
 
-  async function saveImage(uri: string): Promise<void> {
+  async function saveImage(uri: string, pickedMimeType: string | undefined): Promise<void> {
     try {
       await FileSystem.makeDirectoryAsync(IMAGES_DIR, { intermediates: true });
       const ext = uri.split('.').pop() ?? 'jpg';
@@ -60,7 +75,11 @@ export function ImageCaptureInput({ questionId, value, onChange }: Props): React
       const dest = `${IMAGES_DIR}${filename}`;
       await FileSystem.copyAsync({ from: uri, to: dest });
       setLocalUri(dest);
-      onChange({ questionId, mediaLocalPath: dest, mimeType: 'image/jpeg' });
+      onChange({
+        questionId,
+        mediaLocalPath: dest,
+        mimeType: pickedMimeType ?? mimeTypeFromExtension(ext),
+      });
     } catch {
       Alert.alert('Error', 'No se pudo guardar la imagen.');
     }

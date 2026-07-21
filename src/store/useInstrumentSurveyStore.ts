@@ -6,6 +6,7 @@ import { isAnswerComplete } from '../lib/isAnswerComplete';
 import { surveyDraftStore } from '../storage/surveyDraftStore';
 import { syncQueueStorage } from '../storage/syncQueue';
 import { SyncQueueService } from '../sync/SyncQueueService';
+import { logger } from '../lib/logger';
 import { useSyncStatusStore } from './useSyncStatusStore';
 import type {
   FlattenedQuestionItem,
@@ -87,7 +88,9 @@ export const useInstrumentSurveyStore = create<InstrumentSurveyState>((set, get)
 
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
-      surveyDraftStore.saveAnswer(surveyId, questionId, answer).catch(console.error);
+      surveyDraftStore.saveAnswer(surveyId, questionId, answer).catch((err) =>
+        logger.error('[Survey] saveAnswer failed', err),
+      );
     }, DEBOUNCE_MS);
   },
 
