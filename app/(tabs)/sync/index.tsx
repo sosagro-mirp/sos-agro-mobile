@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -121,8 +122,11 @@ export default function SyncScreen() {
     if (!isOnline || retryingMediaId) return;
     setRetryingMediaId(entry.id);
     try {
-      await MediaUploadService.retryEntry(entry.id, entry.surveyId);
+      await MediaUploadService.retryEntry(entry.id, entry.questionId, entry.surveyId);
       await refreshData();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'No se pudo reintentar el adjunto.';
+      Alert.alert('Error', message);
     } finally {
       setRetryingMediaId(null);
     }

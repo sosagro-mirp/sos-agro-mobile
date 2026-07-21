@@ -12,6 +12,8 @@ export const EncodingType = {
   Base64: 'base64',
 } as const;
 
+export const FileSystemUploadType = { BINARY_CONTENT: 'BINARY_CONTENT' } as const;
+
 export const getInfoAsync = jest.fn().mockResolvedValue({ exists: false });
 export const makeDirectoryAsync = jest.fn().mockResolvedValue(undefined);
 export const readAsStringAsync = jest.fn().mockResolvedValue('');

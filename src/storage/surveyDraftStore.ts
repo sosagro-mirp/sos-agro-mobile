@@ -182,6 +182,25 @@ export const surveyDraftStore = {
       .where(eq(surveys.id, surveyId));
   },
 
+  // `surveys.id` never changes from the local id (see schema.ts), so this is
+  // the only local record of which backend survey a synced entry maps to —
+  // needed to retry a media attachment after the survey itself has synced.
+  async setBackendSurveyId(localSurveyId: string, backendSurveyId: string): Promise<void> {
+    await db
+      .update(surveys)
+      .set({ backendSurveyId })
+      .where(eq(surveys.id, localSurveyId));
+  },
+
+  async getBackendSurveyId(localSurveyId: string): Promise<string | null> {
+    const row = await db
+      .select({ backendSurveyId: surveys.backendSurveyId })
+      .from(surveys)
+      .where(eq(surveys.id, localSurveyId))
+      .get();
+    return row?.backendSurveyId ?? null;
+  },
+
   async deleteDraft(surveyId: string): Promise<void> {
     // responses se borran en cascada por FK
     await db.delete(surveys).where(eq(surveys.id, surveyId));

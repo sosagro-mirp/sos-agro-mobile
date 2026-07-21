@@ -200,6 +200,10 @@ class SyncQueueServiceClass {
       let realSurveyId = entry.surveyId;
       if (isLocalId(entry.surveyId)) {
         realSurveyId = await this.materializeSurvey(entry);
+        // Persisted so a failed media attachment can still be retried after
+        // this survey syncs and its local `id` (still the local one) is all
+        // that's left to look it up by — see surveyDraftStore.getBackendSurveyId.
+        await surveyDraftStore.setBackendSurveyId(entry.surveyId, realSurveyId);
       }
 
       const payload = await this.buildPayload(entry, realSurveyId);
@@ -331,7 +335,10 @@ class SyncQueueServiceClass {
     const instrument = await instrumentCacheStorage.get(draft.instrumentId);
     if (!instrument) return [];
 
-    const attachmentIds = await MediaUploadService.processPendingForSurvey(entry.surveyId);
+    const attachmentIds = await MediaUploadService.processPendingForSurvey(
+      entry.surveyId,
+      realSurveyId,
+    );
 
     const flattenedQuestions = flattenSections(instrument.sections);
 

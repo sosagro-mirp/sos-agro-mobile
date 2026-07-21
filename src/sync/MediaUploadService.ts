@@ -1,7 +1,9 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { mediaUploadQueueStorage } from '../storage/mediaUploadQueueStorage';
+import { surveyDraftStore } from '../storage/surveyDraftStore';
 import { httpClient, NetworkError } from '../api/httpClient';
 import { endpoints } from '../api/endpoints';
+import { submitResponsesBatch } from '../api/responses';
 import { logger } from '../lib/logger';
 import { captureError } from '../lib/sentry';
 import { useSyncStatusStore } from '../store/useSyncStatusStore';
@@ -28,16 +30,27 @@ const MAX_UPLOAD_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
 
 class MediaUploadServiceClass {
   // Uploads all pending media for a survey and returns a map of questionId → attachmentId.
-  async processPendingForSurvey(surveyId: string): Promise<Record<string, string>> {
+  //
+  // `localSurveyId` and `realSurveyId` are deliberately separate: every
+  // local table (media_upload_queue, responses) is keyed by the id the
+  // survey was created with offline, which never changes (see schema.ts).
+  // The backend, however, only knows the id it assigned when
+  // SyncQueueService materialized the survey — that's the id the
+  // presigned-url/confirm endpoints require. Passing the local id there
+  // 404s ("Survey not found") for every attachment.
+  async processPendingForSurvey(
+    localSurveyId: string,
+    realSurveyId: string,
+  ): Promise<Record<string, string>> {
     const { setUploadingMediaId, refreshPendingMediaCount } = useSyncStatusStore.getState();
 
     // Populate queue from responses table for entries not yet tracked
-    const unenqueued = await mediaUploadQueueStorage.findUnenqueued(surveyId);
+    const unenqueued = await mediaUploadQueueStorage.findUnenqueued(localSurveyId);
     for (const item of unenqueued) {
       const info = await FileSystem.getInfoAsync(item.localPath);
       await mediaUploadQueueStorage.enqueueIfAbsent({
         id: generateId(),
-        surveyId,
+        surveyId: localSurveyId,
         questionId: item.questionId,
         localPath: item.localPath,
         mimeType: item.mimeType,
@@ -47,14 +60,14 @@ class MediaUploadServiceClass {
     }
 
     // Process pending entries
-    let entry = await mediaUploadQueueStorage.dequeueNextPending(surveyId);
+    let entry = await mediaUploadQueueStorage.dequeueNextPending(localSurveyId);
 
     while (entry) {
       setUploadingMediaId(entry.id);
       await refreshPendingMediaCount();
 
       try {
-        await this.uploadEntry(entry, surveyId);
+        await this.uploadEntry(entry, realSurveyId);
       } catch (error) {
         if (error instanceof NetworkError) {
           // Propagate so SyncQueueService can retry the whole survey entry
@@ -63,19 +76,19 @@ class MediaUploadServiceClass {
         }
         // Validation / file error — mark failed and continue with remaining files
         logger.error(`[MediaUpload] non-network error for ${entry.id}`, error);
-        captureError(error, { entryId: entry.id, surveyId });
+        captureError(error, { entryId: entry.id, surveyId: localSurveyId });
         const detail = error instanceof Error ? error.message : String(error);
         await mediaUploadQueueStorage.markFailed(entry.id, detail);
       }
 
-      entry = await mediaUploadQueueStorage.dequeueNextPending(surveyId);
+      entry = await mediaUploadQueueStorage.dequeueNextPending(localSurveyId);
     }
 
     setUploadingMediaId(null);
     await refreshPendingMediaCount();
 
     // Build and return questionId → attachmentId map for all confirmed uploads
-    const uploaded = await mediaUploadQueueStorage.getUploadedForSurvey(surveyId);
+    const uploaded = await mediaUploadQueueStorage.getUploadedForSurvey(localSurveyId);
     const map: Record<string, string> = {};
     for (const u of uploaded) {
       if (u.attachmentId) map[u.questionId] = u.attachmentId;
@@ -85,7 +98,7 @@ class MediaUploadServiceClass {
 
   private async uploadEntry(
     entry: { id: string; surveyId: string; questionId: string; localPath: string; mimeType: string; fileSizeBytes: number | null },
-    surveyId: string,
+    realSurveyId: string,
   ): Promise<void> {
     await mediaUploadQueueStorage.markInFlight(entry.id);
 
@@ -110,7 +123,7 @@ class MediaUploadServiceClass {
     const { attachmentId, presignedUrl } = await httpClient.post<PresignedUrlResponse>(
       endpoints.mediaAttachmentsPresignedUrl,
       {
-        surveyId,
+        surveyId: realSurveyId,
         questionId: entry.questionId,
         mimeType: entry.mimeType,
         fileSizeBytes,
@@ -138,13 +151,35 @@ class MediaUploadServiceClass {
     logger.info(`[MediaUpload] uploaded ${entry.id} → attachmentId ${attachmentId}`);
   }
 
-  // Manual retry for a `failed` attachment surfaced in the sync UI. The
-  // survey it belongs to may already be `synced` (see the `failed` status
-  // comment in mediaUploadQueueStorage), so this re-runs the upload directly
-  // instead of relying on SyncQueueService picking the survey up again.
-  async retryEntry(entryId: string, surveyId: string): Promise<void> {
+  // Manual retry for a `failed` attachment surfaced in the sync UI.
+  //
+  // The survey it belongs to is almost always already `synced` by this
+  // point — buildResponsesPayload skips a media response entirely until its
+  // attachmentId resolves, so the *response* that links this question to an
+  // attachment was never submitted in the original batch. Re-uploading the
+  // file alone (what this method used to do) leaves the new attachment
+  // orphaned on the backend: nothing ever POSTs it into
+  // /responses/batch. So after a successful re-upload, submit a
+  // single-item batch for just this question to actually create that link.
+  async retryEntry(entryId: string, questionId: string, localSurveyId: string): Promise<void> {
+    const realSurveyId = await surveyDraftStore.getBackendSurveyId(localSurveyId);
+    if (!realSurveyId) {
+      throw new Error(
+        'No se encontró el ID de esta encuesta en el servidor; ya no se puede reintentar el adjunto (puede haberse purgado el borrador local).',
+      );
+    }
+
     await mediaUploadQueueStorage.resetToRetry(entryId);
-    await this.processPendingForSurvey(surveyId);
+    const attachmentIds = await this.processPendingForSurvey(localSurveyId, realSurveyId);
+
+    const attachmentId = attachmentIds[questionId];
+    if (!attachmentId) {
+      // Upload failed again — mediaUploadQueueStorage already marked it
+      // `failed` with the new error detail; nothing to link.
+      return;
+    }
+
+    await submitResponsesBatch([{ surveyId: realSurveyId, questionId, attachmentId }]);
   }
 }
 
