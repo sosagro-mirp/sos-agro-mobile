@@ -68,6 +68,10 @@ pnpm ios                # Simulador iOS
 pnpm test               # Jest unit tests
 pnpm test --watch       # Watch mode
 
+# Typecheck / Lint
+pnpm typecheck           # tsc --noEmit
+pnpm lint                # expo lint (ESLint)
+
 # Migraciones SQLite (Drizzle)
 pnpm drizzle-kit generate   # Generar migración a partir de cambios en schema.ts
 
@@ -108,7 +112,10 @@ Los perfiles en `eas.json` inyectan automáticamente el valor correcto al hacer 
 - **Base URL local:** `http://localhost:3000`
 - **Base URL producción:** `https://sosagroapi.up.railway.app`
 - **Autenticación:** JWT Bearer — token guardado en `expo-secure-store` (cifrado)
-- **Cliente HTTP:** `src/api/httpClient.ts` — timeout 15s, 3 reintentos con backoff exponencial
+- **Cliente HTTP:** `src/api/httpClient.ts` — timeout 15s por request; reintenta internamente solo
+  errores 5xx (máx 3 reintentos, backoff exponencial). Los errores de red (sin conexión, timeout)
+  se propagan de inmediato como `NetworkError` — el reintento de esos casos ocurre una capa arriba,
+  en `SyncQueueService` (ver "Reintentos" más abajo).
 
 Módulos de API (`src/api/`):
 
@@ -124,7 +131,10 @@ Módulos de API (`src/api/`):
 | `endpoints.ts` | Definiciones centralizadas de todas las rutas |
 
 **Manejo de errores:**
-- 5xx / timeout → reintentables (backoff exponencial, máx 3 intentos)
+- 5xx → reintentable dentro de `httpClient` (backoff exponencial, máx 3 intentos por request).
+- Timeout / sin conexión (`NetworkError`) → no se reintenta dentro de `httpClient`; se propaga a
+  `SyncQueueService`, que reintenta en la siguiente corrida de sync (backoff exponencial hasta
+  `MAX_CONSECUTIVE_NETWORK_FAILURES = 5` fallos consecutivos).
 - 4xx → no reintentables; `syncQueue` los marca como `failed_validation`
 
 ---
