@@ -5,9 +5,9 @@
  * out without an Authorization header.
  */
 
-import { http, HttpResponse } from 'msw';
+import { delay, http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
-import { httpClient, NetworkError, ServerError } from '../../api/httpClient';
+import { httpClient, NetworkError, ServerError } from '../api/httpClient';
 
 jest.mock('expo-secure-store', () => ({
   getItemAsync: jest.fn().mockResolvedValue(null),
@@ -153,34 +153,33 @@ describe('4xx responses', () => {
 // ─── 5xx errors — retry then throw ───────────────────────────────────────────
 
 describe('5xx responses', () => {
-  beforeEach(() => {
-    // Speed up retries to avoid slow tests — jest fake timers aren't needed
-    // because the exponential backoff is inside the module. We accept the
-    // small delay for these tests (1s + 2s + 4s) but cap the server error
-    // to always return 500 so all retries exhaust.
-    jest.setTimeout(30_000);
-  });
+  // Real exponential backoff (1s + 2s + 4s = 7s) runs during these tests —
+  // jest fake timers aren't used because the delay lives inside the module
+  // under test. Pass an explicit per-test timeout (3rd arg) rather than
+  // jest.setTimeout() in beforeEach/afterEach: the latter only takes effect
+  // for tests registered *after* it runs and leaks into later describe
+  // blocks depending on execution order, which caused the "Network
+  // failures"/"Timeout" tests below to intermittently inherit a 5s cap.
+  it(
+    'retries on 500 and throws ServerError after all retries are exhausted',
+    async () => {
+      let callCount = 0;
+      server.use(
+        http.get(`${BASE}/api/flaky`, () => {
+          callCount++;
+          return new HttpResponse(null, { status: 500 });
+        }),
+      );
 
-  afterEach(() => {
-    jest.setTimeout(5_000);
-  });
-
-  it('retries on 500 and throws ServerError after all retries are exhausted', async () => {
-    let callCount = 0;
-    server.use(
-      http.get(`${BASE}/api/flaky`, () => {
-        callCount++;
-        return new HttpResponse(null, { status: 500 });
-      }),
-    );
-
-    await expect(httpClient.get('/api/flaky')).rejects.toMatchObject({
-      name: 'ServerError',
-      status: 500,
-    });
-    // MAX_RETRIES=3, so initial attempt + 3 retries = 4 total
-    expect(callCount).toBe(4);
-  });
+      await expect(httpClient.get('/api/flaky')).rejects.toMatchObject({
+        name: 'ServerError',
+        status: 500,
+      });
+      // MAX_RETRIES=3, so initial attempt + 3 retries = 4 total
+      expect(callCount).toBe(4);
+    },
+    15000,
+  );
 
   it('succeeds if a 500 recovers before retries exhausted', async () => {
     let callCount = 0;
@@ -202,11 +201,11 @@ describe('5xx responses', () => {
 
 describe('Network failures', () => {
   it('throws NetworkError when fetch rejects (connection refused)', async () => {
-    server.use(
-      http.get(`${BASE}/api/unreachable`, () => {
-        throw new TypeError('Failed to fetch');
-      }),
-    );
+    // HttpResponse.error() is MSW's dedicated way to simulate a genuine
+    // fetch-level rejection (e.g. connection refused). Throwing inside a
+    // resolver is a different scenario — MSW surfaces it as a 500 response
+    // instead, which would exercise the 5xx retry path, not this one.
+    server.use(http.get(`${BASE}/api/unreachable`, () => HttpResponse.error()));
 
     await expect(httpClient.get('/api/unreachable')).rejects.toMatchObject({
       name: 'NetworkError',
@@ -214,11 +213,7 @@ describe('Network failures', () => {
   });
 
   it('NetworkError is not a ServerError', async () => {
-    server.use(
-      http.get(`${BASE}/api/offline`, () => {
-        throw new TypeError('Failed to fetch');
-      }),
-    );
+    server.use(http.get(`${BASE}/api/offline`, () => HttpResponse.error()));
 
     try {
       await httpClient.get('/api/offline');
@@ -233,19 +228,24 @@ describe('Network failures', () => {
 // ─── Timeout ─────────────────────────────────────────────────────────────────
 
 describe('Timeout', () => {
-  it('throws NetworkError with "Tiempo de espera agotado" on AbortError', async () => {
-    server.use(
-      http.get(`${BASE}/api/slow`, async () => {
-        // Simulate a timeout by throwing an AbortError from the handler
-        const err = new Error('The operation was aborted');
-        err.name = 'AbortError';
-        throw err;
-      }),
-    );
+  it(
+    'throws NetworkError with "Tiempo de espera agotado" on AbortError',
+    async () => {
+      // A resolver throwing an "AbortError" only simulates a server-side
+      // error (MSW turns it into a 500, exercising the retry path instead —
+      // see the "Network failures" tests above for the same pitfall). The
+      // real timeout path is driven by httpClient's own AbortController
+      // (TIMEOUT_MS), so the handler must actually hang past that timeout
+      // for the client to abort it itself.
+      server.use(
+        http.get(`${BASE}/api/slow`, () => delay('infinite')),
+      );
 
-    await expect(httpClient.get('/api/slow')).rejects.toMatchObject({
-      name: 'NetworkError',
-      message: 'Tiempo de espera agotado',
-    });
-  });
+      await expect(httpClient.get('/api/slow')).rejects.toMatchObject({
+        name: 'NetworkError',
+        message: 'Tiempo de espera agotado',
+      });
+    },
+    20000,
+  );
 });
