@@ -22,7 +22,8 @@
       },
       "channel": "preview",
       "env": {
-        "EXPO_PUBLIC_API_BASE_URL": "https://sosagroapi.up.railway.app"
+        "EXPO_PUBLIC_API_BASE_URL": "https://sosagroapi.up.railway.app",
+        "EXPO_PUBLIC_SENTRY_DSN": "https://1e3ca315e262f0496cac10c775041596@o4511778876948480.ingest.us.sentry.io/4511778938093569"
       }
     },
     "production": {
@@ -31,7 +32,8 @@
       },
       "channel": "production",
       "env": {
-        "EXPO_PUBLIC_API_BASE_URL": "https://sosagroapi.up.railway.app"
+        "EXPO_PUBLIC_API_BASE_URL": "https://sosagroapi.up.railway.app",
+        "EXPO_PUBLIC_SENTRY_DSN": "https://1e3ca315e262f0496cac10c775041596@o4511778876948480.ingest.us.sentry.io/4511778938093569"
       }
     }
   },
