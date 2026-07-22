@@ -15,7 +15,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     scheme: 'sosagro',
     runtimeVersion: { policy: 'appVersion' },
     updates: {
-      url: 'https://u.expo.dev/YOUR_PROJECT_ID',
+      url: 'https://u.expo.dev/a9915da7-c235-4537-a1a0-de31ac73d63b',
       enabled: true,
       fallbackToCacheTimeout: 0,
     },
@@ -82,6 +82,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ],
     extra: {
       apiBaseUrl: process.env.EXPO_PUBLIC_API_BASE_URL,
+      eas: {
+        projectId: 'a9915da7-c235-4537-a1a0-de31ac73d63b',
+      },
     },
+    owner: 'santiagosuarez219',
   };
 };
