@@ -1,4 +1,4 @@
-# [TESTING] Spec 22 — Migración de `expo-av` a `expo-audio` (desbloqueo del build EAS)
+# [DONE] Spec 22 — Migración de `expo-av` a `expo-audio` (desbloqueo del build EAS)
 
 **Fecha:** 2026-07-22
 **Repositorio afectado:** `mobile/` (únicamente)
@@ -380,13 +380,13 @@ este spec no cambia esa situación.
 
 ### Fase 7 — Cierre
 
-- [ ] **7.1** Commit(s) siguiendo Conventional Commits en inglés, por ejemplo
-      `refactor(audio): migrate VoiceRecordingInput from expo-av to expo-audio`
-      y `chore(deps): replace expo-av with expo-audio`.
-- [ ] **7.2** Invocar `@reviewer` sobre el cambio; el informe se persiste en
-      `docs/reports/auditorias/` con la numeración secuencial que corresponda.
-- [ ] **7.3** Con todos los casos de `18-test-spec22.md` aprobados, marcar este
-      spec como `[DONE]`.
+- [x] **7.1** Commits en inglés siguiendo Conventional Commits (ver historial
+      de `feature/spec-22-expo-audio`).
+- [x] **7.2** `@reviewer` invocado. **Veredicto: APROBADO**, sin hallazgos
+      bloqueantes ni mayores. Informe:
+      `docs/reports/auditorias/09-auditoria-mobile-spec22.md`.
+- [x] **7.3** 11/12 casos aprobados (TC-001 diferido a 6.4). Spec marcado
+      `[DONE]`.
 - [ ] **7.4** Merge a `feature/spec-46-hardening` (no a `development`
       directamente — decisión del usuario en 1.1: este spec nace de
       `development` pero se integra primero en la rama del Spec 46, que
