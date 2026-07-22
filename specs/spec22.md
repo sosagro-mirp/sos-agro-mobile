@@ -387,13 +387,11 @@ este spec no cambia esa situación.
       `docs/reports/auditorias/09-auditoria-mobile-spec22.md`.
 - [x] **7.3** 11/12 casos aprobados (TC-001 diferido a 6.4). Spec marcado
       `[DONE]`.
-- [ ] **7.4** Merge a `feature/spec-46-hardening` (no a `development`
-      directamente — decisión del usuario en 1.1: este spec nace de
-      `development` pero se integra primero en la rama del Spec 46, que
-      llegará a `development` cuando ese spec cierre) y borrado inmediato de
-      `feature/spec-22-expo-audio`.
-- [ ] **7.5** Retomar la Fase 5 del Spec 46 (piloto multidispositivo), ya
-      desbloqueada.
+- [x] **7.4** Merge a `feature/spec-46-hardening` completado (`b1ccafc`,
+      auto-merge limpio) y `feature/spec-22-expo-audio` borrada.
+- [x] **7.5** Fase 5 del Spec 46 (piloto multidispositivo) desbloqueada —
+      pendiente de retomar cuando haya dispositivos físicos disponibles para
+      el piloto (fuera del alcance de este spec).
 
 ---
 
