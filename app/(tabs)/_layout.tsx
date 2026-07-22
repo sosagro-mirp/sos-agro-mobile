@@ -33,7 +33,7 @@ function TabsHeader() {
     <SafeAreaView edges={["top"]} style={styles.headerContainer}>
       <View style={styles.header}>
         <Pressable onPress={handleTitleTap} accessibilityRole="text">
-          <Text style={styles.appName}>SOS Agro 4C</Text>
+          <Text style={styles.appName}>Sos Agro 4.C</Text>
           {user?.name ? (
             <Text style={styles.userName}>{user.name}</Text>
           ) : null}
