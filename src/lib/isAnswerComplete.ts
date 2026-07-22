@@ -42,6 +42,10 @@ export function isAnswerComplete(
     }
     case "likert":
       return Boolean(answer.optionId);
+    case "image":
+    case "voice_recording":
+    case "document":
+      return Boolean(answer.mediaLocalPath);
     default:
       return Boolean(
         answer.optionId ||

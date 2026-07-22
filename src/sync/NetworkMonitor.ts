@@ -19,7 +19,7 @@ class NetworkMonitorClass {
   }
 
   private handleStateChange = (state: NetInfoState): void => {
-    const isReachable = state.isConnected === true && state.isInternetReachable === true;
+    const isReachable = NetworkMonitorClass.isReachable(state);
 
     useSyncStatusStore.getState().setOnline(isReachable);
 
@@ -36,13 +36,22 @@ class NetworkMonitorClass {
 
   async checkAndSync(): Promise<void> {
     const state = await NetInfo.fetch();
-    const isReachable = state.isConnected === true && state.isInternetReachable === true;
+    const isReachable = NetworkMonitorClass.isReachable(state);
     useSyncStatusStore.getState().setOnline(isReachable);
 
     if (isReachable) {
       SyncQueueService.resetNetworkFailures();
       await SyncQueueService.processAll();
     }
+  }
+
+  // isInternetReachable starts out (and can transiently go back to) null
+  // while NetInfo's own reachability probe is inconclusive — treating that
+  // as offline caused false "sin conexión" banners on devices with a
+  // perfectly working connection. Only an explicit `false` counts as
+  // offline; `null` is treated as reachable.
+  private static isReachable(state: NetInfoState): boolean {
+    return state.isConnected === true && state.isInternetReachable !== false;
   }
 }
 
