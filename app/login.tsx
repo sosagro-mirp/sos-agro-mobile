@@ -45,7 +45,7 @@ export default function LoginScreen() {
           bounces={false}
         >
           <View style={styles.header}>
-            <Text style={styles.title}>SOS Agro 4C</Text>
+            <Text style={styles.title}>Sos Agro 4.C</Text>
             <Text style={styles.subtitle}>Plataforma de caracterización agrícola</Text>
           </View>
 

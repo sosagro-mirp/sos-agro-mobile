@@ -6,7 +6,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
 
   return {
     ...config,
-    name: 'SOS Agro 4C',
+    name: 'Sos Agro 4.C',
     slug: 'sosagro-characterization',
     version: '1.0.0',
     orientation: 'portrait',
