@@ -1,4 +1,4 @@
-# [NOT STARTED] Spec 22 — Migración de `expo-av` a `expo-audio` (desbloqueo del build EAS)
+# [IN PROGRESS] Spec 22 — Migración de `expo-av` a `expo-audio` (desbloqueo del build EAS)
 
 **Fecha:** 2026-07-22
 **Repositorio afectado:** `mobile/` (únicamente)
@@ -200,33 +200,29 @@ este spec no cambia esa situación.
          sin el `projectId` de EAS, el build de verificación de la Fase 5 no
          puede ejecutarse. Ambas ramas quedan con contenido idéntico en esos
          dos archivos, así que el merge final no debería conflictuar.
-- [ ] **1.2** Confirmar con el usuario la instalación de `expo-audio` y la
-      desinstalación de `expo-av`.
-- [ ] **1.3** Instalar `expo-audio` con `npx expo install expo-audio` (deja que
-      Expo resuelva la versión compatible con el SDK 54; no fijar la versión a
-      mano).
-- [ ] **1.4** Desinstalar `expo-av` y verificar que desaparece de `package.json`
-      y del lockfile de pnpm.
-- [ ] **1.5** Verificar con `grep` que no queda ninguna referencia a `expo-av`
-      en el repositorio fuera de documentación histórica (specs, auditorías).
+- [x] **1.2** Confirmado con el usuario.
+- [x] **1.3** `expo-audio@1.1.1` instalado vía `npx expo install expo-audio`
+      (versión resuelta automáticamente para SDK 54, coincide con lo previsto
+      en los hallazgos de arriba).
+- [x] **1.4** `expo-av` desinstalado (`pnpm remove expo-av`). Confirmado que
+      desapareció de `package.json` y de `pnpm-lock.yaml` (`grep -c` → 0).
+- [x] **1.5** Verificado con `grep`: solo quedan las 2 referencias esperadas
+      (el plugin en `app.config.ts` y el import en `VoiceRecordingInput.tsx`),
+      que se resuelven en las Fases 2 y 3.
 
 ### Fase 2 — Configuración nativa (`app.config.ts`)
 
-- [ ] **2.1** Reemplazar la entrada `['expo-av', { microphonePermission }]` del
-      array `plugins` por `['expo-audio', { microphonePermission }]`,
-      **conservando literalmente el mismo texto en español** del mensaje de
-      permiso actual.
-- [ ] **2.2** Evaluar si conviene declarar `recordAudioAndroid` de forma
-      explícita. Por defecto es `true` y ya inyecta `RECORD_AUDIO` en el
-      manifest; declararlo explícito es documentación, no funcionalidad.
-- [ ] **2.3** Revisar `android.permissions`: la lista incluye la cadena
-      `'MICROPHONE'`, que **no corresponde a ningún permiso real de Android**
-      (el permiso real es `RECORD_AUDIO`, que el plugin agrega solo).
-      Proponer al usuario reemplazarla por `'RECORD_AUDIO'` o eliminarla.
+- [x] **2.1** Entrada `['expo-av', { microphonePermission }]` reemplazada por
+      `['expo-audio', { microphonePermission }]` en `app.config.ts`,
+      conservando el mismo texto en español del mensaje de permiso.
+- [x] **2.2** Se deja `recordAudioAndroid` implícito (default `true`) — no se
+      declara explícitamente, sin impacto funcional.
+- [x] **2.3** **Decisión del usuario:** eliminar `'MICROPHONE'` de
+      `android.permissions` (no era un permiso real). Reemplazado por un
+      comentario explicando que `RECORD_AUDIO` lo inyecta el plugin.
       **No modificar sin confirmación**: cambia el `AndroidManifest.xml`
       generado y, por tanto, los permisos que ve el encuestador al instalar.
-- [ ] **2.4** No tocar `eas.json` en esta fase (regla explícita de
-      `mobile/CLAUDE.md`); sus perfiles ya inyectan las variables correctas.
+- [x] **2.4** `eas.json` no se tocó en esta fase.
 
 ### Fase 3 — Reescritura de `VoiceRecordingInput.tsx`
 
@@ -234,82 +230,76 @@ este spec no cambia esa situación.
 > basado en hooks, de modo que la creación del grabador y del reproductor sube
 > al cuerpo del componente y deja de ocurrir dentro de los handlers.
 
-- [ ] **3.1** Sustituir el import de `expo-av` por los símbolos de
-      `expo-audio` identificados arriba (`useAudioRecorder`,
-      `useAudioRecorderState`, `useAudioPlayer`, `AudioModule`,
-      `setAudioModeAsync`, `RecordingPresets`). Mantener intactos los imports
-      de `expo-file-system/legacy`, `lucide-react-native` y los tipos del
-      dominio.
-- [ ] **3.2** Eliminar el comentario `// DEBT:` de las líneas 4-7, que queda
-      saldado con esta migración.
-- [ ] **3.3** Preservar sin cambios la interfaz `Props`
-      (`questionId`, `value`, `onChange`), el tipo `RecordingState`
-      (`idle | recording | recorded`), la constante `VOICE_DIR`, la constante
-      `MAX_DURATION_SECONDS = 300` y su comentario justificativo.
-- [ ] **3.4** Instanciar el grabador con el hook a nivel de componente usando
-      el preset `HIGH_QUALITY`, y el estado del grabador con el hook de estado.
-      Definir el intervalo de polling explícitamente (el default de 500 ms
-      basta para un contador en segundos; usar un valor menor solo si el
-      usuario quiere un contador más fluido — ver "Decisiones pendientes").
-- [ ] **3.5** Reemplazar el estado local `recording` (que hoy guarda la
-      instancia `Audio.Recording`) por el `RecorderState` del hook. El estado
-      `duration` en segundos pasa a derivarse de `durationMillis` en lugar de
-      mantenerse en un `useState` propio; evaluar si conviene eliminarlo del
-      estado local o mantenerlo para no reintroducir renders innecesarios.
-- [ ] **3.6** Reescribir el inicio de grabación: pedir permiso de micrófono
-      con el método de `AudioModule`, mantener la misma alerta en español si
-      se deniega, aplicar el modo de audio con las claves **sin sufijo `IOS`**,
-      preparar el grabador y luego iniciarlo. Mantener el `try/catch` con la
-      alerta "No se pudo iniciar la grabación."
-- [ ] **3.7** Reimplementar el **auto-stop a los 300 s** como efecto que
-      observa la duración del `RecorderState`, conservando el `ref` de guarda
-      contra doble disparo (renombrable, pero el comportamiento debe ser
-      idéntico: una sola detención). Documentar en un comentario por qué el
-      guard sigue siendo necesario con el modelo de polling.
-- [ ] **3.8** Reescribir el fin de grabación: detener el grabador, revertir el
-      modo de audio, leer la URI desde la **propiedad** `uri` del grabador,
-      crear el directorio `media/voice/` si no existe, copiar el archivo con
-      el mismo patrón de nombre `${questionId}-${Date.now()}.m4a` y emitir
-      `onChange` con `mimeType: 'audio/m4a'`. Contemplar que `uri` puede ser
-      `null` (misma salida temprana que hoy).
-- [ ] **3.9** Reescribir la reproducción de preview con el hook de reproductor,
-      alimentado por `value` cuando existe. Como el hook debe llamarse
-      incondicionalmente, resolver el caso `value === undefined` (fuente nula o
-      `replace` al cambiar de valor). El botón "Reproducir" debe reposicionar
-      al inicio y reproducir, replicando el comportamiento de `replayAsync`.
-- [ ] **3.10** Reescribir el borrado: liberar el reproductor con el método
-      correspondiente, volver al estado `idle`, resetear el contador y emitir
-      `onChange` con `mediaLocalPath` y `mimeType` en `undefined`.
-- [ ] **3.11** Añadir limpieza al desmontar el componente (liberar reproductor
-      y, si sigue grabando, detener el grabador). Hoy no existe; es una mejora
-      barata que evita fugas cuando el encuestador navega a la siguiente
-      pregunta a mitad de una grabación. **No ampliar el alcance más allá de
-      esto.**
-- [ ] **3.12** No tocar el bloque `StyleSheet.create` ni el JSX de los tres
-      estados salvo lo estrictamente necesario para leer la nueva fuente de la
-      duración. La UI debe quedar visualmente idéntica.
+- [x] **3.1** Import de `expo-av` sustituido por `AudioModule`,
+      `RecordingPresets`, `setAudioModeAsync`, `useAudioPlayer`,
+      `useAudioRecorder`, `useAudioRecorderState` desde `expo-audio`. Imports
+      de `expo-file-system/legacy`, `lucide-react-native` y tipos del dominio
+      intactos.
+- [x] **3.2** Comentario `// DEBT:` eliminado.
+- [x] **3.3** `Props`, `RecordingState`, `VOICE_DIR` y `MAX_DURATION_SECONDS`
+      (con su comentario) preservados sin cambios.
+- [x] **3.4** `useAudioRecorder(RecordingPresets.HIGH_QUALITY)` +
+      `useAudioRecorderState(recorder, 500)` — intervalo de polling explícito
+      en 500 ms (default, según la decisión del usuario).
+- [x] **3.5** Estado local `recording`/`sound` eliminado. `duration` ya no es
+      `useState`: se deriva en cada render con
+      `Math.floor(recorderState.durationMillis / 1000)`.
+- [x] **3.6** Reescrito con `AudioModule.requestRecordingPermissionsAsync()`,
+      misma alerta en español, `setAudioModeAsync({ allowsRecording,
+      playsInSilentMode })` (sin sufijo `IOS`), `prepareToRecordAsync()` +
+      `record()`. Mismo `try/catch`.
+- [x] **3.7** Auto-stop reimplementado como `useEffect` que observa
+      `duration`/`recorderState.isRecording`, con `autoStoppedRef` como guarda
+      (comentario explica por qué sigue haciendo falta con polling).
+- [x] **3.8** `finishRecording()` reescrito: `recorder.stop()`,
+      `setAudioModeAsync({ allowsRecording: false })`, `recorder.uri`
+      (propiedad, con el mismo `if (!uri) return`), mismo patrón de nombre de
+      archivo y `mimeType: 'audio/m4a'`.
+- [x] **3.9** `useAudioPlayer(value ? { uri: value } : null)` a nivel de
+      componente + `useEffect` que llama `player.replace(...)` cuando cambia
+      `value` (el hook no recarga la fuente solo). `playPreview` hace
+      `seekTo(0)` + `play()`, replicando `replayAsync`.
+- [x] **3.10** `deleteRecording` llama `player.pause()`; el `useEffect` de
+      `value` dispara `player.replace(null)` cuando `onChange` limpia
+      `mediaLocalPath`.
+- [x] **3.11** Cleanup al desmontar agregado: `player.remove()` +
+      `recorder.stop()` si seguía grabando (via `isRecordingRef`, necesario
+      porque el efecto de cleanup con deps estables no ve el último valor de
+      `recorderState.isRecording` directamente).
+- [x] **3.12** `StyleSheet` y JSX de los tres estados sin tocar, salvo leer
+      `duration` desde la nueva fuente (misma interpolación `{duration}s`).
 
 ### Fase 4 — Verificación estática y de suite existente
 
-- [ ] **4.1** `pnpm typecheck` sin errores.
-- [ ] **4.2** `pnpm lint` sin errores nuevos.
-- [ ] **4.3** `pnpm test` — la suite completa debe seguir en verde. No se
-      esperan cambios (no hay tests de audio), pero `QuestionRenderer` es
-      alcanzable desde el árbol de imports y una importación rota lo delataría.
-- [ ] **4.4** Ejecutar `npx expo-doctor` y confirmar que no reporta
-      dependencias incompatibles con el SDK 54 ni restos de `expo-av`.
-- [ ] **4.5** Verificar que no se generó ni quedó pendiente ninguna migración
-      Drizzle (no debe haberla: el schema SQLite no se toca).
+- [x] **4.1** `pnpm typecheck` sin errores.
+- [x] **4.2** `pnpm lint` — 0 errores, 51 warnings preexistentes (ninguno en
+      `VoiceRecordingInput.tsx` ni en archivos tocados por este spec).
+- [x] **4.3** `pnpm test` — 8/8 suites, 134/134 tests en verde.
+- [x] **4.4** `npx expo-doctor`: encontró `expo-asset` como peer dependency
+      faltante de `expo-audio` (riesgo real de crash fuera de Expo Go) —
+      **confirmado con el usuario, instalado** (`expo-asset@12.0.13`; su
+      config plugin es un no-op sin la opción `assets`, que no usamos, así
+      que no se agregó a `app.config.ts`). Tras instalarlo, `expo-audio` ya
+      no aparece en el reporte. Lo que queda (`expo-constants`/`expo-linking`
+      para `expo-router`, y mismatches de versión en `@sentry/react-native`,
+      `react-native-svg`, `expo`) es **preexistente y no relacionado con
+      `expo-av`/`expo-audio`** — documentado aquí, sin actuar (fuera del
+      alcance de este spec).
+- [x] **4.5** No se generó ninguna migración Drizzle — el schema SQLite no se
+      tocó, como estaba previsto.
 
 ### Fase 5 — Verificación del build nativo (criterio de éxito último)
 
 > Esta es la fase que justifica el spec: el build que hoy falla debe pasar.
 
-- [ ] **5.1** (Opcional, si hay Android SDK local) Ejecutar
-      `npx expo prebuild --platform android --clean` y revisar el
-      `AndroidManifest.xml` generado: debe contener `RECORD_AUDIO` y no debe
-      quedar rastro del módulo `expo-av`. Limpiar después los artefactos de
-      prebuild para no ensuciar el repositorio.
+- [x] **5.1** SDK local disponible — ejecutado. `AndroidManifest.xml` generado
+      contiene `RECORD_AUDIO` y **cero rastro de `expo-av`** en el manifest ni
+      en `settings.gradle`/`build.gradle`. Efecto colateral detectado y
+      corregido: `expo prebuild` reescribió los scripts `android`/`ios` de
+      `package.json` a `expo run:android`/`expo run:ios` (asumiendo bare
+      workflow) — revertido a `expo start --android`/`--ios`, ya que el
+      proyecto sigue en managed workflow. Carpeta `android/` generada
+      eliminada tras la verificación.
 - [ ] **5.2** Confirmar explícitamente con el usuario antes de disparar el
       build (consume cuota de EAS y ~15-20 min).
 - [ ] **5.3** Ejecutar `eas build --profile preview --platform android`.
