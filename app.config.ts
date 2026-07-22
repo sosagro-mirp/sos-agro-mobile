@@ -34,7 +34,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         'INTERNET',
         'ACCESS_NETWORK_STATE',
         'CAMERA',
-        'MICROPHONE',
+        // RECORD_AUDIO lo inyecta el config plugin de expo-audio
+        // (recordAudioAndroid, true por defecto). Antes había aquí un
+        // 'MICROPHONE' que no corresponde a ningún permiso real de Android.
         'READ_MEDIA_IMAGES',
         'READ_MEDIA_VIDEO',
         'READ_MEDIA_AUDIO',
@@ -59,7 +61,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         },
       ],
       [
-        'expo-av',
+        'expo-audio',
         {
           microphonePermission: 'SOSAgro necesita acceso al micrófono para grabar respuestas de voz en campo.',
         },

@@ -1,11 +1,14 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Mic, Square, Play, X } from 'lucide-react-native';
-// DEBT: expo-av is deprecated as of Expo 54; migrate to expo-audio
-// (useAudioRecorder/useAudioPlayer) in a maintenance cycle with real-device
-// testing — recording/playback isn't safely verifiable from this session.
-// See docs/reports/auditorias/05-auditoria-mobile-development.md.
-import { Audio } from 'expo-av';
+import {
+  AudioModule,
+  RecordingPresets,
+  setAudioModeAsync,
+  useAudioPlayer,
+  useAudioRecorder,
+  useAudioRecorderState,
+} from 'expo-audio';
 import * as FileSystem from 'expo-file-system/legacy';
 import type { InstrumentDraftAnswer } from '../../types/instrument';
 
@@ -26,52 +29,59 @@ const MAX_DURATION_SECONDS = 300;
 
 export function VoiceRecordingInput({ questionId, value, onChange }: Props): React.JSX.Element {
   const [state, setState] = useState<RecordingState>(value ? 'recorded' : 'idle');
-  const [recording, setRecording] = useState<Audio.Recording | null>(null);
-  const [duration, setDuration] = useState(0);
-  const [sound, setSound] = useState<Audio.Sound | null>(null);
   const autoStoppedRef = useRef(false);
+  const isRecordingRef = useRef(false);
 
-  async function startRecording(): Promise<void> {
-    try {
-      const { granted } = await Audio.requestPermissionsAsync();
-      if (!granted) {
-        Alert.alert('Permiso requerido', 'SOSAgro necesita acceso al micrófono para grabar audio.');
-        return;
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const recorderState = useAudioRecorderState(recorder, 500);
+  const duration = Math.floor(recorderState.durationMillis / 1000);
+
+  const player = useAudioPlayer(value ? { uri: value } : null);
+
+  // Read by the unmount-only cleanup effect below, which must always act on
+  // the latest recorder instance without re-running (and prematurely
+  // stopping it) whenever this component merely re-renders.
+  const recorderRef = useRef(recorder);
+  recorderRef.current = recorder;
+
+  useEffect(() => {
+    isRecordingRef.current = recorderState.isRecording;
+  }, [recorderState.isRecording]);
+
+  // useAudioPlayer only loads the source it was created with — it doesn't
+  // reload when `value` changes on a later render, so a re-record has to
+  // replace it manually. Skipped when `value` clears (delete): the native
+  // module rejects `replace(null)` at runtime even though `useAudioPlayer`
+  // itself accepts a null source. Leaving the previous source loaded is
+  // harmless here since playback controls aren't rendered outside the
+  // `recorded` state, and the next real recording will replace it correctly.
+  useEffect(() => {
+    if (!value) return;
+    player.replace({ uri: value });
+  }, [value, player]);
+
+  useEffect(() => {
+    return () => {
+      // No manual player.remove() here: useAudioPlayer/useAudioRecorder are
+      // both built on useReleasingSharedObject, which already releases the
+      // native instance on unmount. Calling .remove() again ourselves raced
+      // that internal cleanup and crashed with "shared object already
+      // released". Stopping an in-flight recording is a different action
+      // (not a release) and doesn't conflict with it.
+      if (isRecordingRef.current) {
+        recorderRef.current.stop().catch(() => {});
       }
+    };
+    // Intentionally empty: this must run its cleanup exactly once, on true
+    // unmount — not on every render where `player`/`recorder` happen to get
+    // a new identity, which would trigger this early.
+  }, []);
 
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+  async function finishRecording(): Promise<void> {
+    await recorder.stop();
+    await setAudioModeAsync({ allowsRecording: false });
 
-      autoStoppedRef.current = false;
-      const { recording: rec } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY,
-        (status) => {
-          if (!status.isRecording) return;
-          const seconds = Math.floor((status.durationMillis ?? 0) / 1000);
-          setDuration(seconds);
-          if (seconds >= MAX_DURATION_SECONDS && !autoStoppedRef.current) {
-            autoStoppedRef.current = true;
-            // Use `rec` directly instead of the `recording` state: this
-            // callback closes over the render where createAsync was called,
-            // before setRecording(rec) below ever runs.
-            finishRecording(rec).catch(() => {
-              Alert.alert('Error', 'No se pudo guardar la grabación.');
-            });
-          }
-        },
-      );
-
-      setRecording(rec);
-      setState('recording');
-    } catch {
-      Alert.alert('Error', 'No se pudo iniciar la grabación.');
-    }
-  }
-
-  async function finishRecording(rec: Audio.Recording): Promise<void> {
-    await rec.stopAndUnloadAsync();
-    await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
-
-    const uri = rec.getURI();
+    const uri = recorder.uri;
     if (!uri) return;
 
     await FileSystem.makeDirectoryAsync(VOICE_DIR, { intermediates: true });
@@ -79,15 +89,47 @@ export function VoiceRecordingInput({ questionId, value, onChange }: Props): Rea
     const dest = `${VOICE_DIR}${filename}`;
     await FileSystem.copyAsync({ from: uri, to: dest });
 
-    setRecording(null);
     setState('recorded');
     onChange({ questionId, mediaLocalPath: dest, mimeType: 'audio/m4a' });
   }
 
-  async function stopRecording(): Promise<void> {
-    if (!recording) return;
+  // recorderState updates on every polling tick (every 500ms) while
+  // recording, so this effect can fire several times before `recorder.stop()`
+  // resolves and isRecording flips to false — the ref guards against
+  // triggering finishRecording() more than once for the same recording.
+  useEffect(() => {
+    if (!recorderState.isRecording) return;
+    if (duration >= MAX_DURATION_SECONDS && !autoStoppedRef.current) {
+      autoStoppedRef.current = true;
+      finishRecording().catch(() => {
+        Alert.alert('Error', 'No se pudo guardar la grabación.');
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [duration, recorderState.isRecording]);
+
+  async function startRecording(): Promise<void> {
     try {
-      await finishRecording(recording);
+      const { granted } = await AudioModule.requestRecordingPermissionsAsync();
+      if (!granted) {
+        Alert.alert('Permiso requerido', 'SOSAgro necesita acceso al micrófono para grabar audio.');
+        return;
+      }
+
+      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+
+      autoStoppedRef.current = false;
+      await recorder.prepareToRecordAsync();
+      recorder.record();
+      setState('recording');
+    } catch {
+      Alert.alert('Error', 'No se pudo iniciar la grabación.');
+    }
+  }
+
+  async function stopRecording(): Promise<void> {
+    try {
+      await finishRecording();
     } catch {
       Alert.alert('Error', 'No se pudo guardar la grabación.');
     }
@@ -96,25 +138,16 @@ export function VoiceRecordingInput({ questionId, value, onChange }: Props): Rea
   async function playPreview(): Promise<void> {
     if (!value) return;
     try {
-      if (sound) {
-        await sound.replayAsync();
-        return;
-      }
-      const { sound: s } = await Audio.Sound.createAsync({ uri: value });
-      setSound(s);
-      await s.playAsync();
+      await player.seekTo(0);
+      player.play();
     } catch {
       Alert.alert('Error', 'No se pudo reproducir la grabación.');
     }
   }
 
   function deleteRecording(): void {
-    if (sound) {
-      sound.unloadAsync();
-      setSound(null);
-    }
+    player.pause();
     setState('idle');
-    setDuration(0);
     onChange({ questionId, mediaLocalPath: undefined, mimeType: undefined });
   }
 
