@@ -357,8 +357,26 @@ este spec no cambia esa situación.
       - Repetir al menos los casos de grabar/reproducir en modo avión, para
         confirmar que nada del flujo de audio depende de la red.
 - [x] **6.3** Estado del spec cambiado a `[TESTING]`.
-- [ ] **6.4** El usuario ejecuta los casos y reporta resultados; marcarlos
-      ✅/❌ en el archivo de pruebas a medida que los confirme.
+- [x] **6.4** 11/12 casos ejecutados y aprobados por el usuario vía Expo Go
+      en dispositivo físico (TC-002 a TC-012). **TC-001** (texto del diálogo
+      de permiso) — **decisión del usuario**: diferido a
+      `docs/testing/17-test-piloto-multidispositivo.md` (nuevo **TC-08**),
+      ya que requiere el APK real de todas formas y ese piloto ya lo usa.
+      Durante la ejecución se encontraron y corrigieron **3 bugs reales**
+      no anticipados por el plan original (dos en `bug/sentry-native-crash-plugin`,
+      uno en `isAnswerComplete.ts`, ver detalle en TC-003/TC-008/TC-010 del
+      archivo de pruebas):
+      1. `player.replace(null)` no es válido en runtime aunque
+         `useAudioPlayer` acepte fuente nula al crear el player.
+      2. El efecto de limpieza al desmontar llamaba `player.remove()`
+         manualmente, compitiendo con la liberación automática que ya hacen
+         `useAudioPlayer`/`useAudioRecorder` vía `useReleasingSharedObject`
+         — causaba "shared object already released" en desmontajes reales
+         (no solo Fast Refresh).
+      3. `isAnswerComplete.ts` no reconocía `image`/`voice_recording`/
+         `document` como completos — bug preexistente, no introducido por
+         esta migración (la forma del `onChange` no cambió), pero bloqueaba
+         directamente el TC-010. Corregido en la rama de bugs, no en esta.
 
 ### Fase 7 — Cierre
 
@@ -369,7 +387,11 @@ este spec no cambia esa situación.
       `docs/reports/auditorias/` con la numeración secuencial que corresponda.
 - [ ] **7.3** Con todos los casos de `18-test-spec22.md` aprobados, marcar este
       spec como `[DONE]`.
-- [ ] **7.4** Merge a `development` y borrado inmediato de la rama.
+- [ ] **7.4** Merge a `feature/spec-46-hardening` (no a `development`
+      directamente — decisión del usuario en 1.1: este spec nace de
+      `development` pero se integra primero en la rama del Spec 46, que
+      llegará a `development` cuando ese spec cierre) y borrado inmediato de
+      `feature/spec-22-expo-audio`.
 - [ ] **7.5** Retomar la Fase 5 del Spec 46 (piloto multidispositivo), ya
       desbloqueada.
 
