@@ -72,6 +72,13 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           isIosBackgroundLocationEnabled: false,
         },
       ],
+      [
+        '@sentry/react-native/expo',
+        {
+          organization: 'instituto-tecnologico-metropol',
+          project: 'sosagro-mobile',
+        },
+      ],
     ],
     extra: {
       apiBaseUrl: process.env.EXPO_PUBLIC_API_BASE_URL,
