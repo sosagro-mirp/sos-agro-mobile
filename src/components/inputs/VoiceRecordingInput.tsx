@@ -38,25 +38,44 @@ export function VoiceRecordingInput({ questionId, value, onChange }: Props): Rea
 
   const player = useAudioPlayer(value ? { uri: value } : null);
 
+  // Read by the unmount-only cleanup effect below, which must always act on
+  // the latest recorder instance without re-running (and prematurely
+  // stopping it) whenever this component merely re-renders.
+  const recorderRef = useRef(recorder);
+  recorderRef.current = recorder;
+
   useEffect(() => {
     isRecordingRef.current = recorderState.isRecording;
   }, [recorderState.isRecording]);
 
   // useAudioPlayer only loads the source it was created with — it doesn't
-  // reload when `value` changes on a later render, so the source has to be
-  // swapped manually to follow a re-record or a delete (value -> undefined).
+  // reload when `value` changes on a later render, so a re-record has to
+  // replace it manually. Skipped when `value` clears (delete): the native
+  // module rejects `replace(null)` at runtime even though `useAudioPlayer`
+  // itself accepts a null source. Leaving the previous source loaded is
+  // harmless here since playback controls aren't rendered outside the
+  // `recorded` state, and the next real recording will replace it correctly.
   useEffect(() => {
-    player.replace(value ? { uri: value } : null);
+    if (!value) return;
+    player.replace({ uri: value });
   }, [value, player]);
 
   useEffect(() => {
     return () => {
-      player.remove();
+      // No manual player.remove() here: useAudioPlayer/useAudioRecorder are
+      // both built on useReleasingSharedObject, which already releases the
+      // native instance on unmount. Calling .remove() again ourselves raced
+      // that internal cleanup and crashed with "shared object already
+      // released". Stopping an in-flight recording is a different action
+      // (not a release) and doesn't conflict with it.
       if (isRecordingRef.current) {
-        recorder.stop().catch(() => {});
+        recorderRef.current.stop().catch(() => {});
       }
     };
-  }, [player, recorder]);
+    // Intentionally empty: this must run its cleanup exactly once, on true
+    // unmount — not on every render where `player`/`recorder` happen to get
+    // a new identity, which would trigger this early.
+  }, []);
 
   async function finishRecording(): Promise<void> {
     await recorder.stop();
