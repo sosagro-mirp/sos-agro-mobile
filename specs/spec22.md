@@ -1,4 +1,4 @@
-# [IN PROGRESS] Spec 22 — Migración de `expo-av` a `expo-audio` (desbloqueo del build EAS)
+# [TESTING] Spec 22 — Migración de `expo-av` a `expo-audio` (desbloqueo del build EAS)
 
 **Fecha:** 2026-07-22
 **Repositorio afectado:** `mobile/` (únicamente)
@@ -300,18 +300,25 @@ este spec no cambia esa situación.
       workflow) — revertido a `expo start --android`/`--ios`, ya que el
       proyecto sigue en managed workflow. Carpeta `android/` generada
       eliminada tras la verificación.
-- [ ] **5.2** Confirmar explícitamente con el usuario antes de disparar el
-      build (consume cuota de EAS y ~15-20 min).
-- [ ] **5.3** Ejecutar `eas build --profile preview --platform android`.
-- [ ] **5.4** Si falla, descargar y revisar el log completo (viene comprimido
-      con Brotli, como en el intento del Spec 46) e identificar la causa raíz
-      antes de reintentar. **Reportar al usuario antes de improvisar
-      soluciones** (por ejemplo, desactivar la New Architecture).
-- [ ] **5.5** Con el build exitoso, confirmar en el log/artefacto que la URL
-      del backend embebida es `https://sosagroapi.up.railway.app` y que
-      `EXPO_PUBLIC_SENTRY_DSN` viajó (esto cierra el paso **4.3 del Spec 46**).
-- [ ] **5.6** Registrar el resultado en el Spec 46: marcar 4.2 y 4.3 y
-      desbloquear su Fase 5.
+- [x] **5.2** Confirmado con el usuario.
+- [x] **5.3** `eas build --profile preview --platform android` ejecutado
+      (build `4874ad12-fe6b-48ba-bf79-dcdd463b1c88`, commit `4cf0c15`).
+      **`Status: finished`** — ~19 min en cola + ~10 min de build. APK:
+      `https://expo.dev/artifacts/eas/TBqHiMjLvvETCV2PBIEPm8IhkQA-GyCYnv4Iu0L8tGc.apk`.
+      **El build que fallaba en el Spec 46 ahora pasa.**
+- [x] **5.4** No aplicó — el build no falló.
+- [x] **5.5** APK descargado y verificado directamente (bundle Hermes
+      `assets/index.android.bundle`, extraído con `strings` por ser bytecode
+      binario, no JS plano):
+      - `sosagroapi.up.railway.app` presente (1 ocurrencia) ✅
+      - DSN de Sentry mobile presente (1 ocurrencia) ✅
+      - `expo-av`: **0 ocurrencias** ✅
+      - Símbolos de `expo-audio` (`useAudioRecorder`/`AudioModule`/
+        `RecordingPresets`) presentes ✅
+      Esto cierra el paso **4.3 del Spec 46**.
+- [x] **5.6** Registrado en el Spec 46: 4.2 (bloqueante) y 4.3 (URL/DSN
+      embebidos) marcados, Fase 4 completa, Fase 5 (piloto) desbloqueada en
+      cuanto a disponibilidad de build.
 
 ### Fase 6 — Pruebas manuales en dispositivo físico
 
@@ -323,10 +330,10 @@ este spec no cambia esa situación.
 > APK de la Fase 5, en un dispositivo Android físico.** No marcar el spec como
 > `[DONE]` apoyándose en typecheck/lint/tests: esos solo prueban que compila.
 
-- [ ] **6.1** Crear `docs/testing/18-test-spec22.md` (siguiente número libre:
-      el último existente es `17-test-piloto-multidispositivo.md`), con el
-      formato de casos `TC-001`, `TC-002`, … del `CLAUDE.md` raíz.
-- [ ] **6.2** Casos mínimos a cubrir en ese archivo:
+- [x] **6.1** Creado `docs/testing/18-test-spec22.md` con formato
+      `TC-001`…`TC-012`.
+- [x] **6.2** Casos cubiertos (12, ampliando la lista mínima propuesta con
+      TC-012 para regrabar sobre una respuesta existente):
       - Primera grabación en una instalación limpia: aparece el diálogo de
         permiso de micrófono con el texto en español configurado.
       - Denegar el permiso: aparece la alerta "Permiso requerido" y no se
@@ -349,7 +356,7 @@ este spec no cambia esa situación.
         `mimeType` sigue siendo aceptado por el backend).
       - Repetir al menos los casos de grabar/reproducir en modo avión, para
         confirmar que nada del flujo de audio depende de la red.
-- [ ] **6.3** Cambiar el estado del spec a `[TESTING]`.
+- [x] **6.3** Estado del spec cambiado a `[TESTING]`.
 - [ ] **6.4** El usuario ejecuta los casos y reporta resultados; marcarlos
       ✅/❌ en el archivo de pruebas a medida que los confirme.
 
