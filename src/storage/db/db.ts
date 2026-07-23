@@ -25,4 +25,9 @@ export async function runMigrations(): Promise<void> {
   } catch {
     // Column already exists — ignore.
   }
+  try {
+    sqlite.execSync('ALTER TABLE farmer_cache ADD COLUMN crops text');
+  } catch {
+    // Column already exists — ignore.
+  }
 }

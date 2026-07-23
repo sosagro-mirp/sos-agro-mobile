@@ -1,6 +1,7 @@
 import { desc, eq, like, or } from 'drizzle-orm';
 import { db } from './db/db';
 import { farmerCache } from './db/schema';
+import type { CropSummary } from '../types';
 
 export interface FarmerCacheEntry {
   farmerId: string;
@@ -8,22 +9,33 @@ export interface FarmerCacheEntry {
   documentId?: string;
   phone?: string;
   farmName?: string;
+  crops?: CropSummary[];
   cachedAt: Date;
 }
 
 function mapRow(row: typeof farmerCache.$inferSelect): FarmerCacheEntry {
+  let crops: CropSummary[] = [];
+  if (row.crops) {
+    try {
+      crops = JSON.parse(row.crops);
+    } catch {
+      crops = [];
+    }
+  }
   return {
     farmerId: row.farmerId,
     name: row.name,
     documentId: row.documentId ?? undefined,
     phone: row.phone ?? undefined,
     farmName: row.farmName ?? undefined,
+    crops,
     cachedAt: row.cachedAt,
   };
 }
 
 export const farmerCacheStorage = {
   async upsert(entry: FarmerCacheEntry): Promise<void> {
+    const crops = JSON.stringify(entry.crops ?? []);
     await db
       .insert(farmerCache)
       .values({
@@ -32,6 +44,7 @@ export const farmerCacheStorage = {
         documentId: entry.documentId ?? null,
         phone: entry.phone ?? null,
         farmName: entry.farmName ?? null,
+        crops,
         cachedAt: new Date(),
       })
       .onConflictDoUpdate({
@@ -41,6 +54,7 @@ export const farmerCacheStorage = {
           documentId: entry.documentId ?? null,
           phone: entry.phone ?? null,
           farmName: entry.farmName ?? null,
+          crops,
           cachedAt: new Date(),
         },
       });

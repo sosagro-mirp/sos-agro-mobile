@@ -54,6 +54,15 @@ jest.mock('../api/farmers', () => ({
 jest.mock('../storage/sessionCropsStorage', () => ({
   sessionCropsStorage: {
     save: jest.fn(),
+    get: jest.fn().mockResolvedValue([]),
+  },
+}));
+
+jest.mock('../storage/db/db', () => ({
+  db: {
+    update: jest.fn(() => ({
+      set: jest.fn(() => ({ where: jest.fn().mockResolvedValue(undefined) })),
+    })),
   },
 }));
 
@@ -141,9 +150,10 @@ import { surveyDraftStore } from '../storage/surveyDraftStore';
 import { instrumentCacheStorage } from '../storage/instrumentCache';
 import { submitResponsesBatch } from '../api/responses';
 import { markSurveyAsSynced } from '../api/surveys';
-import { markSessionAsSynced } from '../api/campaignSessions';
+import { markSessionAsSynced, createCampaignSession } from '../api/campaignSessions';
 import { extractCrops } from '../api/farmers';
 import { sessionCropsStorage } from '../storage/sessionCropsStorage';
+import { pendingSessionStorage } from '../storage/pendingSessions';
 import { useSyncStatusStore } from '../store/useSyncStatusStore';
 import { flattenSections } from '../lib/flattenSections';
 import { buildResponsesPayload } from '../lib/buildResponsesPayload';
@@ -166,6 +176,10 @@ const mockMarkSurveyAsSynced = markSurveyAsSynced as jest.Mock;
 const mockMarkSessionAsSynced = markSessionAsSynced as jest.Mock;
 const mockExtractCrops = extractCrops as jest.Mock;
 const mockSessionCropsSave = sessionCropsStorage.save as jest.Mock;
+const mockSessionCropsGet = sessionCropsStorage.get as jest.Mock;
+const mockCreateCampaignSession = createCampaignSession as jest.Mock;
+const mockListPendingSessions = pendingSessionStorage.listPending as jest.Mock;
+const mockResolveSession = pendingSessionStorage.resolve as jest.Mock;
 
 const mockFlattenSections = flattenSections as jest.Mock;
 const mockBuildResponsesPayload = buildResponsesPayload as jest.Mock;
@@ -238,6 +252,10 @@ beforeEach(() => {
   mockBuildResponsesPayload.mockReturnValue([]);
   mockExtractCrops.mockResolvedValue({ crops: [] });
   mockSessionCropsSave.mockResolvedValue(undefined);
+  mockSessionCropsGet.mockResolvedValue([]);
+  mockListPendingSessions.mockResolvedValue([]);
+  mockResolveSession.mockResolvedValue(undefined);
+  mockCreateCampaignSession.mockResolvedValue({ sessionId: 'real-session-1' });
 });
 
 // ─── processAll: guard conditions ────────────────────────────────────────────
@@ -494,6 +512,37 @@ describe('processEntry — S2 crop extraction', () => {
 
     expect(mockExtractCrops).not.toHaveBeenCalled();
     expect(mockSessionCropsSave).not.toHaveBeenCalled();
+  });
+});
+
+// ─── resolveLocalSessions (spec 47) ───────────────────────────────────────────
+
+describe('resolveLocalSessions', () => {
+  it('sends cropIds already saved locally when resolving a session', async () => {
+    mockListPendingSessions.mockResolvedValueOnce([
+      { localSessionId: 'local-session-1', campaignId: 'campaign-1', farmerId: 'farmer-1', userId: 'user-1' },
+    ]);
+    mockSessionCropsGet.mockResolvedValueOnce([{ cropId: 'crop-café', name: 'Café' }]);
+
+    await SyncQueueService.processAll();
+
+    expect(mockSessionCropsGet).toHaveBeenCalledWith('local-session-1');
+    expect(mockCreateCampaignSession).toHaveBeenCalledWith(
+      expect.objectContaining({ cropIds: ['crop-café'] }),
+    );
+    expect(mockResolveSession).toHaveBeenCalledWith('local-session-1', 'real-session-1');
+  });
+
+  it('omits cropIds when no crops were saved locally for the session', async () => {
+    mockListPendingSessions.mockResolvedValueOnce([
+      { localSessionId: 'local-session-2', campaignId: 'campaign-1', farmerId: 'farmer-1', userId: 'user-1' },
+    ]);
+    mockSessionCropsGet.mockResolvedValueOnce([]);
+
+    await SyncQueueService.processAll();
+
+    const callArgs = mockCreateCampaignSession.mock.calls[0][0];
+    expect(callArgs.cropIds).toBeUndefined();
   });
 });
 
