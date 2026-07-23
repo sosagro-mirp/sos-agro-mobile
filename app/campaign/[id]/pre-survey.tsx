@@ -13,7 +13,8 @@ import { Fonts } from "../../../src/theme/fonts";
 import { generateLocalId } from "../../../src/lib/generateLocalId";
 import { pendingSessionStorage } from "../../../src/storage/pendingSessions";
 import { farmerCacheStorage } from "../../../src/storage/farmerCache";
-import type { FarmerSearchResult } from "../../../src/types";
+import { sessionCropsStorage } from "../../../src/storage/sessionCropsStorage";
+import type { CropSummary, FarmerSearchResult } from "../../../src/types";
 
 export default function PreSurveyScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -48,6 +49,7 @@ export default function PreSurveyScreen() {
     farmerId?: string;
     farmerName?: string;
     isNew?: boolean;
+    crops?: CropSummary[];
   }) => {
     setError(null);
     setIsLoading(true);
@@ -60,11 +62,18 @@ export default function PreSurveyScreen() {
     }
 
     try {
+      const cropIds = options?.crops?.map((c) => c.cropId);
       const sessionResponse = await createCampaignSession({
         campaignId: campaign.campaignId,
         userId: user?.userId,
         ...(options?.farmerId ? { farmerId: options.farmerId } : {}),
+        ...(cropIds && cropIds.length > 0 ? { cropIds } : {}),
       });
+
+      // Known crop for an existing farmer: seed it locally too so offline
+      // navigation (getNextStepOffline) can unlock crop-conditioned steps
+      // even if the device loses connection later in this same session.
+      await sessionCropsStorage.save(sessionResponse.sessionId, options?.crops ?? []);
 
       applySessionResponse(sessionResponse);
       router.push(`/campaign/${id}/session/${sessionResponse.sessionId}/orchestrator`);
@@ -79,6 +88,7 @@ export default function PreSurveyScreen() {
     farmerId?: string;
     farmerName?: string;
     isNew?: boolean;
+    crops?: CropSummary[];
   }) => {
     setError(null);
     setIsLoading(true);
@@ -100,6 +110,8 @@ export default function PreSurveyScreen() {
         userId: user?.userId,
       });
 
+      await sessionCropsStorage.save(localSessionId, options?.crops ?? []);
+
       applyOfflineSession(localSessionId);
       router.push(`/campaign/${id}/session/${localSessionId}/orchestrator`);
     } catch (err) {
@@ -113,6 +125,7 @@ export default function PreSurveyScreen() {
     farmerId?: string;
     farmerName?: string;
     isNew?: boolean;
+    crops?: CropSummary[];
   }) => {
     if (isOnline) {
       await startSessionOnline(options);
@@ -129,10 +142,11 @@ export default function PreSurveyScreen() {
         documentId: farmer.documentId ?? undefined,
         phone: farmer.phone ?? undefined,
         farmName: farmer.farm?.name ?? undefined,
+        crops: farmer.farm?.crops ?? undefined,
         cachedAt: new Date(),
       });
     }
-    await startSession_({ farmerId, farmerName });
+    await startSession_({ farmerId, farmerName, crops: farmer?.farm?.crops ?? undefined });
   };
 
   const handleNewFarmer = async () => {

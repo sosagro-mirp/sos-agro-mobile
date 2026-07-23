@@ -141,10 +141,14 @@ class SyncQueueServiceClass {
           farmerIdForBackend = undefined;
         }
 
+        const localCrops = await sessionCropsStorage.get(session.localSessionId);
+        const cropIds = localCrops.map((c) => c.cropId);
+
         const sessionResponse = await createCampaignSession({
           campaignId: session.campaignId,
           userId: session.userId,
           ...(farmerIdForBackend ? { farmerId: farmerIdForBackend } : {}),
+          ...(cropIds.length > 0 ? { cropIds } : {}),
         });
 
         const realSessionId = sessionResponse.sessionId;

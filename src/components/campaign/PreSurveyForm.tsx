@@ -50,7 +50,9 @@ export const PreSurveyForm: React.FC<PreSurveyFormProps> = ({
               name: c.name,
               documentId: c.documentId ?? null,
               phone: c.phone ?? null,
-              farm: c.farmName ? { name: c.farmName } : null,
+              farm: c.farmName || (c.crops && c.crops.length > 0)
+                ? { name: c.farmName ?? '', crops: c.crops ?? null }
+                : null,
             }))
           );
         }

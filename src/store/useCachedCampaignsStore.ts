@@ -166,6 +166,7 @@ export const useCachedCampaignsStore = create<CachedCampaignsState>((set, get) =
             documentId: farmer.documentId ?? undefined,
             phone: farmer.phone ?? undefined,
             farmName: farmer.farm?.name ?? undefined,
+            crops: farmer.farm?.crops ?? undefined,
             cachedAt: new Date(),
           });
           set((s) => ({
