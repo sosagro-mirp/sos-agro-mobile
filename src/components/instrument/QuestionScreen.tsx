@@ -91,6 +91,10 @@ export const QuestionScreen: React.FC<QuestionScreenProps> = ({
       <SafeAreaView style={styles.root}>
         <View style={styles.emptyState}>
           <Text style={styles.emptyText}>No hay preguntas disponibles.</Text>
+          <SecondaryButton
+            label="Volver a campañas"
+            onPress={() => router.replace("/(tabs)/campaign")}
+          />
         </View>
       </SafeAreaView>
     );

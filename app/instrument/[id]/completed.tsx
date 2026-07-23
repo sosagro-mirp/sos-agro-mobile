@@ -3,6 +3,7 @@ import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useInstrumentSurveyStore } from "../../../src/store/useInstrumentSurveyStore";
 import { useCampaignSessionStore } from "../../../src/store/useCampaignSessionStore";
+import { advanceWithinCampaign } from "../../../src/lib/campaignNavigation";
 import { Fonts } from "../../../src/theme/fonts";
 
 export default function InstrumentCompletedScreen() {
@@ -17,8 +18,14 @@ export default function InstrumentCompletedScreen() {
     reset();
     if (isInsideCampaign && sessionId) {
       markStepCompleted();
-      router.replace(
-        `/campaign/${campaign!.campaignId}/session/${sessionId}/orchestrator`
+      // dismissTo(pre-survey) + push, not replace: question/start screens for
+      // the instrument just finished were reached via push and would
+      // otherwise remain reachable via the native back button (see
+      // src/lib/campaignNavigation.ts).
+      advanceWithinCampaign(
+        router,
+        campaign!.campaignId,
+        `/campaign/${campaign!.campaignId}/session/${sessionId}/orchestrator`,
       );
     } else {
       router.replace("/");

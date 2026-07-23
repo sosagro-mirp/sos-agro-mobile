@@ -24,6 +24,7 @@ import { extractFarmerLocally } from "../../../../../src/lib/extractFarmerLocall
 import { sessionCropsStorage } from "../../../../../src/storage/sessionCropsStorage";
 import { DuplicateAlertModal } from "../../../../../src/components/campaign/DuplicateAlertModal";
 import { NetworkError } from "../../../../../src/api/httpClient";
+import { advanceWithinCampaign, returnToPreSurvey } from "../../../../../src/lib/campaignNavigation";
 import { Fonts } from "../../../../../src/theme/fonts";
 
 type ScreenState = 'loading' | 'offline' | 'injection_error' | 'error' | 'duplicate_pending' | 'offline_extraction_pending';
@@ -93,8 +94,8 @@ export default function OrchestratorScreen() {
       campaignSessionId: resolvedSessionId,
     });
 
-    router.replace(`/instrument/${instrumentId}/question/0`);
-  }, [resolvedSessionId, getOrDownloadInstrument, store, initializeSurvey, router]);
+    advanceWithinCampaign(router, id, `/instrument/${instrumentId}/question/0`);
+  }, [resolvedSessionId, getOrDownloadInstrument, store, initializeSurvey, router, id]);
 
   const injectInstrumentOffline = useCallback(async (code: 'S1' | 'S2') => {
     if (!resolvedSessionId) return;
@@ -133,8 +134,8 @@ export default function OrchestratorScreen() {
       campaignSessionId: resolvedSessionId,
     });
 
-    router.replace(`/instrument/${instrument.instrumentId}/question/0`);
-  }, [resolvedSessionId, store, initializeSurvey, router]);
+    advanceWithinCampaign(router, id, `/instrument/${instrument.instrumentId}/question/0`);
+  }, [resolvedSessionId, store, initializeSurvey, router, id]);
 
   const injectInstrument = useCallback(async (code: 'S1' | 'S2') => {
     if (isOnline) {
@@ -152,7 +153,7 @@ export default function OrchestratorScreen() {
     instrument?: { instrumentId: string; name: string; isActive: boolean };
   }) => {
     if (!nextStep.instrument) {
-      router.replace(`/campaign/${id}/session/${resolvedSessionId}/completed`);
+      advanceWithinCampaign(router, id, `/campaign/${id}/session/${resolvedSessionId}/completed`);
       return;
     }
 
@@ -179,7 +180,7 @@ export default function OrchestratorScreen() {
     }
 
     await getOrDownloadInstrument(nextStep.instrument.instrumentId);
-    router.replace(`/instrument/${nextStep.instrument.instrumentId}/start`);
+    advanceWithinCampaign(router, id, `/instrument/${nextStep.instrument.instrumentId}/start`);
   }, [id, resolvedSessionId, getOrDownloadInstrument, router]);
 
   // Check for duplicates and either navigate or set duplicate_pending state.
@@ -189,7 +190,7 @@ export default function OrchestratorScreen() {
     instrument?: { instrumentId: string; name: string; isActive: boolean };
   }) => {
     if (!nextStep.stepId || !nextStep.instrument) {
-      router.replace(`/campaign/${id}/session/${resolvedSessionId}/completed`);
+      advanceWithinCampaign(router, id, `/campaign/${id}/session/${resolvedSessionId}/completed`);
       return;
     }
 
@@ -216,7 +217,7 @@ export default function OrchestratorScreen() {
     }
 
     await getOrDownloadInstrument(nextStep.instrument.instrumentId);
-    router.replace(`/instrument/${nextStep.instrument.instrumentId}/start`);
+    advanceWithinCampaign(router, id, `/instrument/${nextStep.instrument.instrumentId}/start`);
   }, [id, resolvedSessionId, isOnline, getOrDownloadInstrument, router]);
 
   // ── main entry logic ───────────────────────────────────────────────────────
@@ -285,12 +286,12 @@ export default function OrchestratorScreen() {
           }
           store.completeS2Injection();
           if (!campaign?.campaignId) {
-            router.replace(`/campaign/${id}/session/${resolvedSessionId}/completed`);
+            advanceWithinCampaign(router, id, `/campaign/${id}/session/${resolvedSessionId}/completed`);
             return;
           }
           const nextStep = await getNextStepOffline(campaign.campaignId, resolvedSessionId, -1);
           if (!nextStep || (!nextStep.stepId && !nextStep.instrument)) {
-            router.replace(`/campaign/${id}/session/${resolvedSessionId}/completed`);
+            advanceWithinCampaign(router, id, `/campaign/${id}/session/${resolvedSessionId}/completed`);
             return;
           }
           store.applyNextStep(nextStep);
@@ -310,7 +311,7 @@ export default function OrchestratorScreen() {
           const lastOrder = currentStep?.order ?? -1;
           const nextStep = await getNextStepOffline(campaign.campaignId, resolvedSessionId, lastOrder);
           if (!nextStep || (!nextStep.stepId && !nextStep.instrument)) {
-            router.replace(`/campaign/${id}/session/${resolvedSessionId}/completed`);
+            advanceWithinCampaign(router, id, `/campaign/${id}/session/${resolvedSessionId}/completed`);
             return;
           }
           store.applyNextStep(nextStep);
@@ -348,8 +349,10 @@ export default function OrchestratorScreen() {
         await getOrDownloadInstrument(duplicatePending.instrument.instrumentId);
         setDuplicatePending(null);
         setScreenState('loading');
-        router.replace(
-          `/instrument/${duplicatePending.instrument.instrumentId}/start?existingSurveyId=${newSurveyId}`
+        advanceWithinCampaign(
+          router,
+          id,
+          `/instrument/${duplicatePending.instrument.instrumentId}/start?existingSurveyId=${newSurveyId}`,
         );
       } else {
         if (duplicatePending.localSurveyId) {
@@ -359,14 +362,14 @@ export default function OrchestratorScreen() {
         await getOrDownloadInstrument(duplicatePending.instrument.instrumentId);
         setDuplicatePending(null);
         setScreenState('loading');
-        router.replace(`/instrument/${duplicatePending.instrument.instrumentId}/start`);
+        advanceWithinCampaign(router, id, `/instrument/${duplicatePending.instrument.instrumentId}/start`);
       }
     } catch (err) {
       setModalLoading(false);
       setScreenState('error');
       setErrorMessage(err instanceof Error ? err.message : 'Error al sobrescribir');
     }
-  }, [duplicatePending, resolvedSessionId, isOnline, getOrDownloadInstrument, router]);
+  }, [duplicatePending, resolvedSessionId, isOnline, getOrDownloadInstrument, router, id]);
 
   const handleSkip = useCallback(async () => {
     if (!duplicatePending || !resolvedSessionId) return;
@@ -406,7 +409,7 @@ export default function OrchestratorScreen() {
 
         const campaignId = campaign?.campaignId;
         if (!campaignId) {
-          router.replace(`/campaign/${id}/session/${resolvedSessionId}/completed`);
+          advanceWithinCampaign(router, id, `/campaign/${id}/session/${resolvedSessionId}/completed`);
           return;
         }
 
@@ -417,13 +420,13 @@ export default function OrchestratorScreen() {
         );
 
         if (!nextStepOffline || (!nextStepOffline.stepId && !nextStepOffline.instrument)) {
-          router.replace(`/campaign/${id}/session/${resolvedSessionId}/completed`);
+          advanceWithinCampaign(router, id, `/campaign/${id}/session/${resolvedSessionId}/completed`);
           return;
         }
 
         store.applyNextStep(nextStepOffline);
         await getOrDownloadInstrument(nextStepOffline.instrument!.instrumentId);
-        router.replace(`/instrument/${nextStepOffline.instrument!.instrumentId}/start`);
+        advanceWithinCampaign(router, id, `/instrument/${nextStepOffline.instrument!.instrumentId}/start`);
       }
     } catch (err) {
       setModalLoading(false);
@@ -434,7 +437,7 @@ export default function OrchestratorScreen() {
 
   const handleCancel = useCallback(() => {
     setDuplicatePending(null);
-    router.replace(`/campaign/${id}/pre-survey`);
+    returnToPreSurvey(router, id);
   }, [id, router]);
 
   // ── effects ────────────────────────────────────────────────────────────────
@@ -527,7 +530,7 @@ export default function OrchestratorScreen() {
           </Pressable>
           <Pressable
             style={styles.button}
-            onPress={() => router.replace(`/campaign/${id}/pre-survey`)}
+            onPress={() => returnToPreSurvey(router, id)}
           >
             <Text style={styles.buttonText}>← Volver a identificar</Text>
           </Pressable>
