@@ -1,4 +1,4 @@
-# [TESTING] Spec 23 — Fix: pantalla muerta al presionar "Atrás" entre instrumentos
+# [IN PROGRESS] Spec 23 — Fix: pantalla muerta al presionar "Atrás" entre instrumentos
 
 **Fecha:** 2026-07-23
 **Repositorio afectado:** `mobile/` (únicamente)
@@ -195,6 +195,37 @@ justifique exponer un MCP.
 ---
 
 ## Fases de implementación
+
+> ⚠️ **REGRESIÓN ENCONTRADA en prueba manual real (piloto en vivo, no
+> `Santiago`/café — campaña distinta con 2+ instrumentos sin condición de
+> cultivo).** Las Fases 1 y 2 (mecanismo `dismissTo(pre-survey) + push`)
+> implementadas y con `pnpm typecheck`/`lint`/`test` en verde, **rompen la
+> navegación real**: al completar el primer instrumento, en vez de llegar al
+> segundo, el usuario es enviado a la lista de campañas (pestaña
+> "Campañas"), sin poder continuar la campaña.
+>
+> **Hipótesis de causa raíz (sin confirmar en código todavía):**
+> `router.dismissTo(href)` probablemente **consume/remueve también la propia
+> pantalla destino** del historial al alcanzarla, no solo las que están por
+> encima. La primera transición de la sesión (`pre-survey` → instrumento 1)
+> también pasa por `advanceWithinCampaign` (mismo mecanismo), así que
+> `pre-survey` queda consumido del historial ya en ese primer uso. Cuando el
+> instrumento 1 termina y se intenta `dismissTo(pre-survey)` una segunda vez
+> (camino al instrumento 2), el destino ya no existe en el historial — el
+> fallback de `dismissTo` en cascada termina reseteando el stack de pestañas
+> a su ruta inicial (Campañas).
+>
+> **Estado:** rama `feature/spec23-navigation-fix` **revertida de la sesión
+> de piloto en vivo** (se volvió a `development`, sin este fix, donde el
+> comportamiento es estable). El código de las Fases 1-2 sigue en esta rama
+> sin mergear. **No mergear a `development` hasta rediseñar el mecanismo de
+> limpieza de historial** — posiblemente usando un ancla distinta que
+> persista entre usos (ej. re-`push`-ear `pre-survey` inmediatamente después
+> de cada `dismissTo` exitoso, en vez de asumir que sigue disponible para la
+> siguiente transición), o un mecanismo distinto a `dismissTo` por completo.
+> Las Fases 3 y 4 (guarda defensiva + botón de salida) son aditivas y no
+> deberían compartir este riesgo, pero no se verificaron de forma aislada
+> (sin las Fases 1-2 activas) antes de este hallazgo.
 
 ### Fase 1 — Limpieza de historial en el punto de choque (`completed.tsx`) ✅
 
