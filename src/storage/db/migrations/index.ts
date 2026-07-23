@@ -11,9 +11,14 @@ const migrations = {
       { idx: 5, when: 5, tag: 'm0005', breakpoints: true },
       { idx: 6, when: 6, tag: 'm0006', breakpoints: true },
       { idx: 7, when: 7, tag: 'm0007', breakpoints: true },
+      { idx: 8, when: 8, tag: 'm0008', breakpoints: true },
     ],
   },
   migrations: {
+    m0008: [
+      'ALTER TABLE `farmer_cache` ADD COLUMN `crops` text',
+    ].join('\n'),
+
     m0007: [
       'ALTER TABLE `surveys` ADD COLUMN `backend_survey_id` text',
     ].join('\n'),

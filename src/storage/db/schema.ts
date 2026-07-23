@@ -117,5 +117,6 @@ export const farmerCache = sqliteTable('farmer_cache', {
   documentId: text('document_id'),
   phone: text('phone'),
   farmName: text('farm_name'),
+  crops: text('crops'), // JSON array of CropSummary: { cropId, name }[]
   cachedAt: integer('cached_at', { mode: 'timestamp' }).notNull(),
 });
