@@ -72,5 +72,10 @@
       "<rootDir>/src/__tests__/__mocks__/"
     ]
   },
-  "private": true
+  "private": true,
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@sentry/cli"
+    ]
+  }
 }
