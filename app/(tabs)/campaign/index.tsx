@@ -13,6 +13,7 @@ import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useCachedCampaignsStore } from "../../../src/store/useCachedCampaignsStore";
 import { useSyncStatusStore } from "../../../src/store/useSyncStatusStore";
+import { runMigrations } from "../../../src/storage/db/db";
 import type { CampaignRender } from "../../../src/types";
 import { Fonts } from "../../../src/theme/fonts";
 
@@ -32,7 +33,14 @@ export default function CampaignListScreen() {
   const { isOnline } = useSyncStatusStore();
 
   useEffect(() => {
-    loadFromCache();
+    // On a fresh install this screen can mount before _layout.tsx's own
+    // runMigrations() call finishes creating the SQLite tables (e.g. right
+    // after login), causing "no such table campaign_cache". runMigrations()
+    // is safe to await again here — drizzle's migrate() only executes
+    // migrations that haven't already been applied.
+    runMigrations()
+      .then(loadFromCache)
+      .catch(loadFromCache);
   }, []);
 
   const progressPercent =
