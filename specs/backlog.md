@@ -8,10 +8,10 @@ No se actúa sobre estos ítems sin aprobación explícita del usuario.
 | Ítem | Spec redactado | Estado |
 |---|---|---|
 | Vulnerabilidades Dependabot | — | Sin spec; pendiente de priorización |
-| Instrumentos condicionados por cultivo offline (Bug A) | `spec/49_correccion_identidad_offline_agricultor_cultivos.md` | `[NOT STARTED]` — spec + pruebas listos, pendiente de aprobación |
-| Duplicados offline / `farmerId` inconsistente (Bug B) | `spec/49_…` (mismo spec) | `[NOT STARTED]` |
-| `farmerCache` obsoleta → FK violation (Bug C) | `spec/49_…` (mismo spec) | `[NOT STARTED]` |
-| Textos cortados / escalado de fuente | `mobile/specs/spec24.md` | `[NOT STARTED]` — spec + pruebas listos, pendiente de aprobación |
+| Instrumentos condicionados por cultivo offline (Bug A) | `spec/49_correccion_identidad_offline_agricultor_cultivos.md` | `[TESTING]` — implementado, pendiente de ronda manual |
+| Duplicados offline / `farmerId` inconsistente (Bug B) | `spec/49_…` (mismo spec) | `[TESTING]` |
+| `farmerCache` obsoleta → FK violation (Bug C) | `spec/49_…` (mismo spec) | `[TESTING]` |
+| Textos cortados / escalado de fuente | `mobile/specs/spec24.md` | `[TESTING]` — implementado, `TC-024-01` (medición en dispositivo) pendiente |
 
 ## Vulnerabilidades Dependabot (revisadas 2026-07-24)
 

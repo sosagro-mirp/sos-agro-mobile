@@ -1,4 +1,4 @@
-# [NOT STARTED] Spec 24 — Overflow de texto y escalado de fuente del sistema
+# [TESTING] Spec 24 — Overflow de texto y escalado de fuente del sistema
 
 **Fecha de redacción:** 2026-07-27
 **Repositorio afectado:** `mobile/` (únicamente)
@@ -131,7 +131,7 @@ expone datos ni acciones a un agente, y no toca el MCP `sosagro-admin`.
 
 ## Fases de implementación
 
-### Fase 1 — Medición en dispositivo
+### Fase 1 — Medición en dispositivo ⚠️ No ejecutada por Claude
 
 - [ ] Ejecutar `TC-024-01` de `docs/testing/22-test-spec24.md`: identificar el
       porcentaje de escala de fuente de One UI a partir del cual "Sin conexión"
@@ -139,18 +139,28 @@ expone datos ni acciones a un agente, y no toca el MCP `sosagro-admin`.
 - [ ] Registrar el hallazgo en el archivo de test y fijar el valor definitivo de
       `maxFontSizeMultiplier` a partir de esa medición.
 
-### Fase 2 — Componente `AppText`
+> **Nota:** Claude no tiene acceso al dispositivo físico del piloto, así que
+> esta fase queda pendiente para el usuario. Las Fases 2-4 se implementaron
+> igualmente usando el valor propuesto en la sección "Decisión de diseño"
+> (`MAX_FONT_SCALE = 1.3`) como punto de partida documentado — no como dato
+> medido. `TC-024-01` sigue pendiente en la ronda manual y puede corregir este
+> valor antes de marcar el spec como `[DONE]`.
 
-- [ ] Crear `src/components/common/AppText.tsx` con tres exports nombrados:
-      - `MAX_FONT_SCALE` — el techo de escalado, con el valor fijado en la Fase 1.
+### Fase 2 — Componente `AppText` ✅ Completada (2026-07-27, con la salvedad de arriba)
+
+- [x] Crear `src/components/common/AppText.tsx` con tres exports nombrados:
+      - `MAX_FONT_SCALE` — el techo de escalado (`1.3`, valor propuesto sin
+        confirmar en dispositivo — ver Fase 1).
       - `resolveAppTextProps(props: TextProps): TextProps` — **función pura**
         que devuelve las props a aplicar: reenvía todo tal cual y agrega
         `maxFontSizeMultiplier: MAX_FONT_SCALE` **solo si el call-site no lo
-        pasó**. No debe agregar ninguna otra prop.
+        pasó**. No agrega ninguna otra prop.
       - `AppText` — el componente, que se limita a `<Text {...resolveAppTextProps(props)} />`.
-- [ ] Usar `TextProps` sin recortar el tipo, para que `numberOfLines`, `style`,
+- [x] Usa `TextProps` sin recortar el tipo, para que `numberOfLines`, `style`,
       `accessibilityRole` y `onPress` sigan funcionando en los call-sites.
-- [ ] Verificar que `e2e-024-textOverflow.test.ts` pasa a verde.
+- [x] Verificar que `e2e-024-textOverflow.test.ts` pasa a verde.
+
+**Resultado:** 7/7 casos en verde.
 
 > **Por qué la lógica va en una función pura y no dentro del componente:**
 > el repositorio **no tiene `@testing-library/react-native` ni
@@ -160,30 +170,41 @@ expone datos ni acciones a un agente, y no toca el MCP `sosagro-admin`.
 > por Jest sin renderizar; lo visual se valida en la ronda manual, que es donde
 > corresponde según `CLAUDE.md`.
 
-### Fase 3 — Adopción en los puntos con overflow
+### Fase 3 — Adopción en los puntos con overflow ✅ Completada (2026-07-27)
 
-- [ ] `app/(tabs)/_layout.tsx`:
+- [x] `app/(tabs)/_layout.tsx`:
       - `statusText` y `userName` → `AppText` con `numberOfLines={1}`;
-      - `flexShrink: 1` en `statusPill` y en el contenedor del texto de la
-        izquierda, de modo que **el nombre de usuario ceda espacio antes que la
-        píldora de estado** — el estado de conexión es información operativa
-        crítica en campo y no debe ser lo primero que se corte;
-      - `flexShrink: 0` explícito en el botón "Salir" para que no se deforme.
-- [ ] `app/(tabs)/campaign/index.tsx`:
+      - **Ajuste respecto al plan original:** en vez de `flexShrink: 1` en
+        *ambos* `statusPill` y el contenedor izquierdo (que solo garantiza que
+        el username ceda "primero" de forma proporcional, no que la píldora
+        quede intacta), se implementó `headerRight` completo
+        (`statusPill` + botón "Salir") con `flexShrink: 0` — **tamaño fijo,
+        nunca se encoge** — y el nuevo contenedor `headerLeft` (el `Pressable`
+        que envuelve `appName`+`userName`) con `flexShrink: 1`. Esto cumple el
+        criterio 4 de forma determinística: la píldora y "Salir" quedan
+        garantizados como completamente visibles en cualquier escenario,
+        porque físicamente no pueden encogerse — no dependen de que el
+        username "ceda antes" en una repartición proporcional.
+- [x] `app/(tabs)/campaign/index.tsx`:
       - `title` y `refreshBtn` → `AppText` con `numberOfLines={1}`;
-      - `flexShrink: 1` en el título y `flexShrink: 0` en el botón
-        "Actualizar", para que el título ceda primero.
-- [ ] Revisar que el `dot` de la píldora (`_layout.tsx:43`) conserve su tamaño
-      fijo y no se encoja con el contenedor.
+      - `flexShrink: 1` en `title`; el botón "Actualizar" se envolvió en un
+        `Pressable` con `flexShrink: 0` (`refreshBtnWrapper`) para el mismo
+        tratamiento de tamaño fijo que en `_layout.tsx`.
+- [x] El `dot` de la píldora conserva su tamaño fijo — garantizado
+      transitivamente porque `headerRight` (su ancestro) ya no se encoge.
 
-### Fase 4 — Verificación y cierre
+**Resultado:** `pnpm typecheck` limpio.
 
-- [ ] `pnpm typecheck` + `pnpm lint` + `pnpm test`.
-- [ ] Marcar el spec como `[TESTING]`.
+### Fase 4 — Verificación y cierre ✅ Completada (2026-07-27)
+
+- [x] `pnpm typecheck` + `pnpm lint` + `pnpm test`. Typecheck limpio; lint sin
+      errores (los 3 warnings en archivos tocados son preexistentes, no
+      introducidos por este spec — verificado con `git diff`); test 170/170 en
+      verde (13/13 suites, incluyendo las de spec49 en la misma rama).
+- [x] Marcar el spec como `[TESTING]`.
 - [ ] Ronda manual completa de `docs/testing/22-test-spec24.md` en el
-      dispositivo del piloto (Galaxy S25), incluyendo la escala de fuente que
-      reprodujo el defecto y la escala por defecto (verificar que no se
-      introdujo regresión visual con ajustes normales).
+      dispositivo del piloto (Galaxy S25), incluyendo `TC-024-01` (medición
+      pendiente, ver Fase 1) y la escala por defecto.
 - [ ] Invocar `@reviewer` antes del merge a `development`.
 - [ ] Marcar `[DONE]` y cerrar el ítem 5 de `specs/backlog.md`.
 
@@ -237,16 +258,15 @@ existe todavía. La suite completa (8 casos) pasa a verde con la Fase 2.
 
 ## Rama
 
-| Repositorio | Rama | Desde |
+| Repositorio | Rama planeada | Rama real de implementación |
 |---|---|---|
-| `mobile/` | `bug/spec24-text-overflow` | `development` |
+| `mobile/` | `bug/spec24-text-overflow` | `bug/spec49-identidad-offline` |
 
-> ⚠️ **Nota de estado:** al redactar este spec, `mobile/` está en la rama `main`
-> con `specs/backlog.md` sin commitear. Hay que resolverlo y crear la rama desde
-> `development`, no desde `main`.
-
-Este spec es independiente del Spec 49 (identidad offline): no comparten
-archivos, así que ambas ramas pueden avanzar en paralelo sin conflicto.
+> ⚠️ **Desviación respecto al plan:** el usuario pidió implementar este spec
+> sobre la rama ya abierta del spec 49 en vez de crear una rama nueva, para no
+> fragmentar el trabajo pendiente de merge. Ambos specs son independientes (no
+> comparten archivos), así que no hay conflicto de contenido — solo quedan
+> mezclados en el mismo PR/rama en lugar de en ramas separadas.
 
 ---
 
@@ -254,5 +274,5 @@ archivos, así que ambas ramas pueden avanzar en paralelo sin conflicto.
 
 > Claude no escribe código de implementación hasta que esta sección esté marcada.
 
-- [ ] Paquete (spec + pruebas) aprobado por el usuario
-- **Fecha de aprobación:** {{pendiente}}
+- [x] Paquete (spec + pruebas) aprobado por el usuario
+- **Fecha de aprobación:** 2026-07-27

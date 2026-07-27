@@ -16,6 +16,7 @@ import { useSyncStatusStore } from "../../../src/store/useSyncStatusStore";
 import { runMigrations } from "../../../src/storage/db/db";
 import type { CampaignRender } from "../../../src/types";
 import { Fonts } from "../../../src/theme/fonts";
+import { AppText } from "../../../src/components/common/AppText";
 
 const GREEN = "#1B6B3A";
 
@@ -52,17 +53,21 @@ export default function CampaignListScreen() {
     <SafeAreaView style={styles.root} edges={["bottom"]}>
       {/* Tab header */}
       <View style={styles.header}>
-        <Text style={styles.title}>Campañas</Text>
+        <AppText style={styles.title} numberOfLines={1}>
+          Campañas
+        </AppText>
         <Pressable
+          style={styles.refreshBtnWrapper}
           onPress={refresh}
           disabled={!isOnline || isLoading}
           accessibilityLabel="Actualizar campañas"
         >
-          <Text
+          <AppText
             style={[styles.refreshBtn, (!isOnline || isLoading) && styles.refreshDisabled]}
+            numberOfLines={1}
           >
             Actualizar
-          </Text>
+          </AppText>
         </Pressable>
       </View>
 
@@ -214,7 +219,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#E5E7EB",
   },
-  title: { fontSize: 17, fontFamily: Fonts.bold, color: "#111827" },
+  title: { flexShrink: 1, fontSize: 17, fontFamily: Fonts.bold, color: "#111827" },
+  // Fixed size: the "Actualizar" button must stay fully visible even when
+  // the campaign title is long or the system font scale is high (spec 24).
+  refreshBtnWrapper: { flexShrink: 0 },
   refreshBtn: { fontSize: 15, fontFamily: Fonts.semiBold, color: GREEN },
   refreshDisabled: { color: "#9CA3AF" },
 
