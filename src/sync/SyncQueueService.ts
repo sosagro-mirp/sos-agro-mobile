@@ -16,7 +16,7 @@ import { resolveOtherOptions } from '../lib/resolveOtherOptions';
 import { isLocalId } from '../lib/isLocalId';
 import { useSyncStatusStore } from '../store/useSyncStatusStore';
 import { useCampaignSessionStore } from '../store/useCampaignSessionStore';
-import { NetworkError, httpClient } from '../api/httpClient';
+import { NetworkError, ServerError, httpClient } from '../api/httpClient';
 import { endpoints } from '../api/endpoints';
 import { logger } from '../lib/logger';
 import { sessionCropsStorage } from '../storage/sessionCropsStorage';
@@ -144,12 +144,38 @@ class SyncQueueServiceClass {
         const localCrops = await sessionCropsStorage.get(session.localSessionId);
         const cropIds = localCrops.map((c) => c.cropId);
 
-        const sessionResponse = await createCampaignSession({
-          campaignId: session.campaignId,
-          userId: session.userId,
-          ...(farmerIdForBackend ? { farmerId: farmerIdForBackend } : {}),
-          ...(cropIds.length > 0 ? { cropIds } : {}),
-        });
+        let sessionResponse;
+        try {
+          sessionResponse = await createCampaignSession({
+            campaignId: session.campaignId,
+            userId: session.userId,
+            ...(farmerIdForBackend ? { farmerId: farmerIdForBackend } : {}),
+            ...(cropIds.length > 0 ? { cropIds } : {}),
+          });
+        } catch (createErr) {
+          // The farmerId was cached on this device but has since been
+          // deleted on the backend (e.g. cleanup of a prior test round):
+          // invalidate the stale entry and retry as a new farmer instead of
+          // marking the whole session as failed (see spec 49, Bug C).
+          if (
+            createErr instanceof ServerError &&
+            createErr.status === 404 &&
+            createErr.message === 'Farmer not found' &&
+            farmerIdForBackend
+          ) {
+            await farmerCacheStorage.remove(farmerIdForBackend);
+            logger.warn(
+              `[Sync] farmerId ${farmerIdForBackend} no longer exists on the backend, retrying session ${session.localSessionId} without it`,
+            );
+            sessionResponse = await createCampaignSession({
+              campaignId: session.campaignId,
+              userId: session.userId,
+              ...(cropIds.length > 0 ? { cropIds } : {}),
+            });
+          } else {
+            throw createErr;
+          }
+        }
 
         const realSessionId = sessionResponse.sessionId;
         const localSessionId = session.localSessionId;

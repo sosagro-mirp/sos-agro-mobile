@@ -111,9 +111,9 @@ describe('extractCropsOffline', () => {
 
   it('returns [] when no responses have booleanValue = true', async () => {
     mockGet.mockResolvedValue({ instrumentId: INSTRUMENT_ID });
-    mockInstrumentCacheGet.mockResolvedValue(makeInstrumentWithFields({ q1: 'crop.café' }));
+    mockInstrumentCacheGet.mockResolvedValue(makeInstrumentWithFields({ q1: 'crop.cafe' }));
     mockAll.mockResolvedValue([]);
-    mockCampaignCacheGet.mockResolvedValue(makeCampaign([{ cropId: 'crop-1', name: 'café' }]));
+    mockCampaignCacheGet.mockResolvedValue(makeCampaign([{ cropId: 'crop-1', name: 'Café' }]));
 
     const result = await extractCropsOffline(SURVEY_ID, CAMPAIGN_ID);
 
@@ -123,28 +123,28 @@ describe('extractCropsOffline', () => {
   it('returns the matching crop when a question with systemField crop.X is answered true', async () => {
     mockGet.mockResolvedValue({ instrumentId: INSTRUMENT_ID });
     mockInstrumentCacheGet.mockResolvedValue(
-      makeInstrumentWithFields({ 'q-café': 'crop.café' })
+      makeInstrumentWithFields({ 'q-cafe': 'crop.cafe' })
     );
-    mockAll.mockResolvedValue([{ questionId: 'q-café' }]);
+    mockAll.mockResolvedValue([{ questionId: 'q-cafe' }]);
     mockCampaignCacheGet.mockResolvedValue(
-      makeCampaign([{ cropId: 'crop-1', name: 'café' }])
+      makeCampaign([{ cropId: 'crop-1', name: 'Café' }])
     );
 
     const result = await extractCropsOffline(SURVEY_ID, CAMPAIGN_ID);
 
-    expect(result).toEqual([{ cropId: 'crop-1', name: 'café' }]);
+    expect(result).toEqual([{ cropId: 'crop-1', name: 'Café' }]);
   });
 
   it('returns multiple crops when multiple crop questions are answered true', async () => {
     mockGet.mockResolvedValue({ instrumentId: INSTRUMENT_ID });
     mockInstrumentCacheGet.mockResolvedValue(
-      makeInstrumentWithFields({ 'q-café': 'crop.café', 'q-cacao': 'crop.cacao' })
+      makeInstrumentWithFields({ 'q-cafe': 'crop.cafe', 'q-cacao': 'crop.cacao' })
     );
-    mockAll.mockResolvedValue([{ questionId: 'q-café' }, { questionId: 'q-cacao' }]);
+    mockAll.mockResolvedValue([{ questionId: 'q-cafe' }, { questionId: 'q-cacao' }]);
     mockCampaignCacheGet.mockResolvedValue(
       makeCampaign([
-        { cropId: 'crop-1', name: 'café' },
-        { cropId: 'crop-2', name: 'cacao' },
+        { cropId: 'crop-1', name: 'Café' },
+        { cropId: 'crop-2', name: 'Cacao' },
       ])
     );
 
@@ -152,24 +152,24 @@ describe('extractCropsOffline', () => {
 
     expect(result).toHaveLength(2);
     expect(result).toEqual(expect.arrayContaining([
-      { cropId: 'crop-1', name: 'café' },
-      { cropId: 'crop-2', name: 'cacao' },
+      { cropId: 'crop-1', name: 'Café' },
+      { cropId: 'crop-2', name: 'Cacao' },
     ]));
   });
 
   it('excludes questions whose systemField does not start with "crop."', async () => {
     mockGet.mockResolvedValue({ instrumentId: INSTRUMENT_ID });
     mockInstrumentCacheGet.mockResolvedValue(
-      makeInstrumentWithFields({ 'q-other': 'farmer.name', 'q-café': 'crop.café' })
+      makeInstrumentWithFields({ 'q-other': 'farmer.name', 'q-cafe': 'crop.cafe' })
     );
-    mockAll.mockResolvedValue([{ questionId: 'q-other' }, { questionId: 'q-café' }]);
+    mockAll.mockResolvedValue([{ questionId: 'q-other' }, { questionId: 'q-cafe' }]);
     mockCampaignCacheGet.mockResolvedValue(
-      makeCampaign([{ cropId: 'crop-1', name: 'café' }])
+      makeCampaign([{ cropId: 'crop-1', name: 'Café' }])
     );
 
     const result = await extractCropsOffline(SURVEY_ID, CAMPAIGN_ID);
 
-    expect(result).toEqual([{ cropId: 'crop-1', name: 'café' }]);
+    expect(result).toEqual([{ cropId: 'crop-1', name: 'Café' }]);
   });
 
   it('excludes crop names not found in availableCrops', async () => {
@@ -179,7 +179,7 @@ describe('extractCropsOffline', () => {
     );
     mockAll.mockResolvedValue([{ questionId: 'q-cannabis' }]);
     mockCampaignCacheGet.mockResolvedValue(
-      makeCampaign([{ cropId: 'crop-1', name: 'café' }])
+      makeCampaign([{ cropId: 'crop-1', name: 'Café' }])
     );
 
     const result = await extractCropsOffline(SURVEY_ID, CAMPAIGN_ID);
@@ -190,9 +190,9 @@ describe('extractCropsOffline', () => {
   it('returns [] when campaign is not in cache', async () => {
     mockGet.mockResolvedValue({ instrumentId: INSTRUMENT_ID });
     mockInstrumentCacheGet.mockResolvedValue(
-      makeInstrumentWithFields({ 'q-café': 'crop.café' })
+      makeInstrumentWithFields({ 'q-cafe': 'crop.cafe' })
     );
-    mockAll.mockResolvedValue([{ questionId: 'q-café' }]);
+    mockAll.mockResolvedValue([{ questionId: 'q-cafe' }]);
     mockCampaignCacheGet.mockResolvedValue(null);
 
     const result = await extractCropsOffline(SURVEY_ID, CAMPAIGN_ID);
@@ -208,11 +208,26 @@ describe('extractCropsOffline', () => {
     });
     mockAll.mockResolvedValue([{ questionId: 'q-no-field' }]);
     mockCampaignCacheGet.mockResolvedValue(
-      makeCampaign([{ cropId: 'crop-1', name: 'café' }])
+      makeCampaign([{ cropId: 'crop-1', name: 'Café' }])
     );
 
     const result = await extractCropsOffline(SURVEY_ID, CAMPAIGN_ID);
 
     expect(result).toEqual([]);
+  });
+
+  it('deduplicates crops when two questions resolve to the same cropId', async () => {
+    mockGet.mockResolvedValue({ instrumentId: INSTRUMENT_ID });
+    mockInstrumentCacheGet.mockResolvedValue(
+      makeInstrumentWithFields({ 'q-cafe-1': 'crop.cafe', 'q-cafe-2': 'crop.cafe' })
+    );
+    mockAll.mockResolvedValue([{ questionId: 'q-cafe-1' }, { questionId: 'q-cafe-2' }]);
+    mockCampaignCacheGet.mockResolvedValue(
+      makeCampaign([{ cropId: 'crop-1', name: 'Café' }])
+    );
+
+    const result = await extractCropsOffline(SURVEY_ID, CAMPAIGN_ID);
+
+    expect(result).toEqual([{ cropId: 'crop-1', name: 'Café' }]);
   });
 });

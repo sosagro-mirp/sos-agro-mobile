@@ -112,4 +112,13 @@ export const farmerCacheStorage = {
     const result = await db.delete(farmerCache);
     return result.changes ?? 0;
   },
+
+  /**
+   * Invalidates a single cached entry. Used when the backend confirms a
+   * farmerId no longer exists (404), so a deleted farmer from a prior test
+   * round doesn't keep getting offered from the offline search.
+   */
+  async remove(farmerId: string): Promise<void> {
+    await db.delete(farmerCache).where(eq(farmerCache.farmerId, farmerId));
+  },
 };

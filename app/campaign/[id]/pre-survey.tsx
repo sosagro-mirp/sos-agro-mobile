@@ -12,8 +12,10 @@ import { OfflineBanner } from "../../../src/components/network/OfflineBanner";
 import { Fonts } from "../../../src/theme/fonts";
 import { generateLocalId } from "../../../src/lib/generateLocalId";
 import { pendingSessionStorage } from "../../../src/storage/pendingSessions";
+import { cacheFarmerIdentity } from "../../../src/lib/cacheFarmerIdentity";
 import { farmerCacheStorage } from "../../../src/storage/farmerCache";
 import { sessionCropsStorage } from "../../../src/storage/sessionCropsStorage";
+import { ServerError } from "../../../src/api/httpClient";
 import type { CropSummary, FarmerSearchResult } from "../../../src/types";
 
 export default function PreSurveyScreen() {
@@ -45,6 +47,27 @@ export default function PreSurveyScreen() {
     );
   }
 
+  const createOnlineSession = async (
+    farmerId: string | undefined,
+    crops: CropSummary[] | undefined,
+  ) => {
+    const cropIds = crops?.map((c) => c.cropId);
+    const sessionResponse = await createCampaignSession({
+      campaignId: campaign.campaignId,
+      userId: user?.userId,
+      ...(farmerId ? { farmerId } : {}),
+      ...(cropIds && cropIds.length > 0 ? { cropIds } : {}),
+    });
+
+    // Known crop for an existing farmer: seed it locally too so offline
+    // navigation (getNextStepOffline) can unlock crop-conditioned steps
+    // even if the device loses connection later in this same session.
+    await sessionCropsStorage.save(sessionResponse.sessionId, crops ?? []);
+
+    applySessionResponse(sessionResponse);
+    router.push(`/campaign/${id}/session/${sessionResponse.sessionId}/orchestrator`);
+  };
+
   const startSessionOnline = async (options?: {
     farmerId?: string;
     farmerName?: string;
@@ -62,23 +85,29 @@ export default function PreSurveyScreen() {
     }
 
     try {
-      const cropIds = options?.crops?.map((c) => c.cropId);
-      const sessionResponse = await createCampaignSession({
-        campaignId: campaign.campaignId,
-        userId: user?.userId,
-        ...(options?.farmerId ? { farmerId: options.farmerId } : {}),
-        ...(cropIds && cropIds.length > 0 ? { cropIds } : {}),
-      });
-
-      // Known crop for an existing farmer: seed it locally too so offline
-      // navigation (getNextStepOffline) can unlock crop-conditioned steps
-      // even if the device loses connection later in this same session.
-      await sessionCropsStorage.save(sessionResponse.sessionId, options?.crops ?? []);
-
-      applySessionResponse(sessionResponse);
-      router.push(`/campaign/${id}/session/${sessionResponse.sessionId}/orchestrator`);
+      await createOnlineSession(options?.farmerId, options?.crops);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Error al crear la sesión");
+      // The farmer was cached on this device (e.g. from a prior test round)
+      // but has since been deleted on the backend: invalidate the stale
+      // entry and continue the flow as a new farmer instead of leaving the
+      // pollster stuck (see spec 49, Bug C).
+      if (
+        err instanceof ServerError &&
+        err.status === 404 &&
+        err.message === "Farmer not found" &&
+        options?.farmerId
+      ) {
+        await farmerCacheStorage.remove(options.farmerId);
+        setNewFarmerMode();
+        try {
+          await createOnlineSession(undefined, options.crops);
+          setError("El agricultor seleccionado ya no existe en el servidor. Se registró como agricultor nuevo.");
+        } catch (retryErr) {
+          setError(retryErr instanceof Error ? retryErr.message : "Error al crear la sesión");
+        }
+      } else {
+        setError(err instanceof Error ? err.message : "Error al crear la sesión");
+      }
     } finally {
       setIsLoading(false);
     }
@@ -136,14 +165,13 @@ export default function PreSurveyScreen() {
 
   const handleSearchSelect = async (farmerId: string, farmerName: string, farmer?: FarmerSearchResult) => {
     if (isOnline && farmer) {
-      await farmerCacheStorage.upsert({
+      await cacheFarmerIdentity({
         farmerId: farmer.farmerId,
         name: farmer.name,
-        documentId: farmer.documentId ?? undefined,
-        phone: farmer.phone ?? undefined,
-        farmName: farmer.farm?.name ?? undefined,
+        documentId: farmer.documentId,
+        phone: farmer.phone,
+        farmName: farmer.farm?.name,
         crops: farmer.farm?.crops ?? undefined,
-        cachedAt: new Date(),
       });
     }
     await startSession_({ farmerId, farmerName, crops: farmer?.farm?.crops ?? undefined });

@@ -3,6 +3,7 @@ import { db } from '../storage/db/db';
 import { surveys, responses } from '../storage/db/schema';
 import { instrumentCacheStorage } from '../storage/instrumentCache';
 import { campaignCacheStorage } from '../storage/campaignCache';
+import { normalizeSearchText } from './optionSearch';
 import type { CropSummary } from '../types';
 
 /**
@@ -52,7 +53,19 @@ export async function extractCropsOffline(
   const campaign = await campaignCacheStorage.get(campaignId);
   if (!campaign) return [];
 
-  return cropNames
-    .map((name) => campaign.availableCrops.find((c) => c.name === name))
+  // The systemField key ('cafe', 'canamo', ...) is the ASCII/lowercase form of
+  // the TypeOfCrop catalog name ('Café', 'Cáñamo', ...). Normalize both sides
+  // instead of hardcoding a name map, so the catalog stays the single source
+  // of truth and a new crop resolves without touching this file, as long as
+  // it follows that convention.
+  const resolvedCrops = cropNames
+    .map((name) =>
+      campaign.availableCrops.find(
+        (c) => normalizeSearchText(c.name) === normalizeSearchText(name),
+      ),
+    )
     .filter((c): c is CropSummary => c !== undefined);
+
+  const uniqueCropsById = new Map(resolvedCrops.map((c) => [c.cropId, c]));
+  return Array.from(uniqueCropsById.values());
 }
