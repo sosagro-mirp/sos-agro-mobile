@@ -16,6 +16,7 @@ import { cacheFarmerIdentity } from "../../../src/lib/cacheFarmerIdentity";
 import { farmerCacheStorage } from "../../../src/storage/farmerCache";
 import { sessionCropsStorage } from "../../../src/storage/sessionCropsStorage";
 import { ServerError } from "../../../src/api/httpClient";
+import { logger } from "../../../src/lib/logger";
 import type { CropSummary, FarmerSearchResult } from "../../../src/types";
 
 export default function PreSurveyScreen() {
@@ -97,7 +98,17 @@ export default function PreSurveyScreen() {
         err.message === "Farmer not found" &&
         options?.farmerId
       ) {
-        await farmerCacheStorage.remove(options.farmerId);
+        try {
+          await farmerCacheStorage.remove(options.farmerId);
+        } catch (removeErr) {
+          // Best-effort invalidation: a cache failure here must not block
+          // the retry below, which is what actually unblocks the pollster.
+          logger.warn(
+            `[pre-survey] failed to invalidate stale farmerCache entry ${options.farmerId}: ${
+              removeErr instanceof Error ? removeErr.message : String(removeErr)
+            }`,
+          );
+        }
         setNewFarmerMode();
         try {
           await createOnlineSession(undefined, options.crops);

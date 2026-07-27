@@ -8,10 +8,14 @@ No se actúa sobre estos ítems sin aprobación explícita del usuario.
 | Ítem | Spec redactado | Estado |
 |---|---|---|
 | Vulnerabilidades Dependabot | — | Sin spec; pendiente de priorización |
-| Instrumentos condicionados por cultivo offline (Bug A) | `spec/49_correccion_identidad_offline_agricultor_cultivos.md` | `[TESTING]` — implementado, pendiente de ronda manual |
-| Duplicados offline / `farmerId` inconsistente (Bug B) | `spec/49_…` (mismo spec) | `[TESTING]` |
-| `farmerCache` obsoleta → FK violation (Bug C) | `spec/49_…` (mismo spec) | `[TESTING]` |
-| Textos cortados / escalado de fuente | `mobile/specs/spec24.md` | `[TESTING]` — implementado, `TC-024-01` (medición en dispositivo) pendiente |
+| Instrumentos condicionados por cultivo offline (Bug A) | `spec/49_correccion_identidad_offline_agricultor_cultivos.md` | `[DONE]` |
+| Duplicados offline / `farmerId` inconsistente (Bug B) | `spec/49_…` (mismo spec) | `[DONE]` |
+| `farmerCache` obsoleta → FK violation (Bug C) | `spec/49_…` (mismo spec) | `[DONE]` |
+| Textos cortados / escalado de fuente | `mobile/specs/spec24.md` | `[DONE]` |
+| `DELETE /api/farmers/:id` → 500 por FK de `campaign_sessions` (nuevo) | — | Sin spec; hallazgo de la ronda manual del spec 49 |
+| Sync no se dispara solo al reconectar en Expo Go (nuevo) | — | Sin spec; hallazgo de la ronda manual del spec 49, sin confirmar en APK real |
+| Caché de identidad provisional no se limpia tras sincronizar (Bug B residual) | — | Sin spec; hallazgo de `@reviewer` sobre la rama del spec 49 |
+| Sesión sin agricultor tras reintento por 404 (documentación) | — | Sin spec; hallazgo de `@reviewer`, no es un bug de comportamiento |
 
 ## Vulnerabilidades Dependabot (revisadas 2026-07-24)
 
@@ -90,8 +94,7 @@ catálogo (`types-of-crops.seed.ts:4-9`).
   reflejar los valores reales de producción (`systemField: 'crop.cafe'` /
   `availableCrops: [{ name: 'Café' }]`).
 
-**Estado:** ⬜ Pendiente de aprobación para implementar. No corregido en esta
-sesión por instrucción explícita del usuario (solo diagnóstico + registro).
+**Estado:** ✅ Corregido — spec `spec/49_correccion_identidad_offline_agricultor_cultivos.md` marcado `[DONE]`.
 
 ## Bug: detección de duplicados offline no dispara aviso al re-encuestar al mismo agricultor (encontrado en piloto APK, `docs/testing/17-test-piloto-multidispositivo.md`, TC-04)
 
@@ -141,8 +144,7 @@ segundo plano.
 No hace falta tocar `duplicateDetection.ts`, los call-sites de
 `checkDuplicate`, ni `DuplicateAlertModal.tsx` — todos correctos.
 
-**Estado:** ⬜ Pendiente de aprobación para implementar. No corregido en esta
-sesión por instrucción explícita del usuario (solo diagnóstico + registro).
+**Estado:** ✅ Corregido — spec `spec/49_correccion_identidad_offline_agricultor_cultivos.md` marcado `[DONE]`.
 
 ## Bug: `farmerCacheStorage` local no se invalida al borrar un agricultor en backend → `POST /api/campaign-sessions` falla con FK violation (Sentry NODE-NESTJS-3, producción)
 
@@ -204,8 +206,7 @@ manejar en vez de un 404/400 claro para el cliente.
   lanzar `NotFoundException` en vez de dejar que la FK de Postgres produzca
   un 500 no controlado.
 
-**Estado:** ⬜ Pendiente de aprobación para implementar. No corregido en esta
-sesión por instrucción explícita del usuario (solo diagnóstico + registro).
+**Estado:** ✅ Corregido — spec `spec/49_correccion_identidad_offline_agricultor_cultivos.md` marcado `[DONE]`.
 Issue de Sentry sin resolver: `NODE-NESTJS-3`.
 
 ## Bug visual: textos cortados en la UI ("En línea" / "Sin conexión" / "Actualizar") en pantallas angostas o con fuente del sistema aumentada
@@ -246,7 +247,130 @@ en los elementos más ajustados de espacio:
   wrapper de `Text` del proyecto con un default sensato, en vez de parchear
   caso por caso.
 
-**Estado:** ⬜ Pendiente de aprobación para implementar. No corregido en esta
-sesión por instrucción explícita del usuario (solo diagnóstico + registro).
+**Estado:** ✅ Corregido — spec `mobile/specs/spec24.md` marcado `[DONE]`.
 Diagnóstico basado en lectura de código; falta confirmar en el dispositivo
 el % exacto de escala de fuente/resolución que lo reproduce.
+
+## Bug: `DELETE /api/farmers/:id` devuelve 500 en vez de un error manejado cuando el agricultor tiene una `campaign_sessions` asociada (encontrado en ronda manual de `docs/testing/21-test-spec49.md`, TC-049-08 y TC-049-10)
+
+**Detectado:** 2026-07-28, preparando datos de prueba para la ronda manual del
+spec 49 (backend local). Al intentar borrar un agricultor de prueba que había
+sido **seleccionado** desde la búsqueda de pre-encuesta (y esa sesión luego
+cancelada sin completar ninguna encuesta), `DELETE /api/farmers/:id` respondió
+`500 Internal Server Error` en vez de completar el borrado.
+
+**Causa raíz:** seleccionar un agricultor en la pre-encuesta online crea de
+inmediato una fila real en `campaign_sessions` (`startSessionOnline` →
+`createCampaignSession`), incluso si el encuestador nunca llega a completar ni
+una sola pregunta y simplemente sale de la pantalla. Esa fila queda
+referenciando al agricultor vía `campaign_sessions.farmer_id → farmers(id) ON
+DELETE RESTRICT`. No existe ningún endpoint para eliminar una
+`campaign_sessions` individual (`campaign-sessions.controller.ts` solo expone
+`POST`, `GET /:id`, `GET /:id/next-step`, `GET last-farmer` — sin `DELETE`),
+así que no hay forma de resolver la restricción vía API. En la ronda de
+pruebas hubo que borrar la fila directamente en la base de datos (con
+aprobación explícita del usuario) para poder continuar.
+
+**Impacto:** cualquier agricultor que haya sido "tocado" alguna vez desde el
+flujo de pre-encuesta —aunque la sesión resultante nunca se haya completado ni
+sincronizado ninguna encuesta— queda imposible de borrar vía API. Es un nivel
+de causa raíz por encima del bug de `farmerCache` obsoleta que motivó el spec
+49: ese spec corrige los síntomas (caché del cliente + 404 al *crear* una
+sesión), pero no toca este endpoint de borrado, que sigue devolviendo un 500
+sin manejar ante la misma FK.
+
+**Archivos a tocar en el fix (referencia, sin modificar todavía):**
+- `backend/src/farmers/farmers.service.ts` (método `remove()`) — capturar la
+  violación de FK y devolver un error claro (`ConflictException` o similar) en
+  vez de dejar que se propague como 500; o evaluar cascada/soft-delete de
+  `campaign_sessions` sin datos asociados.
+- Evaluar si conviene un endpoint `DELETE /api/campaign-sessions/:id` acotado
+  a sesiones sin `surveys` asociadas, para limpieza de datos de prueba sin
+  necesidad de acceso directo a la base.
+
+**Estado:** ⬜ Pendiente de aprobación para implementar. No corregido en esta
+sesión (fuera del scope del spec 49, solo diagnóstico + registro).
+
+## Hallazgo: sincronización no se dispara automáticamente al reconectar en Expo Go (encontrado en ronda manual de `docs/testing/21-test-spec49.md`, TC-049-10)
+
+**Detectado:** 2026-07-28, ejecutando TC-049-10 (resolución de sesión offline
+pendiente al reconectar) sobre **Expo Go**, no APK real. Tras desactivar el
+modo avión, la cola de sincronización no se vació sola — solo se resolvió al
+tocar el botón manual "Sincronizar ahora" en la pestaña Sincronización
+(`app/(tabs)/sync/index.tsx` → `NetworkMonitor.checkAndSync()`).
+
+**Diagnóstico parcial:** el fix de `SyncQueueService.resolveLocalSessions`
+bajo prueba en ese caso **sí funcionó correctamente** una vez invocado
+manualmente — el problema está un nivel más arriba, en que
+`NetworkMonitor.handleStateChange` (`mobile/src/sync/NetworkMonitor.ts:21-35`)
+no disparó `processAll()` automáticamente al detectar la transición
+offline→online. No se investigó más a fondo si es una particularidad de Expo
+Go (posible retraso o comportamiento distinto de `NetInfo` fuera de un build
+nativo) o un bug real en la lógica de `previouslyReachable`.
+
+**Antes de tratarlo como bug confirmado:** repetir el mismo escenario con APK
+real (perfil `preview`/`development`) — el requisito de dispositivo original
+del spec 49 asumía APK real precisamente por este tipo de diferencia de
+comportamiento entre Expo Go y un build nativo.
+
+**Estado:** ⬜ Sin diagnóstico de causa raíz confirmado. No corregido en esta
+sesión (fuera del scope del spec 49, solo observación + registro).
+
+## Hallazgo: caché de identidad provisional no se limpia tras sincronizar → riesgo residual del Bug B en el ciclo offline → sync → offline
+
+**Detectado por `@reviewer`:** 2026-07-27, auditoría de
+`docs/reports/auditorias/13-auditoria-mobile-spec49-spec24.md`, hallazgo 🟠-1,
+sobre la rama del spec 49 (`bug/spec49-identidad-offline`).
+
+Cuando una identificación S1 ocurre **offline**, `extractFarmerLocally()`
+genera un `farmerId` local provisional y lo cachea con `isProvisional: true`.
+Al reconectar, `SyncQueueService` (`src/sync/SyncQueueService.ts:325-349`,
+`maybeExtractFarmerAndCrops` o equivalente) resuelve la identidad real contra
+el backend, pero **no borra la entrada provisional** de `farmerCacheStorage`
+— queda una entrada vieja (provisional) y una nueva (real) compartiendo el
+mismo `documentId`. `farmerCacheStorage.getByDocumentId()`
+(`src/storage/farmerCache.ts:90-97`) no tiene `ORDER BY`, así que no hay
+garantía de cuál de las dos devuelve.
+
+**Impacto:** si tras esa sincronización el dispositivo vuelve a quedar
+offline y se re-encuesta al mismo agricultor, `extractFarmerLocally` podría
+resolver la entrada **provisional** vieja (marcada `isProvisional: false`
+igual, porque `getByDocumentId` no distingue) en vez de la real — reintroduce
+el síntoma del Bug B (criterios 7 y 8 del spec 49) específicamente en el ciclo
+**offline → sync → offline**, que la ronda manual de
+`docs/testing/21-test-spec49.md` no cubrió (TC-049-05/06 solo prueba
+online → offline).
+
+**Archivos a tocar en el fix (referencia, sin modificar todavía):**
+- `src/sync/SyncQueueService.ts` — al resolver la identidad real tras
+  sincronizar, borrar o sobrescribir explícitamente la entrada provisional
+  (`farmerCacheStorage.remove(provisionalId)` antes de cachear la real, o
+  reutilizar la misma fila vía upsert por `documentId` en vez de por
+  `farmerId`).
+- `src/storage/farmerCache.ts` — evaluar agregar `ORDER BY cachedAt DESC` (o
+  similar) a `getByDocumentId()` como defensa adicional, aunque no resuelve la
+  causa raíz (dos filas para la misma persona no debería ser un estado
+  válido).
+
+**Estado:** ⬜ Pendiente de aprobación para implementar. No corregido en esta
+sesión (fuera del scope de la rama del spec 49, solo diagnóstico + registro).
+
+## Hallazgo: sesión sin agricultor tras el reintento por 404 deja respuestas huérfanas de identidad
+
+**Detectado por `@reviewer`:** 2026-07-27, mismo informe, hallazgo 🟠-3.
+
+Cuando `SyncQueueService.resolveLocalSessions` reintenta la creación de una
+sesión sin `farmerId` tras un 404 (fix del Bug C, spec 49), la sesión se crea
+correctamente en el backend, pero queda **sin agricultor asociado y sin un
+S1 nuevo del que extraerlo** — las respuestas de esa sesión llegan al backend
+"huérfanas" de identidad. Es el comportamiento esperado dado el diseño actual
+(no hay otra opción sin bloquear al encuestador), pero no está documentado
+como tal en ningún lado visible para quien analice los datos después.
+
+**Acción sugerida:** documentar este comportamiento (en el spec 49 o en la
+documentación de datos del backend) para que no se interprete como un bug de
+integridad de datos al encontrarlo en producción.
+
+**Estado:** ⬜ Sin acción pendiente de implementación — es una observación de
+documentación, no un bug de comportamiento. Registrado para no perder el
+contexto.

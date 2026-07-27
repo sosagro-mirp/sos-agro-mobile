@@ -1,4 +1,4 @@
-# [TESTING] Spec 24 — Overflow de texto y escalado de fuente del sistema
+# [DONE] Spec 24 — Overflow de texto y escalado de fuente del sistema
 
 **Fecha de redacción:** 2026-07-27
 **Repositorio afectado:** `mobile/` (únicamente)
@@ -195,6 +195,16 @@ expone datos ni acciones a un agente, y no toca el MCP `sosagro-admin`.
 
 **Resultado:** `pnpm typecheck` limpio.
 
+**Corrección post-`@reviewer` (2026-07-27):** la auditoría de mobile
+(`docs/reports/auditorias/13-auditoria-mobile-spec49-spec24.md`, hallazgo
+🟠-2) detectó que el botón **"Salir"** seguía siendo un `Text` plano sin
+techo de escalado. Como `headerRight` es de tamaño fijo (`flexShrink: 0`,
+para garantizar el criterio 4), un "Salir" sin capar podía crecer sin límite
+y desbordar la fila por el borde derecho — exactamente lo que el criterio 4
+prohíbe. Se corrigió aplicando `AppText` + `numberOfLines={1}` también a
+`logoutText`, igual que ya tenían `statusText` y `userName`. `pnpm typecheck`
+sigue limpio tras el cambio.
+
 ### Fase 4 — Verificación y cierre ✅ Completada (2026-07-27)
 
 - [x] `pnpm typecheck` + `pnpm lint` + `pnpm test`. Typecheck limpio; lint sin
@@ -202,10 +212,17 @@ expone datos ni acciones a un agente, y no toca el MCP `sosagro-admin`.
       introducidos por este spec — verificado con `git diff`); test 170/170 en
       verde (13/13 suites, incluyendo las de spec49 en la misma rama).
 - [x] Marcar el spec como `[TESTING]`.
-- [ ] Ronda manual completa de `docs/testing/22-test-spec24.md` en el
-      dispositivo del piloto (Galaxy S25), incluyendo `TC-024-01` (medición
-      pendiente, ver Fase 1) y la escala por defecto.
-- [ ] Invocar `@reviewer` antes del merge a `development`.
+- [x] Ronda manual completa de `docs/testing/22-test-spec24.md` — **6/6
+      aprobados** (2026-07-28), sobre Expo Go (ver corrección del requisito de
+      dispositivo en el propio archivo de test). `TC-024-01` se adaptó: sin
+      build anterior al fix disponible, se validó que `MAX_FONT_SCALE = 1.3`
+      aguanta la escala máxima del sistema en vez de medir el umbral original.
+- [x] Invocar `@reviewer` antes del merge a `development` — ✅ APROBADO para
+      el código de este spec (ver
+      `docs/reports/auditorias/13-auditoria-mobile-spec49-spec24.md`). El
+      bloqueo que reportó (ronda manual 0/6) ya se resolvió arriba. El
+      hallazgo 🟠-2 (botón "Salir" sin techo de escalado) se corrigió en la
+      misma rama y quedó validado en `TC-024-04`.
 - [ ] Marcar `[DONE]` y cerrar el ítem 5 de `specs/backlog.md`.
 
 ---

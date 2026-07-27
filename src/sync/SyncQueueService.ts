@@ -25,6 +25,7 @@ import { MediaUploadService } from './MediaUploadService';
 import { changeRequestStorage } from '../storage/changeRequestStorage';
 import { postChangeRequest, fetchMyResolved } from '../api/changeRequests';
 import { useChangeRequestStore } from '../store/useChangeRequestStore';
+import type { CampaignSessionResponse } from '../types/campaign';
 
 const MAX_CONSECUTIVE_NETWORK_FAILURES = 5;
 const BACKOFF_BASE_MS = 1000;
@@ -144,7 +145,7 @@ class SyncQueueServiceClass {
         const localCrops = await sessionCropsStorage.get(session.localSessionId);
         const cropIds = localCrops.map((c) => c.cropId);
 
-        let sessionResponse;
+        let sessionResponse: CampaignSessionResponse;
         try {
           sessionResponse = await createCampaignSession({
             campaignId: session.campaignId,

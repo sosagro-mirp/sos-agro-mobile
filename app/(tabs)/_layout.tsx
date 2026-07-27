@@ -47,7 +47,7 @@ function TabsHeader() {
             </AppText>
           </View>
           <Pressable onPress={logout} style={styles.logoutBtn} accessibilityRole="button">
-            <Text style={styles.logoutText}>Salir</Text>
+            <AppText style={styles.logoutText} numberOfLines={1}>Salir</AppText>
           </Pressable>
         </View>
       </View>
