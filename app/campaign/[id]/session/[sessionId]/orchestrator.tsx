@@ -14,13 +14,13 @@ import { overwriteSurvey, skipStepApi } from "../../../../../src/api/surveys";
 import { surveyDraftStore } from "../../../../../src/storage/surveyDraftStore";
 import { syncQueueStorage } from "../../../../../src/storage/syncQueue";
 import { instrumentCacheStorage } from "../../../../../src/storage/instrumentCache";
-import { farmerCacheStorage } from "../../../../../src/storage/farmerCache";
 import { SyncQueueService } from "../../../../../src/sync/SyncQueueService";
 import { checkDuplicate } from "../../../../../src/storage/duplicateDetection";
 import { getNextStepOffline } from "../../../../../src/lib/getNextStepOffline";
 import { extractCropsOffline } from "../../../../../src/lib/extractCropsOffline";
 import { generateLocalId } from "../../../../../src/lib/generateLocalId";
 import { extractFarmerLocally } from "../../../../../src/lib/extractFarmerLocally";
+import { cacheFarmerIdentity } from "../../../../../src/lib/cacheFarmerIdentity";
 import { sessionCropsStorage } from "../../../../../src/storage/sessionCropsStorage";
 import { DuplicateAlertModal } from "../../../../../src/components/campaign/DuplicateAlertModal";
 import { NetworkError } from "../../../../../src/api/httpClient";
@@ -239,21 +239,31 @@ export default function OrchestratorScreen() {
           // Online: sync S1, extract farmer, inject S2
           await SyncQueueService.processSurveyNow(s1SurveyId);
           const { farmer } = await extractFarmer(s1SurveyId);
+          await cacheFarmerIdentity({
+            farmerId: farmer.farmerId,
+            name: farmer.name,
+            documentId: farmer.documentId,
+            phone: farmer.phone,
+            farmName: farmer.farm?.name,
+            crops: farmer.farm?.crops ?? undefined,
+          });
           store.completeS1Injection(farmer.farmerId, farmer.name);
           await injectInstrument('S2');
         } else {
           // Offline: extract farmer locally from S1 responses
           const draft = await extractFarmerLocally(s1SurveyId);
           if (draft) {
-            if (draft.isProvisional) {
-              await farmerCacheStorage.upsert({
-                farmerId: draft.farmerId,
-                name: draft.name,
-                documentId: draft.documentId ?? undefined,
-                phone: draft.phone ?? undefined,
-                cachedAt: new Date(),
-              });
-            }
+            // Re-caching an already-resolved identity (isProvisional: false)
+            // just refreshes cachedAt — harmless, and keeps this branch
+            // symmetric with the online one instead of only caching new
+            // provisional farmers.
+            await cacheFarmerIdentity({
+              farmerId: draft.farmerId,
+              name: draft.name,
+              documentId: draft.documentId,
+              phone: draft.phone,
+              farmName: draft.farmName,
+            });
             store.applyLocalFarmer(draft);
             store.completeS1Injection(draft.farmerId, draft.name);
             await injectInstrument('S2');

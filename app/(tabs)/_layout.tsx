@@ -5,6 +5,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuthStore } from "../../src/store/useAuthStore";
 import { useSyncStatusStore } from "../../src/store/useSyncStatusStore";
 import { Fonts } from "../../src/theme/fonts";
+import { AppText } from "../../src/components/common/AppText";
 import { useRef } from "react";
 import { useRouter } from "expo-router";
 
@@ -32,19 +33,21 @@ function TabsHeader() {
   return (
     <SafeAreaView edges={["top"]} style={styles.headerContainer}>
       <View style={styles.header}>
-        <Pressable onPress={handleTitleTap} accessibilityRole="text">
+        <Pressable style={styles.headerLeft} onPress={handleTitleTap} accessibilityRole="text">
           <Text style={styles.appName}>Sos Agro 4.C</Text>
           {user?.name ? (
-            <Text style={styles.userName}>{user.name}</Text>
+            <AppText style={styles.userName} numberOfLines={1}>{user.name}</AppText>
           ) : null}
         </Pressable>
         <View style={styles.headerRight}>
           <View style={styles.statusPill}>
             <View style={[styles.dot, isOnline ? styles.dotOnline : styles.dotOffline]} />
-            <Text style={styles.statusText}>{isOnline ? "En línea" : "Sin conexión"}</Text>
+            <AppText style={styles.statusText} numberOfLines={1}>
+              {isOnline ? "En línea" : "Sin conexión"}
+            </AppText>
           </View>
           <Pressable onPress={logout} style={styles.logoutBtn} accessibilityRole="button">
-            <Text style={styles.logoutText}>Salir</Text>
+            <AppText style={styles.logoutText} numberOfLines={1}>Salir</AppText>
           </Pressable>
         </View>
       </View>
@@ -124,6 +127,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 12,
   },
+  headerLeft: {
+    flexShrink: 1,
+  },
   appName: {
     fontSize: 18,
     fontFamily: Fonts.bold,
@@ -139,6 +145,11 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
+    // Fixed size: the connection-status pill and "Salir" are operationally
+    // critical in the field and must stay fully visible even when the
+    // left-side username is long or the system font scale is high (spec 24).
+    // Only headerLeft (and userName inside it) shrinks/truncates.
+    flexShrink: 0,
   },
   statusPill: {
     flexDirection: "row",
