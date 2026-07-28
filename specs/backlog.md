@@ -7,15 +7,21 @@ No se actúa sobre estos ítems sin aprobación explícita del usuario.
 
 | Ítem | Spec redactado | Estado |
 |---|---|---|
-| Vulnerabilidades Dependabot | — | Sin spec; pendiente de priorización |
+| Vulnerabilidades Dependabot | `spec/54_remediacion_vulnerabilidades_dependencias_mobile.md` | `[NOT STARTED]` — pendiente de aprobación |
 | Instrumentos condicionados por cultivo offline (Bug A) | `spec/49_correccion_identidad_offline_agricultor_cultivos.md` | `[DONE]` |
 | Duplicados offline / `farmerId` inconsistente (Bug B) | `spec/49_…` (mismo spec) | `[DONE]` |
 | `farmerCache` obsoleta → FK violation (Bug C) | `spec/49_…` (mismo spec) | `[DONE]` |
 | Textos cortados / escalado de fuente | `mobile/specs/spec24.md` | `[DONE]` |
-| `DELETE /api/farmers/:id` → 500 por FK de `campaign_sessions` (nuevo) | — | Sin spec; hallazgo de la ronda manual del spec 49 |
-| Sync no se dispara solo al reconectar en Expo Go (nuevo) | — | Sin spec; hallazgo de la ronda manual del spec 49, sin confirmar en APK real |
-| Caché de identidad provisional no se limpia tras sincronizar (Bug B residual) | — | Sin spec; hallazgo de `@reviewer` sobre la rama del spec 49 |
-| Sesión sin agricultor tras reintento por 404 (documentación) | — | Sin spec; hallazgo de `@reviewer`, no es un bug de comportamiento |
+| `DELETE /api/farmers/:id` → 500 por FK de `campaign_sessions` | `spec/50_borrado_seguro_agricultores_y_sesiones.md` | `[DONE]` |
+| Sync no se dispara solo al reconectar en Expo Go | `spec/52_sincronizacion_automatica_al_reconectar.md` | `[NOT STARTED]` — arranca con fase de diagnóstico en APK real |
+| Caché de identidad provisional no se limpia tras sincronizar (Bug B residual) | `spec/51_limpieza_identidad_provisional_post_sync.md` | `[NOT STARTED]` — pendiente de aprobación |
+| Sesión sin agricultor tras reintento por 404 (documentación) | `spec/51_…` (mismo spec, Fase 3) | `[NOT STARTED]` — solo documentación |
+
+> **Nota (2026-07-28):** los 5 ítems abiertos quedaron cubiertos por 4 specs
+> nuevos (50-54), cada uno con sus archivos de prueba en `docs/testing/`. Todos
+> están en `[NOT STARTED]` y **ninguno autoriza a escribir código** hasta la
+> aprobación explícita del usuario. Orden de implementación recomendado si se
+> aprueban varios: **50 → 52 → 51 → 54** (ver la nota de ramas de cada spec).
 
 ## Vulnerabilidades Dependabot (revisadas 2026-07-24)
 
@@ -288,8 +294,12 @@ sin manejar ante la misma FK.
   a sesiones sin `surveys` asociadas, para limpieza de datos de prueba sin
   necesidad de acceso directo a la base.
 
-**Estado:** ⬜ Pendiente de aprobación para implementar. No corregido en esta
-sesión (fuera del scope del spec 49, solo diagnóstico + registro).
+**Estado:** ✅ Corregido — spec `spec/50_borrado_seguro_agricultores_y_sesiones.md`
+marcado `[DONE]` (2026-07-28). Al redactarlo se verificó que **`surveys.farmer_id`
+también es `ON DELETE RESTRICT`** (`survey.entity.ts:30-33`), así que un agricultor
+con encuestas completadas fallaba igual: eran dos FKs bloqueantes, no una — ambas
+cubiertas. Ronda manual `docs/testing/23-test-spec50.md`: 6/6 aprobados.
+`@reviewer`: APROBADO (`docs/reports/auditorias/14-auditoria-backend-spec50.md`).
 
 ## Hallazgo: sincronización no se dispara automáticamente al reconectar en Expo Go (encontrado en ronda manual de `docs/testing/21-test-spec49.md`, TC-049-10)
 
@@ -313,8 +323,13 @@ real (perfil `preview`/`development`) — el requisito de dispositivo original
 del spec 49 asumía APK real precisamente por este tipo de diferencia de
 comportamiento entre Expo Go y un build nativo.
 
-**Estado:** ⬜ Sin diagnóstico de causa raíz confirmado. No corregido en esta
-sesión (fuera del scope del spec 49, solo observación + registro).
+**Estado:** ⬜ Spec redactado — `spec/52_sincronizacion_automatica_al_reconectar.md`
+(2026-07-28), en `[NOT STARTED]`. Arranca con una **Fase 0 de diagnóstico en APK
+real**, bloqueante: si el fallo no se reproduce fuera de Expo Go, el spec se
+cierra sin cambios de código. Hipótesis principal: `isReachable` trata
+`isInternetReachable === null` como online, así que el disparo se consume sobre
+el estado intermedio de la reconexión y el estado confirmado ya no produce
+transición.
 
 ## Hallazgo: caché de identidad provisional no se limpia tras sincronizar → riesgo residual del Bug B en el ciclo offline → sync → offline
 
@@ -352,8 +367,11 @@ online → offline).
   causa raíz (dos filas para la misma persona no debería ser un estado
   válido).
 
-**Estado:** ⬜ Pendiente de aprobación para implementar. No corregido en esta
-sesión (fuera del scope de la rama del spec 49, solo diagnóstico + registro).
+**Estado:** ⬜ Spec redactado — `spec/51_limpieza_identidad_provisional_post_sync.md`
+(2026-07-28), en `[NOT STARTED]`. Corrección respecto del diagnóstico original:
+el desempate de `getByDocumentId()` **no puede ser `ORDER BY cachedAt DESC`** —
+nada garantiza que la entrada real sea la más reciente. Debe priorizar el ID no
+provisional y desempatar por `cachedAt` solo entre iguales.
 
 ## Hallazgo: sesión sin agricultor tras el reintento por 404 deja respuestas huérfanas de identidad
 
@@ -371,6 +389,7 @@ como tal en ningún lado visible para quien analice los datos después.
 documentación de datos del backend) para que no se interprete como un bug de
 integridad de datos al encontrarlo en producción.
 
-**Estado:** ⬜ Sin acción pendiente de implementación — es una observación de
-documentación, no un bug de comportamiento. Registrado para no perder el
-contexto.
+**Estado:** ⬜ Recogido en la **Fase 3 de
+`spec/51_limpieza_identidad_provisional_post_sync.md`** (2026-07-28) como tarea
+de documentación exclusivamente: comentario de contrato en el backend y nota
+para quien analice los datos. Sin cambio de comportamiento.
