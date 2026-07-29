@@ -14,8 +14,8 @@ No se actúa sobre estos ítems sin aprobación explícita del usuario.
 | Textos cortados / escalado de fuente | `mobile/specs/spec24.md` | `[DONE]` |
 | `DELETE /api/farmers/:id` → 500 por FK de `campaign_sessions` (nuevo) | — | Sin spec; hallazgo de la ronda manual del spec 49 |
 | Sync no se dispara solo al reconectar en Expo Go (nuevo) | — | Sin spec; hallazgo de la ronda manual del spec 49, sin confirmar en APK real |
-| Caché de identidad provisional no se limpia tras sincronizar (Bug B residual) | — | Sin spec; hallazgo de `@reviewer` sobre la rama del spec 49 |
-| Sesión sin agricultor tras reintento por 404 (documentación) | — | Sin spec; hallazgo de `@reviewer`, no es un bug de comportamiento |
+| Caché de identidad provisional no se limpia tras sincronizar (Bug B residual) | `spec/51_limpieza_identidad_provisional_post_sync.md` | `[TESTING]` — implementación completa, falta ronda manual + `@reviewer` |
+| Sesión sin agricultor tras reintento por 404 (documentación) | `spec/51_…` (Fase 3, `docs/data-notes.md` en backend) | `[TESTING]` — documentación aplicada |
 
 ## Vulnerabilidades Dependabot (revisadas 2026-07-24)
 
