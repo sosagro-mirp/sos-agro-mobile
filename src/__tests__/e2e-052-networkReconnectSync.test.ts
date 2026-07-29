@@ -1,17 +1,21 @@
 /**
  * Spec 52 — Fiabilidad del disparo automático de sincronización al reconectar.
  *
- * Cubre los criterios de aceptación 2, 3, 5 y 7 de
- * `spec/52_sincronizacion_automatica_al_reconectar.md`.
+ * Cubre los criterios de aceptación 3, 5 y 7 de
+ * `spec/52_sincronizacion_automatica_al_reconectar.md`. El criterio 2 (abajo)
+ * queda documentado pero deshabilitado — ver nota.
  *
- * ARRANCA EN ROJO, con una salvedad importante: los fixtures de esta suite
- * codifican la hipótesis H1 del spec (disparo prematuro de un solo tiro). La
- * FASE 0 del spec —reproducción en APK real con captura de la secuencia de
- * eventos de NetInfo— puede contradecirla. Si eso ocurre, la Fase 1 ajusta
- * estos fixtures a la secuencia realmente observada; NO es ampliar el scope,
- * es alinear las pruebas con la evidencia.
+ * DESENLACE DE LA FASE 0 (2026-07-29): la hipótesis H1 que codifican estos
+ * fixtures **no se reprodujo en APK real** (`TC-052-01`), solo en Expo Go
+ * (`TC-052-01b`) — es H3, una diferencia de fidelidad de `NetInfo` entre Expo
+ * Go y un build nativo, no un bug del código. Por decisión explícita del
+ * usuario, el spec cierra sin implementar la Fase 2 (el disparo ya funciona
+ * correctamente en el entorno real). Los dos casos que ejercitan la secuencia
+ * incierto→confirmado quedan en `it.skip` en vez de borrarse, para no perder
+ * el registro de qué se probó y por qué no se persigue el fix.
  *
- * Defecto bajo prueba (H1), en `NetworkMonitor.handleStateChange`:
+ * Defecto bajo prueba (H1, no confirmado en dispositivo real), en
+ * `NetworkMonitor.handleStateChange`:
  *
  *   isReachable(state) => state.isConnected === true
  *                      && state.isInternetReachable !== false
@@ -140,25 +144,26 @@ afterEach(() => {
   NetworkMonitor.stop();
 });
 
-// ─── Criterio 2: el intento prematuro no debe anular el disparo posterior ────
+// ─── Criterio 2 (retirado — H3 confirmada): casos activos son sanity checks ──
 
 describe('transición offline → online con estado intermedio incierto', () => {
-  it('criterio 2: sincroniza sobre una conexión CONFIRMADA, no solo sobre la incierta', () => {
+  // No aplica (H3 confirmada, Fase 0 del spec 52, 2026-07-29): en APK real
+  // TC-052-01 sincronizó sola en ~3.7s sin pasar por esta secuencia
+  // problemática. Solo se reprodujo en Expo Go. Se deja en .skip en vez de
+  // borrarse: documenta la hipótesis original y por qué se descartó el fix.
+  it.skip('criterio 2 (no aplica — H3): sincroniza sobre una conexión CONFIRMADA, no solo sobre la incierta', () => {
     emitir(INCIERTO, CONFIRMADO);
 
-    // Hoy falla: `disparosSobre` es ['incierto']. El disparo ocurre mientras la
-    // red aún no cursa tráfico, y el evento confirmado no produce transición,
-    // así que la cola nunca se procesa sobre una conexión utilizable.
     expect(disparosSobre).toContain('confirmado');
   });
 
-  it('criterio 2: la secuencia directa offline → confirmado dispara una vez', () => {
+  it('sanity check: la secuencia directa offline → confirmado dispara una vez', () => {
     emitir(CONFIRMADO);
 
     expect(disparosSobre).toEqual(['confirmado']);
   });
 
-  it('criterio 2: si la conexión se cae antes de confirmarse, no queda disparo pendiente indebido', () => {
+  it.skip('criterio 2 (no aplica — H3): si la conexión se cae antes de confirmarse, no queda disparo pendiente indebido', () => {
     emitir(INCIERTO, OFFLINE, CONFIRMADO);
 
     // Tras volver a offline y reconectar de verdad, debe haber exactamente un

@@ -22,11 +22,12 @@ class NetworkMonitorClass {
     const isReachable = NetworkMonitorClass.isReachable(state);
     const willTrigger = isReachable && this.previouslyReachable === false;
 
-    // TEMPORAL — spec 52 Fase 0: capturar la secuencia cruda de NetInfo
-    // durante la reconexión para decidir entre H1, H3 y H4. Retirar al
-    // cerrar la Fase 0 (se reemplaza por el logging permanente de la Fase 2).
+    // Observabilidad permanente (spec 52, criterio 8): registrar cada
+    // transición de conectividad con el estado crudo de NetInfo, el
+    // isReachable calculado y si disparó sincronización. Es lo que permite
+    // diagnosticar el próximo caso de este tipo sin instrumentar de nuevo.
     logger.info(
-      `[NetworkMonitor][diag-052] isConnected=${state.isConnected} isInternetReachable=${state.isInternetReachable} type=${state.type} previouslyReachable=${this.previouslyReachable} isReachable=${isReachable} willTrigger=${willTrigger}`,
+      `[NetworkMonitor] connectivity transition isConnected=${state.isConnected} isInternetReachable=${state.isInternetReachable} type=${state.type} previouslyReachable=${this.previouslyReachable} isReachable=${isReachable} willTrigger=${willTrigger}`,
     );
 
     useSyncStatusStore.getState().setOnline(isReachable);
