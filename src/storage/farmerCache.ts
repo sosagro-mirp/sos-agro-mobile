@@ -2,6 +2,7 @@ import { desc, eq, like, or } from 'drizzle-orm';
 import { db } from './db/db';
 import { farmerCache } from './db/schema';
 import type { CropSummary } from '../types';
+import { isLocalId } from '../lib/isLocalId';
 
 export interface FarmerCacheEntry {
   farmerId: string;
@@ -89,13 +90,21 @@ export const farmerCacheStorage = {
     return row ? mapRow(row) : null;
   },
 
+  // Deliberately not `cachedAt DESC` alone: nothing guarantees the real
+  // (non-provisional) entry is the most recent one — a later
+  // cacheFarmerIdentity() call on the provisional would refresh its
+  // cachedAt too. Tie-break by ID nature first, recency only among equals.
   async getByDocumentId(documentId: string): Promise<FarmerCacheEntry | null> {
-    const row = await db
+    const rows = await db
       .select()
       .from(farmerCache)
       .where(eq(farmerCache.documentId, documentId))
-      .get();
-    return row ? mapRow(row) : null;
+      .orderBy(desc(farmerCache.cachedAt))
+      .all();
+
+    if (rows.length === 0) return null;
+    const real = rows.find((row) => !isLocalId(row.farmerId));
+    return mapRow(real ?? rows[0]);
   },
 
   async listRecent(limit = 20): Promise<FarmerCacheEntry[]> {

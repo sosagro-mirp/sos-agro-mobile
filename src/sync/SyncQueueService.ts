@@ -10,6 +10,7 @@ import { submitResponsesBatch } from '../api/responses';
 import { createSurvey, markSurveyAsSynced } from '../api/surveys';
 import { markSessionAsSynced, createCampaignSession } from '../api/campaignSessions';
 import { extractFarmer, extractCrops } from '../api/farmers';
+import { cacheFarmerIdentity } from '../lib/cacheFarmerIdentity';
 import { buildResponsesPayload } from '../lib/buildResponsesPayload';
 import { flattenSections } from '../lib/flattenSections';
 import { resolveOtherOptions } from '../lib/resolveOtherOptions';
@@ -340,13 +341,25 @@ class SyncQueueServiceClass {
         if (storeState.localFarmerId === localFarmerId) {
           storeState.resolveFarmer(farmer.farmerId);
         }
+
+        try {
+          await farmerCacheStorage.remove(localFarmerId);
+        } catch (err) {
+          logger.warn(
+            `[Sync] failed to remove provisional farmer cache entry ${localFarmerId}: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
       }
 
-      await farmerCacheStorage.upsert({
+      await cacheFarmerIdentity({
         farmerId: farmer.farmerId,
         name: farmer.name,
         documentId: farmer.documentId ?? undefined,
-        cachedAt: new Date(),
+        phone: farmer.phone ?? undefined,
+        farmName: farmer.farm?.name ?? undefined,
+        crops: farmer.farm?.crops ?? undefined,
       });
 
       logger.info(`[Sync] extractFarmer completed for survey ${realSurveyId}`);

@@ -92,7 +92,12 @@ jest.mock('../storage/farmerCache', () => ({
   farmerCacheStorage: {
     listRecent: jest.fn().mockResolvedValue([]),
     upsert: jest.fn().mockResolvedValue(undefined),
+    remove: jest.fn().mockResolvedValue(undefined),
   },
+}));
+
+jest.mock('../lib/cacheFarmerIdentity', () => ({
+  cacheFarmerIdentity: jest.fn().mockResolvedValue(undefined),
 }));
 
 jest.mock('../storage/changeRequestStorage', () => ({
@@ -151,12 +156,15 @@ import { instrumentCacheStorage } from '../storage/instrumentCache';
 import { submitResponsesBatch } from '../api/responses';
 import { markSurveyAsSynced } from '../api/surveys';
 import { markSessionAsSynced, createCampaignSession } from '../api/campaignSessions';
-import { extractCrops } from '../api/farmers';
+import { extractFarmer, extractCrops } from '../api/farmers';
 import { sessionCropsStorage } from '../storage/sessionCropsStorage';
 import { pendingSessionStorage } from '../storage/pendingSessions';
 import { useSyncStatusStore } from '../store/useSyncStatusStore';
+import { useCampaignSessionStore } from '../store/useCampaignSessionStore';
 import { flattenSections } from '../lib/flattenSections';
 import { buildResponsesPayload } from '../lib/buildResponsesPayload';
+import { farmerCacheStorage } from '../storage/farmerCache';
+import { cacheFarmerIdentity } from '../lib/cacheFarmerIdentity';
 
 // ─── Typed mock aliases ───────────────────────────────────────────────────────
 
@@ -174,7 +182,11 @@ const mockInstrumentCacheGet = instrumentCacheStorage.get as jest.Mock;
 const mockSubmitResponsesBatch = submitResponsesBatch as jest.Mock;
 const mockMarkSurveyAsSynced = markSurveyAsSynced as jest.Mock;
 const mockMarkSessionAsSynced = markSessionAsSynced as jest.Mock;
+const mockExtractFarmer = extractFarmer as jest.Mock;
 const mockExtractCrops = extractCrops as jest.Mock;
+const mockFarmerCacheListRecent = farmerCacheStorage.listRecent as jest.Mock;
+const mockFarmerCacheRemove = farmerCacheStorage.remove as jest.Mock;
+const mockCacheFarmerIdentity = cacheFarmerIdentity as jest.Mock;
 const mockSessionCropsSave = sessionCropsStorage.save as jest.Mock;
 const mockSessionCropsGet = sessionCropsStorage.get as jest.Mock;
 const mockCreateCampaignSession = createCampaignSession as jest.Mock;
@@ -256,6 +268,19 @@ beforeEach(() => {
   mockListPendingSessions.mockResolvedValue([]);
   mockResolveSession.mockResolvedValue(undefined);
   mockCreateCampaignSession.mockResolvedValue({ sessionId: 'real-session-1' });
+  mockExtractFarmer.mockResolvedValue({
+    farmer: { farmerId: 'real-farmer-1', name: 'Mateo Quintero', documentId: '9105558899' },
+    existed: false,
+  });
+  mockFarmerCacheListRecent.mockResolvedValue([]);
+  mockFarmerCacheRemove.mockResolvedValue(undefined);
+  mockCacheFarmerIdentity.mockResolvedValue(undefined);
+  (useCampaignSessionStore.getState as jest.Mock).mockReturnValue({
+    localSessionId: null,
+    localFarmerId: null,
+    resolveSession: jest.fn(),
+    resolveFarmer: jest.fn(),
+  });
 });
 
 // ─── processAll: guard conditions ────────────────────────────────────────────
@@ -512,6 +537,86 @@ describe('processEntry — S2 crop extraction', () => {
 
     expect(mockExtractCrops).not.toHaveBeenCalled();
     expect(mockSessionCropsSave).not.toHaveBeenCalled();
+  });
+});
+
+// ─── processEntry: S1 farmer extraction — provisional cache cleanup (spec 51) ─
+
+describe('processEntry — S1 farmer extraction, provisional cache cleanup', () => {
+  it('removes the provisional farmerCache entry after remapping surveys to the real farmerId', async () => {
+    const entry = makeEntry();
+    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
+    mockLoadDraft.mockResolvedValue(makeDraft('inst-s1'));
+    mockInstrumentCacheGet.mockResolvedValue(makeInstrument({ code: 'S1' }));
+    mockBuildResponsesPayload.mockReturnValue([{ surveyId: 'survey-1', questionId: 'q1', textValue: 'x' }]);
+    mockFarmerCacheListRecent.mockResolvedValue([
+      { farmerId: 'local_farmer_123', name: 'Mateo Provisional', documentId: '9105558899', cachedAt: new Date() },
+    ]);
+
+    await SyncQueueService.processAll();
+
+    expect(mockFarmerCacheRemove).toHaveBeenCalledWith('local_farmer_123');
+  });
+
+  it('does not remove anything when no provisional entry matches the resolved documentId', async () => {
+    const entry = makeEntry();
+    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
+    mockLoadDraft.mockResolvedValue(makeDraft('inst-s1'));
+    mockInstrumentCacheGet.mockResolvedValue(makeInstrument({ code: 'S1' }));
+    mockBuildResponsesPayload.mockReturnValue([{ surveyId: 'survey-1', questionId: 'q1', textValue: 'x' }]);
+    mockFarmerCacheListRecent.mockResolvedValue([
+      { farmerId: 'local_farmer_999', name: 'Otro Provisional', documentId: '0000000000', cachedAt: new Date() },
+    ]);
+
+    await SyncQueueService.processAll();
+
+    expect(mockFarmerCacheRemove).not.toHaveBeenCalled();
+  });
+
+  it('completes the sync even if removing the provisional entry fails', async () => {
+    const entry = makeEntry();
+    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
+    mockLoadDraft.mockResolvedValue(makeDraft('inst-s1'));
+    mockInstrumentCacheGet.mockResolvedValue(makeInstrument({ code: 'S1' }));
+    mockBuildResponsesPayload.mockReturnValue([{ surveyId: 'survey-1', questionId: 'q1', textValue: 'x' }]);
+    mockFarmerCacheListRecent.mockResolvedValue([
+      { farmerId: 'local_farmer_123', name: 'Mateo Provisional', documentId: '9105558899', cachedAt: new Date() },
+    ]);
+    mockFarmerCacheRemove.mockRejectedValue(new Error('SQLITE_BUSY'));
+
+    await SyncQueueService.processAll();
+
+    expect(mockMarkSynced).toHaveBeenCalledWith(entry.id);
+    expect(mockMarkSyncedDraft).toHaveBeenCalledWith('survey-1');
+  });
+
+  it('caches the real identity via cacheFarmerIdentity with phone, farmName and crops', async () => {
+    const entry = makeEntry();
+    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
+    mockLoadDraft.mockResolvedValue(makeDraft('inst-s1'));
+    mockInstrumentCacheGet.mockResolvedValue(makeInstrument({ code: 'S1' }));
+    mockBuildResponsesPayload.mockReturnValue([{ surveyId: 'survey-1', questionId: 'q1', textValue: 'x' }]);
+    mockExtractFarmer.mockResolvedValue({
+      farmer: {
+        farmerId: 'real-farmer-1',
+        name: 'Mateo Quintero',
+        documentId: '9105558899',
+        phone: '3001112233',
+        farm: { name: 'Finca La Esperanza', crops: [{ cropId: 'crop-1', name: 'Café' }] },
+      },
+      existed: false,
+    });
+
+    await SyncQueueService.processAll();
+
+    expect(mockCacheFarmerIdentity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        farmerId: 'real-farmer-1',
+        phone: '3001112233',
+        farmName: 'Finca La Esperanza',
+        crops: [{ cropId: 'crop-1', name: 'Café' }],
+      }),
+    );
   });
 });
 
