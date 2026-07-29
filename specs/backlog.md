@@ -14,8 +14,9 @@ No se actúa sobre estos ítems sin aprobación explícita del usuario.
 | Textos cortados / escalado de fuente | `mobile/specs/spec24.md` | `[DONE]` |
 | `DELETE /api/farmers/:id` → 500 por FK de `campaign_sessions` (nuevo) | — | Sin spec; hallazgo de la ronda manual del spec 49 |
 | Sync no se dispara solo al reconectar en Expo Go (nuevo) | — | Sin spec; hallazgo de la ronda manual del spec 49, sin confirmar en APK real |
-| Caché de identidad provisional no se limpia tras sincronizar (Bug B residual) | `spec/51_limpieza_identidad_provisional_post_sync.md` | `[TESTING]` — implementación completa, falta ronda manual + `@reviewer` |
-| Sesión sin agricultor tras reintento por 404 (documentación) | `spec/51_…` (Fase 3, `docs/data-notes.md` en backend) | `[TESTING]` — documentación aplicada |
+| Caché de identidad provisional no se limpia tras sincronizar (Bug B residual) | `spec/51_limpieza_identidad_provisional_post_sync.md` | `[TESTING]` — `@reviewer` APROBADO, falta ronda manual |
+| Sesión sin agricultor tras reintento por 404 (documentación) | `spec/51_…` (Fase 3, `docs/data-notes.md` en backend) | `[TESTING]` — documentación aplicada, `@reviewer` APROBADO |
+| `isProvisional` sigue mintiendo en el ciclo offline puro (nuevo) | — | Sin spec; hallazgo de `@reviewer` sobre la rama del spec 51, preexistente |
 
 ## Vulnerabilidades Dependabot (revisadas 2026-07-24)
 
@@ -315,6 +316,33 @@ comportamiento entre Expo Go y un build nativo.
 
 **Estado:** ⬜ Sin diagnóstico de causa raíz confirmado. No corregido en esta
 sesión (fuera del scope del spec 49, solo observación + registro).
+
+## Hallazgo: `isProvisional` sigue mintiendo en el ciclo offline puro (encontrado por `@reviewer` en la rama del spec 51)
+
+**Detectado por `@reviewer`:** 2026-07-29, auditoría de
+`docs/reports/auditorias/15-auditoria-mobile-spec51.md`, sobre la rama
+`bug/spec51-limpieza-identidad-provisional`. **No es una regresión de ese
+spec** — es un comportamiento preexistente que el spec 51 no se propuso
+corregir (su hallazgo B ataca la lectura ambigua entre dos filas, no este
+caso).
+
+**Escenario:** con **solo una entrada provisional** en `farmerCache` para un
+`documentId` (agricultor identificado offline, todavía sin sincronizar),
+`extractFarmerLocally` devuelve `isProvisional: false` con un `farmerId`
+local — el flag miente porque la función confía en que "estar en caché"
+implica identidad real, sin distinguir si esa entrada es provisional.
+
+**Consecuencia observada:** el store deja `localFarmerId` en `null` (porque el
+código que lo setea depende de que `isProvisional` sea `true`), y por eso la
+guarda de `SyncQueueService.ts:341` (`if (storeState.localFarmerId ===
+localFarmerId)`) no dispara — el `resolveFarmer()` en memoria de la sesión
+activa no ocurre al sincronizar. Los datos en SQLite (`surveys.farmerId`, la
+entrada de `farmerCache`) sí se remapean correctamente vía la Fase 1 del spec
+51; el impacto se limita al estado en memoria de la sesión en curso si sigue
+abierta en el momento exacto del sync.
+
+**Estado:** ⬜ Sin spec. Pendiente de priorización — no corregido, solo
+diagnóstico + registro.
 
 ## Hallazgo: caché de identidad provisional no se limpia tras sincronizar → riesgo residual del Bug B en el ciclo offline → sync → offline
 
