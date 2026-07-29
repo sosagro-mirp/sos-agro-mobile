@@ -83,6 +83,19 @@ eas build --profile production --platform android    # AAB para Google Play
 
 > **Nota:** El background sync **no funciona en Expo Go**. Requiere un EAS dev build (`development` profile) para probar tareas en background.
 
+> **Nota (spec 52, 2026-07-29):** el disparo de sincronización al reconectar
+> (`NetworkMonitor`, basado en `@react-native-community/netinfo`) también
+> puede diferir entre Expo Go y un build nativo, aunque en teoría no depende
+> de `expo-background-task`. Se confirmó que Expo Go no emite la secuencia de
+> eventos de `NetInfo` con la misma fidelidad que un APK real: un caso que no
+> sincronizaba solo en Expo Go sí lo hizo correctamente (~3.7s) en APK
+> `preview`. Para cualquier caso de prueba que dependa de transiciones de
+> conectividad (no solo de si hay red o no), reproducir en APK real antes de
+> asumir que es un bug — Expo Go no es una base confiable para ese tipo de
+> diagnóstico. Detalle completo en
+> `spec/52_sincronizacion_automatica_al_reconectar.md` y
+> `docs/testing/25-test-spec52.md`.
+
 ---
 
 ## Variables de entorno
@@ -315,8 +328,11 @@ No borrar ni modificar tests existentes sin instrucción explícita.
 
 ## Specs de funcionalidades
 
-- Carpeta: `specs/`
-- Nomenclatura: `spec{{NN}}.md` (ej. `spec19.md`)
+- Carpeta: `spec/` en la raíz del ecosistema (`../spec/` desde este repositorio).
+  Todos los specs viven ahí, sin importar cuántos repositorios afecten —
+  ver el `CLAUDE.md` raíz. Este repositorio ya no tiene una carpeta `specs/` propia.
+- Nomenclatura: `NN_slug_descriptivo.md` (ej. `57_mejoras_post_lanzamiento_mobile.md`),
+  con numeración continua compartida por todo el ecosistema.
 - Antes de implementar, el spec debe estar aprobado por el usuario.
 - Los specs completados **no se borran**; se marcan con `[DONE]` en el título.
 
@@ -331,7 +347,7 @@ No borrar ni modificar tests existentes sin instrucción explícita.
    - El schema SQLite (¿necesita migración Drizzle?)
    - La cola de sync (¿cambia el payload al backend?)
 2. Usar el subagente `architect` para el plan (fases y archivos; **sin código**).
-3. Guardar el plan en `specs/`.
+3. Guardar el plan en `../spec/` (raíz del ecosistema).
 4. Esperar aprobación del usuario.
 5. Crear rama nueva desde `development`.
 
