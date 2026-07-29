@@ -13,9 +13,11 @@ No se actúa sobre estos ítems sin aprobación explícita del usuario.
 | `farmerCache` obsoleta → FK violation (Bug C) | `spec/49_…` (mismo spec) | `[DONE]` |
 | Textos cortados / escalado de fuente | `mobile/specs/spec24.md` | `[DONE]` |
 | `DELETE /api/farmers/:id` → 500 por FK de `campaign_sessions` (nuevo) | — | Sin spec; hallazgo de la ronda manual del spec 49 |
-| Sync no se dispara solo al reconectar en Expo Go (nuevo) | — | Sin spec; hallazgo de la ronda manual del spec 49, sin confirmar en APK real |
+| Sync no se dispara solo al reconectar en Expo Go (nuevo) | `spec/52_sincronizacion_automatica_al_reconectar.md` | `[NOT STARTED]` — Fase 0 en curso; Expo Go reproducido, falta contraparte APK real |
 | Caché de identidad provisional no se limpia tras sincronizar (Bug B residual) | — | Sin spec; hallazgo de `@reviewer` sobre la rama del spec 49 |
 | Sesión sin agricultor tras reintento por 404 (documentación) | — | Sin spec; hallazgo de `@reviewer`, no es un bug de comportamiento |
+| `logger.write()` pierde entradas bajo escrituras concurrentes (nuevo) | — | Sin spec; hallazgo de la Fase 0 del spec 52 (`docs/testing/25-test-spec52.md`, TC-052-01b) |
+| "Exportar todo" en `/dev/logs` congela la app (nuevo) | — | Sin spec; hallazgo de la Fase 0 del spec 52, no investigado a fondo |
 
 ## Vulnerabilidades Dependabot (revisadas 2026-07-24)
 
@@ -315,6 +317,49 @@ comportamiento entre Expo Go y un build nativo.
 
 **Estado:** ⬜ Sin diagnóstico de causa raíz confirmado. No corregido en esta
 sesión (fuera del scope del spec 49, solo observación + registro).
+
+## Hallazgo: `logger.write()` puede perder entradas bajo escrituras concurrentes (encontrado en Fase 0 del spec 52, `docs/testing/25-test-spec52.md`, TC-052-01b)
+
+**Detectado:** 2026-07-29, leyendo la secuencia de eventos `diag-052`
+instrumentada temporalmente en `NetworkMonitor.handleStateChange` durante el
+diagnóstico del spec 52 (Expo Go). El `[WARN] campaign session not yet
+resolved...` de `SyncQueueService.ts:225` solo se emite dentro de
+`processAll()`, lo que prueba que hubo un evento de reconexión con
+`willTrigger=true` — pero ninguna línea `diag-052` con ese valor aparece en el
+log, pese a que el usuario confirmó que no hay más contenido para ese día (no
+es un problema de scroll).
+
+**Diagnóstico:** `logger.write()` (`src/lib/logger.ts:48-53`) dispara
+`appendToFile()` (líneas 32-46) de forma asíncrona y sin serializar llamadas
+concurrentes. `appendToFile` lee el contenido actual del archivo y luego
+escribe `existing + entry` completo — si dos `logger.info()` se llaman con
+pocos milisegundos de diferencia (como puede pasar con dos eventos seguidos de
+`NetInfo`), la segunda lectura puede ocurrir antes de que la primera escritura
+termine, y la segunda escritura sobrescribe la primera entrada.
+
+**Impacto:** además de perder valor diagnóstico (como pasó acá), es el mismo
+patrón que sustenta el logging permanente que el spec 52 planea agregar en su
+Fase 2 — si no se corrige, ese logging heredaría el mismo problema bajo ráfagas
+de eventos.
+
+**Estado:** ⬜ Sin spec. Pendiente de priorización — no corregido en esta
+sesión (fuera del scope del spec 52, solo diagnóstico + registro).
+
+## Hallazgo: botón "Exportar todo" de `/dev/logs` congela la app
+
+**Detectado:** 2026-07-29, durante la Fase 0 del spec 52, al intentar exportar
+los logs de diagnóstico desde el dispositivo (Expo Go).
+
+**Contexto:** `app/dev/logs.tsx:71-75`, `handleExport()` llama a
+`logger.exportLogs()` (concatena el contenido de todos los archivos de log en
+un solo string) y lo pasa a `Share.share()`. No se investigó si la causa es el
+tamaño del contenido, un bloqueo del hilo JS al leer/concatenar archivos, o el
+propio módulo `Share` nativo. Workaround usado: forzar el cierre de la app y
+leer los logs tocando el archivo individual (`handleSelectFile`) en vez de
+exportar.
+
+**Estado:** ⬜ Sin spec. Pendiente de priorización — no investigado a fondo,
+solo registrado.
 
 ## Hallazgo: caché de identidad provisional no se limpia tras sincronizar → riesgo residual del Bug B en el ciclo offline → sync → offline
 
