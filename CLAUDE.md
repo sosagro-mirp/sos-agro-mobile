@@ -315,8 +315,11 @@ No borrar ni modificar tests existentes sin instrucción explícita.
 
 ## Specs de funcionalidades
 
-- Carpeta: `specs/`
-- Nomenclatura: `spec{{NN}}.md` (ej. `spec19.md`)
+- Carpeta: `spec/` en la raíz del ecosistema (`../spec/` desde este repositorio).
+  Todos los specs viven ahí, sin importar cuántos repositorios afecten —
+  ver el `CLAUDE.md` raíz. Este repositorio ya no tiene una carpeta `specs/` propia.
+- Nomenclatura: `NN_slug_descriptivo.md` (ej. `57_mejoras_post_lanzamiento_mobile.md`),
+  con numeración continua compartida por todo el ecosistema.
 - Antes de implementar, el spec debe estar aprobado por el usuario.
 - Los specs completados **no se borran**; se marcan con `[DONE]` en el título.
 
@@ -331,7 +334,7 @@ No borrar ni modificar tests existentes sin instrucción explícita.
    - El schema SQLite (¿necesita migración Drizzle?)
    - La cola de sync (¿cambia el payload al backend?)
 2. Usar el subagente `architect` para el plan (fases y archivos; **sin código**).
-3. Guardar el plan en `specs/`.
+3. Guardar el plan en `../spec/` (raíz del ecosistema).
 4. Esperar aprobación del usuario.
 5. Crear rama nueva desde `development`.
 
