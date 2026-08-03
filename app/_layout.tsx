@@ -21,6 +21,7 @@ import { BackgroundSync } from "../src/sync/BackgroundSync";
 import { initSentry, captureError } from "../src/lib/sentry";
 import { logger } from "../src/lib/logger";
 import { ChangeRequestBanner } from "../src/components/requests/ChangeRequestBanner";
+import { ThemeProvider } from "../src/theme/ThemeProvider";
 
 initSentry();
 
@@ -126,26 +127,28 @@ export default function RootLayout() {
   }, [fontsLoaded, isRestoring, dbReady]);
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <AuthGuard />
-      <ChangeRequestBanner />
-      <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="login" />
-        <Stack.Screen name="index" />
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="campaign/[id]/pre-survey" />
-        <Stack.Screen name="campaign/[id]/session/[sessionId]/orchestrator" />
-        <Stack.Screen name="campaign/[id]/session/[sessionId]/completed" />
-        <Stack.Screen name="instrument/[id]/download" />
-        <Stack.Screen name="instrument/[id]/start" />
-        <Stack.Screen
-          name="instrument/[id]/question/[index]"
-          options={{ animation: "none" }}
-        />
-        <Stack.Screen name="instrument/[id]/review" />
-        <Stack.Screen name="instrument/[id]/completed" />
-        <Stack.Screen name="dev/logs" />
-      </Stack>
-    </QueryClientProvider>
+    <ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <AuthGuard />
+        <ChangeRequestBanner />
+        <Stack screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="login" />
+          <Stack.Screen name="index" />
+          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+          <Stack.Screen name="campaign/[id]/pre-survey" />
+          <Stack.Screen name="campaign/[id]/session/[sessionId]/orchestrator" />
+          <Stack.Screen name="campaign/[id]/session/[sessionId]/completed" />
+          <Stack.Screen name="instrument/[id]/download" />
+          <Stack.Screen name="instrument/[id]/start" />
+          <Stack.Screen
+            name="instrument/[id]/question/[index]"
+            options={{ animation: "none" }}
+          />
+          <Stack.Screen name="instrument/[id]/review" />
+          <Stack.Screen name="instrument/[id]/completed" />
+          <Stack.Screen name="dev/logs" />
+        </Stack>
+      </QueryClientProvider>
+    </ThemeProvider>
   );
 }

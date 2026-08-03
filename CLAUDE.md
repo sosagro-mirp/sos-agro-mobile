@@ -159,10 +159,11 @@ mobile/
 ├── app/                          # Rutas Expo Router (file-based)
 │   ├── _layout.tsx               # Root: auth check + inicialización DB
 │   ├── login.tsx
-│   ├── (tabs)/                   # Tab navigator con 3 pestañas
+│   ├── (tabs)/                   # Tab navigator con 4 pestañas
 │   │   ├── campaign/index.tsx    # Lista de campañas activas
 │   │   ├── drafts/index.tsx      # Encuestas guardadas sin enviar
-│   │   └── sync/index.tsx        # Estado de cola de sincronización
+│   │   ├── sync/index.tsx        # Estado de cola de sincronización
+│   │   └── requests/index.tsx    # Solicitudes de cambio
 │   └── campaign/[id]/
 │       ├── pre-survey.tsx        # Identificación del agricultor (S1/S2 flow)
 │       └── session/[sessionId]/
@@ -174,12 +175,19 @@ mobile/
     │
     ├── components/               # Componentes React Native reutilizables
     │   ├── campaign/             # CampaignCard, CampaignProgress, DuplicateAlertModal, PreSurveyForm
-    │   ├── common/               # PrimaryButton, SecondaryButton, Screen (safe-area wrapper)
+    │   ├── common/               # PrimaryButton, SecondaryButton, Screen (safe-area wrapper),
+    │   │                          # ThemeToggle (spec 63)
     │   ├── drafts/               # DraftListItem
     │   ├── inputs/               # Todos los inputs de encuesta (ver tabla de tipos)
     │   ├── instrument/           # QuestionRenderer, QuestionScreen, ProgressBar, QuestionContainer
     │   ├── network/              # OfflineBanner
+    │   ├── requests/             # ChangeRequestBanner, ChangeRequestForm
     │   └── sync/                 # SyncStatusBadge
+    │
+    ├── theme/                    # resolveTheme.ts (funciones puras), colors.ts
+    │   │                          # (lightColors/darkColors), ThemeProvider.tsx + useTheme()
+    │   │                          # — spec 63. Persistencia en storage/themeStorage.ts
+    │   └── fonts.ts               # JetBrains Mono
     │
     ├── lib/                      # Utilidades puras
     │   ├── buildResponsesPayload.ts  # Serializa respuestas para el batch API
@@ -199,6 +207,7 @@ mobile/
     │   ├── instrumentCache.ts    # Cache de definiciones de instrumentos
     │   ├── campaignCache.ts      # Cache de campañas renderizadas
     │   ├── secureStorage.ts      # Token cifrado (expo-secure-store)
+    │   ├── themeStorage.ts       # Preferencia de tema (expo-secure-store) — spec 63
     │   └── duplicateDetection.ts # Detecta encuestas duplicadas por agricultor + timestamp
     │
     ├── store/                    # Zustand stores (estado en memoria)

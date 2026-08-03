@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -20,6 +20,8 @@ import { QuestionRenderer } from "./QuestionRenderer";
 import { PrimaryButton } from "../common/PrimaryButton";
 import { SecondaryButton } from "../common/SecondaryButton";
 import { Fonts } from "../../theme/fonts";
+import { useTheme } from "../../theme/ThemeProvider";
+import type { ThemeColors } from "../../theme/colors";
 import { OPTION_SEARCH_THRESHOLD } from "../../lib/optionSearch";
 import type { InstrumentDraftAnswer } from "../../types";
 
@@ -36,6 +38,8 @@ export const QuestionScreen: React.FC<QuestionScreenProps> = ({
 }) => {
   const router = useRouter();
   const [showExitConfirm, setShowExitConfirm] = useState(false);
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
 
   const answers = useInstrumentSurveyStore((s) => s.answers);
   const currentIndex = useInstrumentSurveyStore((s) => s.currentIndex);
@@ -232,185 +236,187 @@ export const QuestionScreen: React.FC<QuestionScreenProps> = ({
 
 export default QuestionScreen;
 
-const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: "#F9FAFB",
-  },
-  kavContainer: {
-    flex: 1,
-  },
-  emptyState: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 24,
-  },
-  emptyText: {
-    fontFamily: Fonts.regular,
-    fontSize: 16,
-    color: "#6B7280",
-    textAlign: "center",
-  },
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    root: {
+      flex: 1,
+      backgroundColor: colors.surfaceMuted,
+    },
+    kavContainer: {
+      flex: 1,
+    },
+    emptyState: {
+      flex: 1,
+      justifyContent: "center",
+      alignItems: "center",
+      padding: 24,
+    },
+    emptyText: {
+      fontFamily: Fonts.regular,
+      fontSize: 16,
+      color: colors.textMuted,
+      textAlign: "center",
+    },
 
-  // 1. Header
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: "#FFFFFF",
-    borderBottomWidth: 1,
-    borderBottomColor: "#E5E7EB",
-  },
-  brand: {
-    flex: 1,
-    alignItems: "center",
-  },
-  brandTitle: {
-    fontFamily: Fonts.bold,
-    fontSize: 17,
-    color: "#1B6B3A",
-    letterSpacing: 1.5,
-    textTransform: "uppercase",
-  },
-  brandSubtitle: {
-    fontFamily: Fonts.regular,
-    fontSize: 11,
-    color: "#9CA3AF",
-    marginTop: 2,
-  },
-  exitButton: {
-    width: 36,
-    height: 36,
-    alignItems: "center",
-    justifyContent: "center",
-    position: "absolute",
-    right: 12,
-  },
-  exitIcon: {
-    fontSize: 16,
-    color: "#9CA3AF",
-    fontFamily: Fonts.regular,
-  },
+    // 1. Header
+    header: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+      backgroundColor: colors.surface,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    brand: {
+      flex: 1,
+      alignItems: "center",
+    },
+    brandTitle: {
+      fontFamily: Fonts.bold,
+      fontSize: 17,
+      color: colors.brand,
+      letterSpacing: 1.5,
+      textTransform: "uppercase",
+    },
+    brandSubtitle: {
+      fontFamily: Fonts.regular,
+      fontSize: 11,
+      color: colors.textMuted,
+      marginTop: 2,
+    },
+    exitButton: {
+      width: 36,
+      height: 36,
+      alignItems: "center",
+      justifyContent: "center",
+      position: "absolute",
+      right: 12,
+    },
+    exitIcon: {
+      fontSize: 16,
+      color: colors.textMuted,
+      fontFamily: Fonts.regular,
+    },
 
-  // 2. Sección
-  sectionCard: {
-    backgroundColor: "#FFFFFF",
-    borderBottomWidth: 1,
-    borderBottomColor: "#E5E7EB",
-    overflow: "hidden",
-  },
-  sectionAccent: {
-    height: 3,
-    backgroundColor: "#1B6B3A",
-  },
-  sectionName: {
-    fontFamily: Fonts.semiBold,
-    fontSize: 14,
-    color: "#374151",
-    letterSpacing: 0.5,
-    textTransform: "uppercase",
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-  },
+    // 2. Sección
+    sectionCard: {
+      backgroundColor: colors.surface,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+      overflow: "hidden",
+    },
+    sectionAccent: {
+      height: 3,
+      backgroundColor: colors.brand,
+    },
+    sectionName: {
+      fontFamily: Fonts.semiBold,
+      fontSize: 14,
+      color: colors.textPrimary,
+      letterSpacing: 0.5,
+      textTransform: "uppercase",
+      paddingHorizontal: 20,
+      paddingVertical: 10,
+    },
 
-  // Exit confirmation modal
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 24,
-  },
-  modalCard: {
-    width: "100%",
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    padding: 24,
-    gap: 12,
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontFamily: Fonts.bold,
-    color: "#111827",
-  },
-  modalBody: {
-    fontSize: 15,
-    fontFamily: Fonts.regular,
-    color: "#374151",
-    lineHeight: 22,
-  },
-  modalActions: {
-    flexDirection: "row",
-    gap: 12,
-    marginTop: 4,
-  },
-  modalButton: {
-    flex: 1,
-    borderRadius: 10,
-    paddingVertical: 14,
-    alignItems: "center",
-  },
-  modalButtonSecondary: {
-    backgroundColor: "#F3F4F6",
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-  },
-  modalButtonDestructive: {
-    backgroundColor: "#DC2626",
-  },
-  modalButtonText: {
-    fontSize: 15,
-    fontFamily: Fonts.semiBold,
-    color: "#fff",
-  },
-  modalButtonSecondaryText: {
-    fontSize: 15,
-    fontFamily: Fonts.semiBold,
-    color: "#374151",
-  },
+    // Exit confirmation modal
+    modalOverlay: {
+      flex: 1,
+      backgroundColor: "rgba(0,0,0,0.5)",
+      justifyContent: "center",
+      alignItems: "center",
+      padding: 24,
+    },
+    modalCard: {
+      width: "100%",
+      backgroundColor: colors.surface,
+      borderRadius: 16,
+      padding: 24,
+      gap: 12,
+    },
+    modalTitle: {
+      fontSize: 18,
+      fontFamily: Fonts.bold,
+      color: colors.textPrimary,
+    },
+    modalBody: {
+      fontSize: 15,
+      fontFamily: Fonts.regular,
+      color: colors.textPrimary,
+      lineHeight: 22,
+    },
+    modalActions: {
+      flexDirection: "row",
+      gap: 12,
+      marginTop: 4,
+    },
+    modalButton: {
+      flex: 1,
+      borderRadius: 10,
+      paddingVertical: 14,
+      alignItems: "center",
+    },
+    modalButtonSecondary: {
+      backgroundColor: colors.surfaceMuted,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    modalButtonDestructive: {
+      backgroundColor: colors.dangerFg,
+    },
+    modalButtonText: {
+      fontSize: 15,
+      fontFamily: Fonts.semiBold,
+      color: colors.brandForeground,
+    },
+    modalButtonSecondaryText: {
+      fontSize: 15,
+      fontFamily: Fonts.semiBold,
+      color: colors.textPrimary,
+    },
 
-  // Progress
-  progressContainer: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: "#FFFFFF",
-  },
+    // Progress
+    progressContainer: {
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+      backgroundColor: colors.surface,
+    },
 
-  // Scroll
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 24,
-  },
-  ownScrollContainer: {
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 8,
-  },
+    // Scroll
+    scrollView: {
+      flex: 1,
+    },
+    scrollContent: {
+      paddingHorizontal: 20,
+      paddingTop: 8,
+      paddingBottom: 24,
+    },
+    ownScrollContainer: {
+      paddingHorizontal: 20,
+      paddingTop: 8,
+      paddingBottom: 8,
+    },
 
-  // Footer
-  footer: {
-    flexDirection: "row",
-    gap: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    backgroundColor: "#FFFFFF",
-    borderTopWidth: 1,
-    borderTopColor: "#E5E7EB",
-  },
-  prevButtonWrapper: {
-    flex: 1,
-  },
-  nextButtonWrapper: {
-    flex: 1,
-  },
-  nextButtonFull: {
-    flex: 1,
-  },
-});
+    // Footer
+    footer: {
+      flexDirection: "row",
+      gap: 12,
+      paddingHorizontal: 16,
+      paddingVertical: 16,
+      backgroundColor: colors.surface,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+    },
+    prevButtonWrapper: {
+      flex: 1,
+    },
+    nextButtonWrapper: {
+      flex: 1,
+    },
+    nextButtonFull: {
+      flex: 1,
+    },
+  });
+}
