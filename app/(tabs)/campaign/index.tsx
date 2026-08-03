@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -16,9 +16,9 @@ import { useSyncStatusStore } from "../../../src/store/useSyncStatusStore";
 import { runMigrations } from "../../../src/storage/db/db";
 import type { CampaignRender } from "../../../src/types";
 import { Fonts } from "../../../src/theme/fonts";
+import { useTheme } from "../../../src/theme/ThemeProvider";
+import type { ThemeColors } from "../../../src/theme/colors";
 import { AppText } from "../../../src/components/common/AppText";
-
-const GREEN = "#1B6B3A";
 
 export default function CampaignListScreen() {
   const router = useRouter();
@@ -32,6 +32,8 @@ export default function CampaignListScreen() {
     isCampaignFullyCached,
   } = useCachedCampaignsStore();
   const { isOnline } = useSyncStatusStore();
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
 
   useEffect(() => {
     // On a fresh install this screen can mount before _layout.tsx's own
@@ -117,7 +119,7 @@ export default function CampaignListScreen() {
           <RefreshControl
             refreshing={isLoading && !downloadProgress}
             onRefresh={refresh}
-            tintColor={GREEN}
+            tintColor={colors.brand}
           />
         }
       >
@@ -142,7 +144,7 @@ export default function CampaignListScreen() {
         ))}
 
         {isLoading && campaigns.length === 0 && !downloadProgress ? (
-          <ActivityIndicator size="large" color={GREEN} style={styles.loader} />
+          <ActivityIndicator size="large" color={colors.brand} style={styles.loader} />
         ) : null}
       </ScrollView>
     </SafeAreaView>
@@ -158,6 +160,9 @@ function CampaignRow({
   fullyCached: boolean;
   onPress: () => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+
   return (
     <Pressable
       style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
@@ -192,6 +197,9 @@ function CampaignRow({
 }
 
 function CacheStatusBadge({ fullyCached }: { fullyCached: boolean }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+
   if (fullyCached) {
     return (
       <View style={[styles.badge, styles.badgeCached]}>
@@ -206,101 +214,103 @@ function CacheStatusBadge({ fullyCached }: { fullyCached: boolean }) {
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#F9FAFB" },
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    root: { flex: 1, backgroundColor: colors.surfaceMuted },
 
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    backgroundColor: "#fff",
-    borderBottomWidth: 1,
-    borderBottomColor: "#E5E7EB",
-  },
-  title: { flexShrink: 1, fontSize: 17, fontFamily: Fonts.bold, color: "#111827" },
-  // Fixed size: the "Actualizar" button must stay fully visible even when
-  // the campaign title is long or the system font scale is high (spec 24).
-  refreshBtnWrapper: { flexShrink: 0 },
-  refreshBtn: { fontSize: 15, fontFamily: Fonts.semiBold, color: GREEN },
-  refreshDisabled: { color: "#9CA3AF" },
+    header: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingHorizontal: 20,
+      paddingVertical: 14,
+      backgroundColor: colors.surface,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    title: { flexShrink: 1, fontSize: 17, fontFamily: Fonts.bold, color: colors.textPrimary },
+    // Fixed size: the "Actualizar" button must stay fully visible even when
+    // the campaign title is long or the system font scale is high (spec 24).
+    refreshBtnWrapper: { flexShrink: 0 },
+    refreshBtn: { fontSize: 15, fontFamily: Fonts.semiBold, color: colors.brand },
+    refreshDisabled: { color: colors.textMuted },
 
-  progressContainer: {
-    backgroundColor: "#fff",
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: "#E5E7EB",
-    gap: 6,
-  },
-  progressHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  progressPhase: { fontSize: 13, fontFamily: Fonts.semiBold, color: "#374151" },
-  progressCount: { fontSize: 13, fontFamily: Fonts.regular, color: "#6B7280" },
-  progressName: { fontSize: 12, fontFamily: Fonts.regular, color: "#9CA3AF" },
-  progressTrack: { height: 6, backgroundColor: "#E5E7EB", borderRadius: 3, overflow: "hidden" },
-  progressFill: { height: 6, backgroundColor: GREEN, borderRadius: 3 },
+    progressContainer: {
+      backgroundColor: colors.surface,
+      paddingHorizontal: 20,
+      paddingVertical: 14,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+      gap: 6,
+    },
+    progressHeader: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+    },
+    progressPhase: { fontSize: 13, fontFamily: Fonts.semiBold, color: colors.textPrimary },
+    progressCount: { fontSize: 13, fontFamily: Fonts.regular, color: colors.textMuted },
+    progressName: { fontSize: 12, fontFamily: Fonts.regular, color: colors.textMuted },
+    progressTrack: { height: 6, backgroundColor: colors.border, borderRadius: 3, overflow: "hidden" },
+    progressFill: { height: 6, backgroundColor: colors.brand, borderRadius: 3 },
 
-  offlineBanner: {
-    backgroundColor: "#FEF3C7",
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: "#FDE68A",
-  },
-  offlineText: { fontSize: 13, fontFamily: Fonts.regular, color: "#92400E" },
+    offlineBanner: {
+      backgroundColor: colors.warningBg,
+      paddingHorizontal: 20,
+      paddingVertical: 10,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.warningFg,
+    },
+    offlineText: { fontSize: 13, fontFamily: Fonts.regular, color: colors.warningFg },
 
-  errorBox: {
-    margin: 20,
-    padding: 14,
-    backgroundColor: "#FEF2F2",
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#FECACA",
-  },
-  errorText: { fontSize: 14, fontFamily: Fonts.regular, color: "#DC2626" },
+    errorBox: {
+      margin: 20,
+      padding: 14,
+      backgroundColor: colors.dangerBg,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: colors.dangerFg,
+    },
+    errorText: { fontSize: 14, fontFamily: Fonts.regular, color: colors.dangerFg },
 
-  list: { padding: 20, gap: 12 },
-  loader: { marginTop: 48 },
+    list: { padding: 20, gap: 12 },
+    loader: { marginTop: 48 },
 
-  card: {
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    gap: 8,
-  },
-  cardPressed: { opacity: 0.8 },
-  cardTop: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: 8,
-  },
-  campaignName: { flex: 1, fontSize: 17, fontFamily: Fonts.semiBold, color: "#111827" },
-  campaignDesc: { fontSize: 14, fontFamily: Fonts.regular, color: "#6B7280" },
-  cardBottom: { flexDirection: "row", gap: 16 },
-  stepsCount: { fontSize: 12, fontFamily: Fonts.regular, color: GREEN },
-  instrumentsCount: { fontSize: 12, fontFamily: Fonts.regular, color: "#6B7280" },
+    card: {
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      padding: 18,
+      borderWidth: 1,
+      borderColor: colors.border,
+      gap: 8,
+    },
+    cardPressed: { opacity: 0.8 },
+    cardTop: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "flex-start",
+      gap: 8,
+    },
+    campaignName: { flex: 1, fontSize: 17, fontFamily: Fonts.semiBold, color: colors.textPrimary },
+    campaignDesc: { fontSize: 14, fontFamily: Fonts.regular, color: colors.textMuted },
+    cardBottom: { flexDirection: "row", gap: 16 },
+    stepsCount: { fontSize: 12, fontFamily: Fonts.regular, color: colors.brand },
+    instrumentsCount: { fontSize: 12, fontFamily: Fonts.regular, color: colors.textMuted },
 
-  badge: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
-  badgeCached: { backgroundColor: "#DCFCE7" },
-  badgeCachedText: { fontSize: 11, fontFamily: Fonts.semiBold, color: GREEN },
-  badgePending: { backgroundColor: "#FEF3C7" },
-  badgePendingText: { fontSize: 11, fontFamily: Fonts.semiBold, color: "#92400E" },
+    badge: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
+    badgeCached: { backgroundColor: colors.successBg },
+    badgeCachedText: { fontSize: 11, fontFamily: Fonts.semiBold, color: colors.successFg },
+    badgePending: { backgroundColor: colors.warningBg },
+    badgePendingText: { fontSize: 11, fontFamily: Fonts.semiBold, color: colors.warningFg },
 
-  empty: { alignItems: "center", paddingVertical: 48, gap: 8 },
-  emptyTitle: { fontSize: 17, fontFamily: Fonts.semiBold, color: "#374151" },
-  emptyDesc: {
-    fontSize: 14,
-    fontFamily: Fonts.regular,
-    color: "#9CA3AF",
-    textAlign: "center",
-    paddingHorizontal: 32,
-  },
-});
+    empty: { alignItems: "center", paddingVertical: 48, gap: 8 },
+    emptyTitle: { fontSize: 17, fontFamily: Fonts.semiBold, color: colors.textPrimary },
+    emptyDesc: {
+      fontSize: 14,
+      fontFamily: Fonts.regular,
+      color: colors.textMuted,
+      textAlign: "center",
+      paddingHorizontal: 32,
+    },
+  });
+}

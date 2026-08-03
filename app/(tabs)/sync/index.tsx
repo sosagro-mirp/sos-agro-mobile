@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -19,9 +19,9 @@ import { surveyDraftStore } from "../../../src/storage/surveyDraftStore";
 import { NetworkMonitor } from "../../../src/sync/NetworkMonitor";
 import { MediaUploadService } from "../../../src/sync/MediaUploadService";
 import { Fonts } from "../../../src/theme/fonts";
+import { useTheme } from "../../../src/theme/ThemeProvider";
+import type { ThemeColors } from "../../../src/theme/colors";
 import { logger } from "../../../src/lib/logger";
-
-const GREEN = "#1B6B3A";
 
 export default function SyncScreen() {
   const {
@@ -31,6 +31,8 @@ export default function SyncScreen() {
     currentlySyncingId,
     refreshPendingCount,
   } = useSyncStatusStore();
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
 
   const [failedEntries, setFailedEntries] = useState<SyncQueueEntry[]>([]);
   const [failedMedia, setFailedMedia] = useState<MediaUploadEntry[]>([]);
@@ -133,7 +135,7 @@ export default function SyncScreen() {
   };
 
   const isBusy = isSyncing || Boolean(currentlySyncingId);
-  const statusColor = isOnline ? "#16A34A" : "#DC2626";
+  const statusColor = isOnline ? colors.successFg : colors.dangerFg;
   const statusLabel = isOnline ? "En línea" : "Sin conexión";
 
   return (
@@ -150,7 +152,7 @@ export default function SyncScreen() {
               {statusLabel}
             </Text>
             {isBusy ? (
-              <ActivityIndicator size="small" color={GREEN} style={{ marginLeft: 8 }} />
+              <ActivityIndicator size="small" color={colors.brand} style={{ marginLeft: 8 }} />
             ) : null}
           </View>
           {currentlySyncingId ? (
@@ -167,9 +169,9 @@ export default function SyncScreen() {
         </View>
 
         <View style={styles.countersRow}>
-          <CounterCard label="Pendientes" value={pendingCount} color="#F59E0B" />
-          <CounterCard label="Con error" value={failedEntries.length} color="#DC2626" />
-          <CounterCard label="Adjuntos" value={failedMedia.length} color="#DC2626" />
+          <CounterCard label="Pendientes" value={pendingCount} color={colors.warningFg} />
+          <CounterCard label="Con error" value={failedEntries.length} color={colors.dangerFg} />
+          <CounterCard label="Adjuntos" value={failedMedia.length} color={colors.dangerFg} />
         </View>
 
         <Pressable
@@ -178,7 +180,7 @@ export default function SyncScreen() {
           disabled={!isOnline || isBusy}
         >
           {isBusy ? (
-            <ActivityIndicator color="#fff" />
+            <ActivityIndicator color={colors.brandForeground} />
           ) : (
             <Text style={styles.syncButtonText}>Sincronizar ahora</Text>
           )}
@@ -190,7 +192,7 @@ export default function SyncScreen() {
           disabled={isPurging}
         >
           {isPurging ? (
-            <ActivityIndicator color={GREEN} />
+            <ActivityIndicator color={colors.brand} />
           ) : (
             <Text style={styles.purgeButtonText}>Limpiar historial sincronizado</Text>
           )}
@@ -209,7 +211,7 @@ export default function SyncScreen() {
               <Text style={styles.sectionTitle}>Errores de validación</Text>
               <Pressable onPress={handleClearFailed} disabled={isClearingFailed}>
                 {isClearingFailed ? (
-                  <ActivityIndicator size="small" color="#DC2626" />
+                  <ActivityIndicator size="small" color={colors.dangerFg} />
                 ) : (
                   <Text style={styles.clearFailedBtn}>Limpiar todo</Text>
                 )}
@@ -240,7 +242,7 @@ export default function SyncScreen() {
                     disabled={!isOnline || Boolean(retryingId)}
                   >
                     {retryingId === entry.id ? (
-                      <ActivityIndicator size="small" color="#fff" />
+                      <ActivityIndicator size="small" color={colors.brandForeground} />
                     ) : (
                       <Text style={styles.retryBtnText}>Reintentar</Text>
                     )}
@@ -257,7 +259,7 @@ export default function SyncScreen() {
               <Text style={styles.sectionTitle}>Adjuntos sin subir</Text>
               <Pressable onPress={handleClearFailedMedia} disabled={isClearingFailedMedia}>
                 {isClearingFailedMedia ? (
-                  <ActivityIndicator size="small" color="#DC2626" />
+                  <ActivityIndicator size="small" color={colors.dangerFg} />
                 ) : (
                   <Text style={styles.clearFailedBtn}>Limpiar todo</Text>
                 )}
@@ -289,7 +291,7 @@ export default function SyncScreen() {
                     disabled={!isOnline || Boolean(retryingMediaId)}
                   >
                     {retryingMediaId === entry.id ? (
-                      <ActivityIndicator size="small" color="#fff" />
+                      <ActivityIndicator size="small" color={colors.brandForeground} />
                     ) : (
                       <Text style={styles.retryBtnText}>Reintentar</Text>
                     )}
@@ -312,6 +314,9 @@ export default function SyncScreen() {
 }
 
 function CounterCard({ label, value, color }: { label: string; value: number; color: string }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+
   return (
     <View style={styles.counterCard}>
       <Text style={[styles.counterValue, { color }]}>{value}</Text>
@@ -320,97 +325,99 @@ function CounterCard({ label, value, color }: { label: string; value: number; co
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#F9FAFB" },
-  header: {
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    backgroundColor: "#fff",
-    borderBottomWidth: 1,
-    borderBottomColor: "#E5E7EB",
-  },
-  title: { fontSize: 17, fontFamily: Fonts.bold, color: "#111827" },
-  content: { padding: 20, gap: 16 },
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    root: { flex: 1, backgroundColor: colors.surfaceMuted },
+    header: {
+      paddingHorizontal: 20,
+      paddingVertical: 14,
+      backgroundColor: colors.surface,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    title: { fontSize: 17, fontFamily: Fonts.bold, color: colors.textPrimary },
+    content: { padding: 20, gap: 16 },
 
-  statusCard: {
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    gap: 6,
-  },
-  statusRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  dot: { width: 10, height: 10, borderRadius: 5 },
-  statusLabel: { fontSize: 16, fontFamily: Fonts.semiBold },
-  syncingDetail: { fontSize: 13, fontFamily: Fonts.regular, color: GREEN },
-  lastSync: { fontSize: 13, fontFamily: Fonts.regular, color: "#9CA3AF" },
+    statusCard: {
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      padding: 16,
+      borderWidth: 1,
+      borderColor: colors.border,
+      gap: 6,
+    },
+    statusRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+    dot: { width: 10, height: 10, borderRadius: 5 },
+    statusLabel: { fontSize: 16, fontFamily: Fonts.semiBold },
+    syncingDetail: { fontSize: 13, fontFamily: Fonts.regular, color: colors.brand },
+    lastSync: { fontSize: 13, fontFamily: Fonts.regular, color: colors.textMuted },
 
-  countersRow: { flexDirection: "row", gap: 12 },
-  counterCard: {
-    flex: 1,
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    padding: 16,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-  },
-  counterValue: { fontSize: 32, fontFamily: Fonts.bold },
-  counterLabel: { fontSize: 13, fontFamily: Fonts.regular, color: "#6B7280", marginTop: 2 },
+    countersRow: { flexDirection: "row", gap: 12 },
+    counterCard: {
+      flex: 1,
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      padding: 16,
+      alignItems: "center",
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    counterValue: { fontSize: 32, fontFamily: Fonts.bold },
+    counterLabel: { fontSize: 13, fontFamily: Fonts.regular, color: colors.textMuted, marginTop: 2 },
 
-  syncButton: {
-    backgroundColor: GREEN,
-    borderRadius: 12,
-    paddingVertical: 18,
-    alignItems: "center",
-  },
-  syncButtonDisabled: { backgroundColor: "#9CA3AF" },
-  syncButtonText: { fontSize: 17, fontFamily: Fonts.bold, color: "#fff" },
+    syncButton: {
+      backgroundColor: colors.brand,
+      borderRadius: 12,
+      paddingVertical: 18,
+      alignItems: "center",
+    },
+    syncButtonDisabled: { backgroundColor: colors.textMuted },
+    syncButtonText: { fontSize: 17, fontFamily: Fonts.bold, color: colors.brandForeground },
 
-  purgeButton: {
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#D1D5DB",
-  },
-  purgeButtonText: { fontSize: 15, fontFamily: Fonts.medium, color: "#374151" },
-  purgeResult: { fontSize: 13, fontFamily: Fonts.regular, color: "#6B7280", textAlign: "center" },
+    purgeButton: {
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      paddingVertical: 14,
+      alignItems: "center",
+      borderWidth: 1,
+      borderColor: colors.borderStrong,
+    },
+    purgeButtonText: { fontSize: 15, fontFamily: Fonts.medium, color: colors.textPrimary },
+    purgeResult: { fontSize: 13, fontFamily: Fonts.regular, color: colors.textMuted, textAlign: "center" },
 
-  section: { gap: 10 },
-  sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  sectionTitle: { fontSize: 15, fontFamily: Fonts.semiBold, color: "#374151" },
-  clearFailedBtn: { fontSize: 14, fontFamily: Fonts.semiBold, color: "#DC2626" },
-  sectionHint: { fontSize: 13, fontFamily: Fonts.regular, color: "#9CA3AF", lineHeight: 18 },
-  failedCard: {
-    backgroundColor: "#FEF2F2",
-    borderRadius: 10,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: "#FECACA",
-    gap: 6,
-  },
-  failedId: { fontSize: 13, fontFamily: Fonts.semiBold, color: "#374151" },
-  failedError: { fontSize: 12, fontFamily: Fonts.regular, color: "#DC2626", lineHeight: 18 },
-  failedFooter: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginTop: 4,
-  },
-  failedAttempts: { fontSize: 12, fontFamily: Fonts.regular, color: "#9CA3AF" },
-  retryBtn: {
-    backgroundColor: GREEN,
-    borderRadius: 8,
-    paddingVertical: 6,
-    paddingHorizontal: 14,
-  },
-  retryBtnDisabled: { backgroundColor: "#9CA3AF" },
-  retryBtnText: { fontSize: 13, fontFamily: Fonts.semiBold, color: "#fff" },
+    section: { gap: 10 },
+    sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+    sectionTitle: { fontSize: 15, fontFamily: Fonts.semiBold, color: colors.textPrimary },
+    clearFailedBtn: { fontSize: 14, fontFamily: Fonts.semiBold, color: colors.dangerFg },
+    sectionHint: { fontSize: 13, fontFamily: Fonts.regular, color: colors.textMuted, lineHeight: 18 },
+    failedCard: {
+      backgroundColor: colors.dangerBg,
+      borderRadius: 10,
+      padding: 14,
+      borderWidth: 1,
+      borderColor: colors.dangerFg,
+      gap: 6,
+    },
+    failedId: { fontSize: 13, fontFamily: Fonts.semiBold, color: colors.textPrimary },
+    failedError: { fontSize: 12, fontFamily: Fonts.regular, color: colors.dangerFg, lineHeight: 18 },
+    failedFooter: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      marginTop: 4,
+    },
+    failedAttempts: { fontSize: 12, fontFamily: Fonts.regular, color: colors.textMuted },
+    retryBtn: {
+      backgroundColor: colors.brand,
+      borderRadius: 8,
+      paddingVertical: 6,
+      paddingHorizontal: 14,
+    },
+    retryBtnDisabled: { backgroundColor: colors.textMuted },
+    retryBtnText: { fontSize: 13, fontFamily: Fonts.semiBold, color: colors.brandForeground },
 
-  allGood: { alignItems: "center", paddingVertical: 32, gap: 8 },
-  allGoodIcon: { fontSize: 40, color: GREEN },
-  allGoodText: { fontSize: 16, fontFamily: Fonts.semiBold, color: "#374151" },
-});
+    allGood: { alignItems: "center", paddingVertical: 32, gap: 8 },
+    allGoodIcon: { fontSize: 40, color: colors.brand },
+    allGoodText: { fontSize: 16, fontFamily: Fonts.semiBold, color: colors.textPrimary },
+  });
+}

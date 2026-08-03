@@ -1,14 +1,18 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useCachedInstrumentsStore } from "../../../src/store/useCachedInstrumentsStore";
 import { Fonts } from "../../../src/theme/fonts";
+import { useTheme } from "../../../src/theme/ThemeProvider";
+import type { ThemeColors } from "../../../src/theme/colors";
 
 export default function InstrumentDownloadScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { downloadAndCache, error } = useCachedInstrumentsStore();
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
 
   useEffect(() => {
     downloadAndCache(id)
@@ -25,7 +29,7 @@ export default function InstrumentDownloadScreen() {
           <Text style={styles.error}>{error}</Text>
         ) : (
           <>
-            <ActivityIndicator size="large" color="#1B6B3A" />
+            <ActivityIndicator size="large" color={colors.brand} />
             <Text style={styles.label}>Descargando instrumento…</Text>
           </>
         )}
@@ -34,9 +38,11 @@ export default function InstrumentDownloadScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#F9FAFB" },
-  center: { flex: 1, justifyContent: "center", alignItems: "center", gap: 16 },
-  label: { fontSize: 15, fontFamily: Fonts.regular, color: "#6B7280" },
-  error: { fontSize: 15, fontFamily: Fonts.regular, color: "#DC2626", textAlign: "center", paddingHorizontal: 32 },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    root: { flex: 1, backgroundColor: colors.surfaceMuted },
+    center: { flex: 1, justifyContent: "center", alignItems: "center", gap: 16 },
+    label: { fontSize: 15, fontFamily: Fonts.regular, color: colors.textMuted },
+    error: { fontSize: 15, fontFamily: Fonts.regular, color: colors.dangerFg, textAlign: "center", paddingHorizontal: 32 },
+  });
+}

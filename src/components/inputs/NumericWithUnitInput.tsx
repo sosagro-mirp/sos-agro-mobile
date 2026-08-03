@@ -1,6 +1,8 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { Fonts } from "../../theme/fonts";
+import { useTheme } from "../../theme/ThemeProvider";
+import type { ThemeColors } from "../../theme/colors";
 import type { InstrumentDraftAnswer, InstrumentOption } from "../../types/instrument";
 
 interface Props {
@@ -20,6 +22,8 @@ export function NumericWithUnitInput({
 }: Props): React.JSX.Element {
   const [focused, setFocused] = useState(false);
   const [raw, setRaw] = useState<string>(numericValue !== undefined ? String(numericValue) : "");
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
 
   function handleNumericChange(text: string): void {
     setRaw(text);
@@ -52,7 +56,7 @@ export function NumericWithUnitInput({
           keyboardType="decimal-pad"
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
-          placeholderTextColor="#9CA3AF"
+          placeholderTextColor={colors.textMuted}
           placeholder="0"
           returnKeyType="done"
         />
@@ -87,86 +91,88 @@ export function NumericWithUnitInput({
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    width: "100%",
-    gap: 24,
-  },
-  section: {
-    gap: 8,
-  },
-  sectionLabel: {
-    fontFamily: Fonts.semiBold,
-    fontSize: 16,
-    lineHeight: 22,
-    color: "#374151",
-  },
-  numericInput: {
-    fontFamily: Fonts.regular,
-    fontSize: 18,
-    lineHeight: 26,
-    color: "#111827",
-    backgroundColor: "#FFFFFF",
-    borderWidth: 2,
-    borderColor: "#D1D5DB",
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 0,
-    height: 56,
-    minHeight: 56,
-  },
-  numericInputFocused: {
-    borderColor: "#1B6B3A",
-  },
-  unitList: {
-    gap: 8,
-  },
-  unitOption: {
-    flexDirection: "row",
-    alignItems: "center",
-    minHeight: 56,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    backgroundColor: "#FFFFFF",
-    borderWidth: 2,
-    borderColor: "#D1D5DB",
-    borderRadius: 12,
-    gap: 14,
-  },
-  unitOptionSelected: {
-    borderLeftWidth: 4,
-    borderLeftColor: "#1B6B3A",
-    borderColor: "#1B6B3A",
-    backgroundColor: "#F0FDF4",
-  },
-  radio: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: "#9CA3AF",
-    alignItems: "center",
-    justifyContent: "center",
-    flexShrink: 0,
-  },
-  radioSelected: {
-    borderColor: "#1B6B3A",
-  },
-  radioDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: "#1B6B3A",
-  },
-  unitLabel: {
-    fontFamily: Fonts.regular,
-    fontSize: 18,
-    lineHeight: 24,
-    color: "#374151",
-    flex: 1,
-  },
-  unitLabelSelected: {
-    fontFamily: Fonts.semiBold,
-    color: "#14532D",
-  },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    container: {
+      width: "100%",
+      gap: 24,
+    },
+    section: {
+      gap: 8,
+    },
+    sectionLabel: {
+      fontFamily: Fonts.semiBold,
+      fontSize: 16,
+      lineHeight: 22,
+      color: colors.textPrimary,
+    },
+    numericInput: {
+      fontFamily: Fonts.regular,
+      fontSize: 18,
+      lineHeight: 26,
+      color: colors.textPrimary,
+      backgroundColor: colors.surface,
+      borderWidth: 2,
+      borderColor: colors.borderStrong,
+      borderRadius: 12,
+      paddingHorizontal: 16,
+      paddingVertical: 0,
+      height: 56,
+      minHeight: 56,
+    },
+    numericInputFocused: {
+      borderColor: colors.brand,
+    },
+    unitList: {
+      gap: 8,
+    },
+    unitOption: {
+      flexDirection: "row",
+      alignItems: "center",
+      minHeight: 56,
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+      backgroundColor: colors.surface,
+      borderWidth: 2,
+      borderColor: colors.borderStrong,
+      borderRadius: 12,
+      gap: 14,
+    },
+    unitOptionSelected: {
+      borderLeftWidth: 4,
+      borderLeftColor: colors.brand,
+      borderColor: colors.brand,
+      backgroundColor: colors.brandSubtleBg,
+    },
+    radio: {
+      width: 24,
+      height: 24,
+      borderRadius: 12,
+      borderWidth: 2,
+      borderColor: colors.textMuted,
+      alignItems: "center",
+      justifyContent: "center",
+      flexShrink: 0,
+    },
+    radioSelected: {
+      borderColor: colors.brand,
+    },
+    radioDot: {
+      width: 12,
+      height: 12,
+      borderRadius: 6,
+      backgroundColor: colors.brand,
+    },
+    unitLabel: {
+      fontFamily: Fonts.regular,
+      fontSize: 18,
+      lineHeight: 24,
+      color: colors.textPrimary,
+      flex: 1,
+    },
+    unitLabelSelected: {
+      fontFamily: Fonts.semiBold,
+      color: colors.brandSubtleFg,
+    },
+  });
+}
