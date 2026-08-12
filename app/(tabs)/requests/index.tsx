@@ -33,7 +33,7 @@ export default function RequestsScreen() {
   }, []);
 
   return (
-    <SafeAreaView style={styles.root} edges={["bottom"]}>
+    <SafeAreaView style={styles.root} edges={[]}>
       <View style={styles.header}>
         <Text style={styles.title}>Solicitudes de cambio</Text>
       </View>

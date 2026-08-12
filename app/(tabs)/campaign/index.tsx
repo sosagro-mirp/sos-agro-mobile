@@ -52,7 +52,7 @@ export default function CampaignListScreen() {
       : "0%";
 
   return (
-    <SafeAreaView style={styles.root} edges={["bottom"]}>
+    <SafeAreaView style={styles.root} edges={[]}>
       {/* Tab header */}
       <View style={styles.header}>
         <AppText style={styles.title} numberOfLines={1}>
