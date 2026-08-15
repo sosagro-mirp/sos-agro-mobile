@@ -166,6 +166,7 @@ import { useSyncStatusStore } from '../store/useSyncStatusStore';
 import { flattenSections } from '../lib/flattenSections';
 import { buildResponsesPayload } from '../lib/buildResponsesPayload';
 import { isLocalId } from '../lib/isLocalId';
+import { MediaUploadService } from '../sync/MediaUploadService';
 
 // ─── Typed mock aliases ───────────────────────────────────────────────────────
 
@@ -187,6 +188,8 @@ const mockCreateSurvey = createSurvey as jest.Mock;
 const mockMarkSurveyAsSynced = markSurveyAsSynced as jest.Mock;
 const mockFlattenSections = flattenSections as jest.Mock;
 const mockBuildResponsesPayload = buildResponsesPayload as jest.Mock;
+const mockProcessPendingForSurvey =
+  MediaUploadService.processPendingForSurvey as jest.Mock;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -407,5 +410,44 @@ describe('spec-070 — SyncQueueService: una encuesta sin respuestas no llega al
 
     expect(mockCreateSurvey).not.toHaveBeenCalled();
     expect(mockSubmitResponsesBatch).toHaveBeenCalledTimes(1);
+  });
+
+  it('TC-070-R · adjuntos multimedia siempre reciben el surveyId real, nunca el local', async () => {
+    // Regresión: la Fase 3 llegó a construir el payload con el id local antes
+    // de materializar y llamaba a MediaUploadService con ese mismo id local
+    // como "surveyId real" — cada adjunto recibía 404 del backend
+    // ("Survey not found"), ver MediaUploadService.ts. Este caso reproduce
+    // una encuesta solo-multimedia: el payload de texto sale vacío a
+    // propósito (buildResponsesPayload omite la respuesta hasta que resuelva
+    // attachmentId), pero SÍ hay contenido (una respuesta con
+    // mediaLocalPath), así que debe materializarse igual.
+    mockDequeueNextPending.mockResolvedValueOnce(makeEntry()).mockResolvedValue(null);
+    mockLoadDraft.mockResolvedValue(
+      makeDraft({
+        answers: {
+          q1: { questionId: 'q1', mediaLocalPath: '/tmp/foto.jpg', mimeType: 'image/jpeg' },
+        },
+      }),
+    );
+    mockFlattenSections.mockReturnValue([{ question: { questionId: 'q1' } }]);
+    mockBuildResponsesPayload.mockReturnValue([]); // aún sin attachmentId resuelto
+
+    await SyncQueueService.processAll();
+
+    expect(mockCreateSurvey).toHaveBeenCalledTimes(1); // sí materializa: hay contenido
+    expect(mockProcessPendingForSurvey).toHaveBeenCalledWith(
+      'local_survey_11111111-1111-4111-8111-111111111111',
+      'real-survey-070',
+    );
+  });
+
+  it('TC-070-S · una encuesta sin ninguna respuesta nunca invoca a MediaUploadService', async () => {
+    mockDequeueNextPending.mockResolvedValueOnce(makeEntry()).mockResolvedValue(null);
+    mockLoadDraft.mockResolvedValue(makeDraft({ answers: {} }));
+
+    await SyncQueueService.processAll();
+
+    expect(mockCreateSurvey).not.toHaveBeenCalled();
+    expect(mockProcessPendingForSurvey).not.toHaveBeenCalled();
   });
 });

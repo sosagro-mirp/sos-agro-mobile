@@ -246,8 +246,16 @@ export default function OrchestratorScreen() {
           // `s1SurveyId` is local (spec 70, Fase 4) — processSurveyNow()
           // materializes it on the backend; extractFarmer() needs the real id.
           await SyncQueueService.processSurveyNow(s1SurveyId);
-          const realS1SurveyId =
-            (await surveyDraftStore.getBackendSurveyId(s1SurveyId)) ?? s1SurveyId;
+          const realS1SurveyId = await surveyDraftStore.getBackendSurveyId(s1SurveyId);
+          if (!realS1SurveyId) {
+            // Sync didn't materialize it (e.g. S1 has no answers yet) —
+            // sending the local id to extractFarmer() would 404 against the
+            // backend. Surface it as an injection error instead of a silent
+            // fallback (caught below, sets screenState to 'injection_error').
+            throw new Error(
+              `No se pudo sincronizar la encuesta S1 (${s1SurveyId}) antes de extraer el agricultor`,
+            );
+          }
           const { farmer } = await extractFarmer(realS1SurveyId);
           await cacheFarmerIdentity({
             farmerId: farmer.farmerId,
@@ -289,8 +297,14 @@ export default function OrchestratorScreen() {
           // `s2SurveyId` is local (spec 70, Fase 4) — resolve the real id
           // materialized by processSurveyNow() before calling extractCrops().
           await SyncQueueService.processSurveyNow(s2SurveyId);
-          const realS2SurveyId =
-            (await surveyDraftStore.getBackendSurveyId(s2SurveyId)) ?? s2SurveyId;
+          const realS2SurveyId = await surveyDraftStore.getBackendSurveyId(s2SurveyId);
+          if (!realS2SurveyId) {
+            // Same reasoning as the S1 branch above — never fall back to the
+            // local id silently.
+            throw new Error(
+              `No se pudo sincronizar la encuesta S2 (${s2SurveyId}) antes de extraer los cultivos`,
+            );
+          }
           const cropsResult = await extractCrops(realS2SurveyId);
           if (resolvedSessionId) {
             await sessionCropsStorage.save(resolvedSessionId, cropsResult.crops);
