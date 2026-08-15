@@ -272,7 +272,13 @@ class SyncQueueServiceClass {
         // otherwise unresolved) — the survey is already materialized (it has
         // real content) but there's nothing to submit yet. The manual retry
         // flow (MediaUploadService.retryEntry) links the response once the
-        // upload confirms; see its docs for why that's safe here.
+        // upload confirms; see its docs for why that's safe here. Logged
+        // explicitly so this doesn't read as a silent "synced with nothing
+        // sent" (see the `!hasAnswers` branch above for the case this isn't).
+        logger.warn(
+          `[Sync] entry ${entry.id} materialized survey ${realSurveyId} but has nothing to submit yet ` +
+            '(pending media attachment, most likely) — closing the queue entry locally',
+        );
         await syncQueueStorage.markSynced(entry.id);
         await surveyDraftStore.markSynced(entry.surveyId);
         return;
