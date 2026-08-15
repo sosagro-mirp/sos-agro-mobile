@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useRef, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -13,9 +13,8 @@ import { useCachedInstrumentsStore } from "../../../src/store/useCachedInstrumen
 import { useInstrumentSurveyStore } from "../../../src/store/useInstrumentSurveyStore";
 import { useCampaignSessionStore } from "../../../src/store/useCampaignSessionStore";
 import { useSyncStatusStore } from "../../../src/store/useSyncStatusStore";
-import { createSurvey } from "../../../src/api/surveys";
 import { surveyDraftStore } from "../../../src/storage/surveyDraftStore";
-import { generateLocalId } from "../../../src/lib/generateLocalId";
+import { beginSurvey } from "../../../src/lib/beginSurvey";
 import { OfflineBanner } from "../../../src/components/network/OfflineBanner";
 import { Fonts } from "../../../src/theme/fonts";
 import { useTheme } from "../../../src/theme/ThemeProvider";
@@ -36,6 +35,13 @@ export default function InstrumentStartScreen() {
 
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Guarda efectiva contra el doble disparo del botón «Comenzar»: `starting`
+  // (estado de React) no se refleja de forma síncrona en la clausura ya
+  // capturada por un segundo `onPress` dentro del mismo tick, así que dos
+  // toques rápidos podían pasar ambos la guarda de estado. `useRef` sí es
+  // síncrono — ver spec 70, Fase 1. `starting` se conserva solo para el
+  // estado visual del botón (spinner + disabled).
+  const startingRef = useRef(false);
 
   if (!instrument) {
     return (
@@ -54,7 +60,8 @@ export default function InstrumentStartScreen() {
   );
 
   const handleStart = async () => {
-    if (starting) return;
+    if (startingRef.current) return;
+    startingRef.current = true;
     setError(null);
     setStarting(true);
 
@@ -70,29 +77,16 @@ export default function InstrumentStartScreen() {
           campaignSessionId: campaignSessionId ?? undefined,
           farmerId: farmerId ?? undefined,
         });
-      } else if (isOnline) {
-        const response = await createSurvey({
-          instrumentIds: [instrument.instrumentId],
-          ...(campaignSessionId ? { campaignSessionId } : {}),
-          ...(currentStep ? { stepOrder: currentStep.order } : {}),
-          ...(farmerId ? { farmerId } : {}),
-        });
-        surveyId = response.surveyId;
-
-        await surveyDraftStore.createDraft({
-          surveyId,
-          instrumentId: instrument.instrumentId,
-          campaignSessionId: campaignSessionId ?? undefined,
-          farmerId: farmerId ?? undefined,
-        });
       } else {
-        // Offline: generate a local id; SyncQueueService materializes it on reconnect.
-        surveyId = generateLocalId('survey');
-        await surveyDraftStore.createDraft({
-          surveyId,
+        // Camino único, online y offline: el registro en el backend se
+        // difiere hasta que exista al menos una respuesta (spec 70, Fase 2).
+        // `beginSurvey()` siempre genera un id local y crea el borrador; el
+        // backend recibe la fila real recién al sincronizar.
+        surveyId = await beginSurvey({
           instrumentId: instrument.instrumentId,
           campaignSessionId: campaignSessionId ?? undefined,
           farmerId: farmerId ?? undefined,
+          stepOrder: currentStep?.order,
         });
       }
 
@@ -111,6 +105,7 @@ export default function InstrumentStartScreen() {
         err instanceof Error ? err.message : "Error al iniciar la encuesta"
       );
     } finally {
+      startingRef.current = false;
       setStarting(false);
     }
   };
