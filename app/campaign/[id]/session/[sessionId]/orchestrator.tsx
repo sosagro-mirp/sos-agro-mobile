@@ -9,7 +9,6 @@ import { useSyncStatusStore } from "../../../../../src/store/useSyncStatusStore"
 import { getNextStep } from "../../../../../src/api/campaignSessions";
 import { fetchInstrumentByCode } from "../../../../../src/api/instruments";
 import { extractFarmer, extractCrops } from "../../../../../src/api/farmers";
-import { createSurvey } from "../../../../../src/api/surveys";
 import { overwriteSurvey, skipStepApi } from "../../../../../src/api/surveys";
 import { surveyDraftStore } from "../../../../../src/storage/surveyDraftStore";
 import { syncQueueStorage } from "../../../../../src/storage/syncQueue";
@@ -73,10 +72,13 @@ export default function OrchestratorScreen() {
     const { instrumentId, name } = await fetchInstrumentByCode(code);
     const instrument = await getOrDownloadInstrument(instrumentId);
 
-    const { surveyId } = await createSurvey({
-      instrumentIds: [instrumentId],
-      campaignSessionId: resolvedSessionId,
-    });
+    // Spec 70, Fase 4 (vector 3) — igual que `injectInstrumentOffline`: el
+    // registro real se difiere hasta que exista contenido. Antes, esto
+    // llamaba a `createSurvey()` de inmediato; si la app se cerraba durante
+    // la fase de inyección, `s1SurveyId`/`s2SurveyId` (solo en memoria) se
+    // perdía y la reentrada creaba una fila nueva, dejando la anterior
+    // huérfana.
+    const surveyId = generateLocalId('survey');
 
     await surveyDraftStore.createDraft({
       surveyId,
@@ -240,9 +242,13 @@ export default function OrchestratorScreen() {
         if (!s1SurveyId) {
           await injectInstrument('S1');
         } else if (isOnline) {
-          // Online: sync S1, extract farmer, inject S2
+          // Online: sync S1, extract farmer, inject S2.
+          // `s1SurveyId` is local (spec 70, Fase 4) — processSurveyNow()
+          // materializes it on the backend; extractFarmer() needs the real id.
           await SyncQueueService.processSurveyNow(s1SurveyId);
-          const { farmer } = await extractFarmer(s1SurveyId);
+          const realS1SurveyId =
+            (await surveyDraftStore.getBackendSurveyId(s1SurveyId)) ?? s1SurveyId;
+          const { farmer } = await extractFarmer(realS1SurveyId);
           await cacheFarmerIdentity({
             farmerId: farmer.farmerId,
             name: farmer.name,
@@ -279,9 +285,13 @@ export default function OrchestratorScreen() {
         if (!s2SurveyId) {
           await injectInstrument('S2');
         } else if (isOnline) {
-          // Online: sync S2, extract crops, get next step
+          // Online: sync S2, extract crops, get next step.
+          // `s2SurveyId` is local (spec 70, Fase 4) — resolve the real id
+          // materialized by processSurveyNow() before calling extractCrops().
           await SyncQueueService.processSurveyNow(s2SurveyId);
-          const cropsResult = await extractCrops(s2SurveyId);
+          const realS2SurveyId =
+            (await surveyDraftStore.getBackendSurveyId(s2SurveyId)) ?? s2SurveyId;
+          const cropsResult = await extractCrops(realS2SurveyId);
           if (resolvedSessionId) {
             await sessionCropsStorage.save(resolvedSessionId, cropsResult.crops);
           }
@@ -353,21 +363,21 @@ export default function OrchestratorScreen() {
     try {
       if (isOnline) {
         const { sessionId: storeSessionId } = useCampaignSessionStore.getState();
-        const { surveyId: newSurveyId } = await overwriteSurvey({
+        // Spec 70, Fase 4 — el endpoint solo descarta el duplicado. El
+        // reemplazo se inicia igual que cualquier otro instrumento: navegar
+        // a `start` sin id previo, para que `beginSurvey()` cree el borrador
+        // local y el registro real solo exista al haber respuestas. Antes,
+        // el backend creaba de inmediato la fila de reemplazo vacía, que
+        // quedaba huérfana si el encuestador abandonaba tras sobrescribir.
+        await overwriteSurvey({
           surveyId: duplicatePending.remoteSurveyId!,
           sessionId: storeSessionId!,
-          instrumentId: duplicatePending.instrument.instrumentId,
-          stepOrder: duplicatePending.stepOrder,
         });
 
         await getOrDownloadInstrument(duplicatePending.instrument.instrumentId);
         setDuplicatePending(null);
         setScreenState('loading');
-        advanceWithinCampaign(
-          router,
-          id,
-          `/instrument/${duplicatePending.instrument.instrumentId}/start?existingSurveyId=${newSurveyId}`,
-        );
+        advanceWithinCampaign(router, id, `/instrument/${duplicatePending.instrument.instrumentId}/start`);
       } else {
         if (duplicatePending.localSurveyId) {
           await syncQueueStorage.deleteBySurveyId(duplicatePending.localSurveyId);

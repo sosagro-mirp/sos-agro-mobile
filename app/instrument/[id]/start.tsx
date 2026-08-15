@@ -13,7 +13,6 @@ import { useCachedInstrumentsStore } from "../../../src/store/useCachedInstrumen
 import { useInstrumentSurveyStore } from "../../../src/store/useInstrumentSurveyStore";
 import { useCampaignSessionStore } from "../../../src/store/useCampaignSessionStore";
 import { useSyncStatusStore } from "../../../src/store/useSyncStatusStore";
-import { surveyDraftStore } from "../../../src/storage/surveyDraftStore";
 import { beginSurvey } from "../../../src/lib/beginSurvey";
 import { OfflineBanner } from "../../../src/components/network/OfflineBanner";
 import { Fonts } from "../../../src/theme/fonts";
@@ -21,7 +20,10 @@ import { useTheme } from "../../../src/theme/ThemeProvider";
 import type { ThemeColors } from "../../../src/theme/colors";
 
 export default function InstrumentStartScreen() {
-  const { id, existingSurveyId } = useLocalSearchParams<{ id: string; existingSurveyId?: string }>();
+  // `existingSurveyId` se retiró en spec 70, Fase 4: el flujo de
+  // sobrescritura ya no crea la encuesta de reemplazo por adelantado, así
+  // que este screen tiene un único camino de inicio (ver `beginSurvey()`).
+  const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
 
   const instrument = useCachedInstrumentsStore((s) =>
@@ -66,29 +68,17 @@ export default function InstrumentStartScreen() {
     setStarting(true);
 
     try {
-      let surveyId: string;
-
-      if (existingSurveyId) {
-        // Overwrite flow: backend already created the survey via /overwrite.
-        surveyId = existingSurveyId;
-        await surveyDraftStore.createDraft({
-          surveyId,
-          instrumentId: instrument.instrumentId,
-          campaignSessionId: campaignSessionId ?? undefined,
-          farmerId: farmerId ?? undefined,
-        });
-      } else {
-        // Camino único, online y offline: el registro en el backend se
-        // difiere hasta que exista al menos una respuesta (spec 70, Fase 2).
-        // `beginSurvey()` siempre genera un id local y crea el borrador; el
-        // backend recibe la fila real recién al sincronizar.
-        surveyId = await beginSurvey({
-          instrumentId: instrument.instrumentId,
-          campaignSessionId: campaignSessionId ?? undefined,
-          farmerId: farmerId ?? undefined,
-          stepOrder: currentStep?.order,
-        });
-      }
+      // Camino único, online y offline, incluida la sobrescritura de un
+      // duplicado (spec 70, Fases 2 y 4): el registro en el backend se
+      // difiere hasta que exista al menos una respuesta. `beginSurvey()`
+      // siempre genera un id local y crea el borrador; el backend recibe la
+      // fila real recién al sincronizar.
+      const surveyId = await beginSurvey({
+        instrumentId: instrument.instrumentId,
+        campaignSessionId: campaignSessionId ?? undefined,
+        farmerId: farmerId ?? undefined,
+        stepOrder: currentStep?.order,
+      });
 
       initializeSurvey({
         surveyId,
