@@ -46,10 +46,17 @@ jest.mock('../api/campaignSessions', () => ({
   createCampaignSession: jest.fn(),
 }));
 
-jest.mock('../api/farmers', () => ({
-  extractFarmer: jest.fn(),
-  extractCrops: jest.fn(),
-}));
+jest.mock('../api/farmers', () => {
+  // DocumentIdCollisionError se toma de la implementación real (spec 68):
+  // SyncQueueService la usa con `instanceof`, así que un mock plano de la
+  // clase rompería ese chequeo en runtime.
+  const actual = jest.requireActual('../api/farmers');
+  return {
+    extractFarmer: jest.fn(),
+    extractCrops: jest.fn(),
+    DocumentIdCollisionError: actual.DocumentIdCollisionError,
+  };
+});
 
 jest.mock('../storage/sessionCropsStorage', () => ({
   sessionCropsStorage: {
@@ -156,7 +163,7 @@ import { instrumentCacheStorage } from '../storage/instrumentCache';
 import { submitResponsesBatch } from '../api/responses';
 import { markSurveyAsSynced } from '../api/surveys';
 import { markSessionAsSynced, createCampaignSession } from '../api/campaignSessions';
-import { extractFarmer, extractCrops } from '../api/farmers';
+import { extractFarmer, extractCrops, DocumentIdCollisionError } from '../api/farmers';
 import { sessionCropsStorage } from '../storage/sessionCropsStorage';
 import { pendingSessionStorage } from '../storage/pendingSessions';
 import { useSyncStatusStore } from '../store/useSyncStatusStore';
@@ -617,6 +624,86 @@ describe('processEntry — S1 farmer extraction, provisional cache cleanup', () 
         crops: [{ cropId: 'crop-1', name: 'Café' }],
       }),
     );
+  });
+});
+
+// ─── S1 documentId collision discovered only while syncing (spec 68, Fase 5) ──
+// Criterio 12: nunca fusionar en silencio; resolver como "registrar aparte"
+// automáticamente (única opción reversible sin encuestador presente); la
+// entrada de la cola no queda marcada como fallida.
+
+describe('processEntry — S1 documentId collision on sync (spec 68)', () => {
+  it('resolves as separate_person and does not mark the entry as failed', async () => {
+    const entry = makeEntry();
+    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
+    mockLoadDraft.mockResolvedValue(makeDraft('inst-s1'));
+    mockInstrumentCacheGet.mockResolvedValue(makeInstrument({ code: 'S1' }));
+    mockBuildResponsesPayload.mockReturnValue([{ surveyId: 'survey-1', questionId: 'q1', textValue: 'x' }]);
+
+    mockExtractFarmer
+      .mockRejectedValueOnce(
+        new DocumentIdCollisionError({
+          documentId: '9105558899',
+          submittedName: 'Karol Vanessa Quintero Marin',
+          existingFarmer: { farmerId: 'real-farmer-santiago', name: 'Santiago Suarez Cortes' },
+        }),
+      )
+      .mockResolvedValueOnce({
+        farmer: { farmerId: 'real-farmer-karol', name: 'Karol Vanessa Quintero Marin', documentId: '9105558899' },
+        existed: false,
+      });
+
+    await SyncQueueService.processAll();
+
+    expect(mockExtractFarmer).toHaveBeenNthCalledWith(1, 'survey-1');
+    expect(mockExtractFarmer).toHaveBeenNthCalledWith(2, 'survey-1', { resolution: 'separate_person' });
+    expect(mockMarkFailedValidation).not.toHaveBeenCalled();
+    expect(mockMarkSynced).toHaveBeenCalledWith(entry.id);
+    expect(mockMarkSyncedDraft).toHaveBeenCalledWith('survey-1');
+  });
+
+  it('still remaps the provisional farmerCache entry after resolving the collision', async () => {
+    const entry = makeEntry();
+    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
+    mockLoadDraft.mockResolvedValue(makeDraft('inst-s1'));
+    mockInstrumentCacheGet.mockResolvedValue(makeInstrument({ code: 'S1' }));
+    mockBuildResponsesPayload.mockReturnValue([{ surveyId: 'survey-1', questionId: 'q1', textValue: 'x' }]);
+    mockFarmerCacheListRecent.mockResolvedValue([
+      { farmerId: 'local_farmer_karol', name: 'Karol Vanessa Quintero Marin', documentId: '9105558899', cachedAt: new Date() },
+    ]);
+
+    mockExtractFarmer
+      .mockRejectedValueOnce(
+        new DocumentIdCollisionError({
+          documentId: '9105558899',
+          submittedName: 'Karol Vanessa Quintero Marin',
+          existingFarmer: { farmerId: 'real-farmer-santiago', name: 'Santiago Suarez Cortes' },
+        }),
+      )
+      .mockResolvedValueOnce({
+        farmer: { farmerId: 'real-farmer-karol', name: 'Karol Vanessa Quintero Marin', documentId: '9105558899' },
+        existed: false,
+      });
+
+    await SyncQueueService.processAll();
+
+    // El remapeo del spec 51 sigue funcionando: la identidad provisional se
+    // resuelve contra el farmer REAL creado por "separate_person" (Karol),
+    // nunca contra el que ya tenía el documento (Santiago).
+    expect(mockFarmerCacheRemove).toHaveBeenCalledWith('local_farmer_karol');
+  });
+
+  it('propagates any other error from extractFarmer unchanged', async () => {
+    const entry = makeEntry();
+    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
+    mockLoadDraft.mockResolvedValue(makeDraft('inst-s1'));
+    mockInstrumentCacheGet.mockResolvedValue(makeInstrument({ code: 'S1' }));
+    mockBuildResponsesPayload.mockReturnValue([{ surveyId: 'survey-1', questionId: 'q1', textValue: 'x' }]);
+    mockExtractFarmer.mockRejectedValue(new Error('boom'));
+
+    await SyncQueueService.processAll();
+
+    expect(mockMarkFailedValidation).toHaveBeenCalledWith(entry.id, 'boom');
   });
 });
 

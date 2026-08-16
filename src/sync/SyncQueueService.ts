@@ -9,7 +9,7 @@ import { instrumentCacheStorage } from '../storage/instrumentCache';
 import { submitResponsesBatch } from '../api/responses';
 import { createSurvey, markSurveyAsSynced } from '../api/surveys';
 import { markSessionAsSynced, createCampaignSession } from '../api/campaignSessions';
-import { extractFarmer, extractCrops } from '../api/farmers';
+import { extractFarmer, extractCrops, DocumentIdCollisionError } from '../api/farmers';
 import { cacheFarmerIdentity } from '../lib/cacheFarmerIdentity';
 import { buildResponsesPayload } from '../lib/buildResponsesPayload';
 import { flattenSections } from '../lib/flattenSections';
@@ -321,7 +321,27 @@ class SyncQueueServiceClass {
     if (code !== 'S1' && code !== 'S2') return;
 
     if (code === 'S1') {
-      const { farmer } = await extractFarmer(realSurveyId);
+      let farmer: Awaited<ReturnType<typeof extractFarmer>>['farmer'];
+      try {
+        ({ farmer } = await extractFarmer(realSurveyId));
+      } catch (err) {
+        if (!(err instanceof DocumentIdCollisionError)) throw err;
+
+        // Spec 68, Fase 5 — colisión de documentId descubierta solo al
+        // sincronizar: el encuestador ya no está frente al agricultor, no
+        // hay a quién preguntarle (ver § "Resolución diferida" del spec).
+        // El default es siempre "registrar aparte" — nunca fusionar en
+        // silencio — porque es la única opción reversible sin backend: un
+        // administrador puede revisar y corregir después vía
+        // GET /api/farmers/document-collisions. No bloquear ni marcar la
+        // entrada de la cola como fallida por esto.
+        logger.warn(
+          `[Sync] documentId collision for survey ${realSurveyId} (document ${err.documentId}: ` +
+            `submitted "${err.submittedName}" vs existing "${err.existingFarmerName}") — ` +
+            'resolving as separate_person, pending admin review',
+        );
+        ({ farmer } = await extractFarmer(realSurveyId, { resolution: 'separate_person' }));
+      }
 
       // Remap provisional farmerId if one exists in farmerCache.
       const allRecent = await farmerCacheStorage.listRecent(100);
