@@ -17,6 +17,13 @@ interface DocumentCollisionModalProps {
   onCorrectDocument: () => void;
   onSamePerson: () => void;
   onSeparatePerson: () => void;
+  // TC-068-09 (@reviewer, docs/reports/auditorias/24-auditoria-mobile-spec68.md):
+  // sin `onRequestClose`, Android captura el botón "atrás" del sistema sin
+  // hacer nada mientras el modal está visible — pantalla muerta. No hay
+  // botón "Cancelar" (no está en la tabla de acciones del spec), pero el
+  // botón físico de Android sí debe salir; la colisión sigue sin resolver
+  // en el backend y vuelve a aparecer al reingresar (ver Fase 3 del spec).
+  onRequestClose: () => void;
 }
 
 export function DocumentCollisionModal({
@@ -29,12 +36,19 @@ export function DocumentCollisionModal({
   onCorrectDocument,
   onSamePerson,
   onSeparatePerson,
+  onRequestClose,
 }: DocumentCollisionModalProps) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
   return (
-    <Modal visible={visible} transparent animationType="fade" statusBarTranslucent>
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      statusBarTranslucent
+      onRequestClose={onRequestClose}
+    >
       <View style={styles.overlay}>
         <View style={styles.card}>
           <Text style={styles.title}>Documento ya registrado</Text>

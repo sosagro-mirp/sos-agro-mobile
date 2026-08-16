@@ -548,7 +548,12 @@ export default function OrchestratorScreen() {
     try {
       if (documentCollisionPending.offline) {
         const draft = documentCollisionPending.localDraft;
-        if (!draft) return;
+        if (!draft) {
+          // No debería pasar (el offline siempre llena localDraft) — evitar
+          // dejar el spinner del modal encendido para siempre si ocurre.
+          setModalLoading(false);
+          return;
+        }
         await cacheFarmerIdentity({
           farmerId: draft.farmerId,
           name: draft.name,
@@ -560,7 +565,10 @@ export default function OrchestratorScreen() {
         store.completeS1Injection(draft.farmerId, draft.name);
       } else {
         const { s1SurveyId } = useCampaignSessionStore.getState();
-        if (!s1SurveyId) return;
+        if (!s1SurveyId) {
+          setModalLoading(false);
+          return;
+        }
         const { farmer } = await extractFarmer(s1SurveyId, { resolution });
         await cacheFarmerIdentity({
           farmerId: farmer.farmerId,
@@ -594,6 +602,16 @@ export default function OrchestratorScreen() {
     () => resolveDocumentCollision('separate_person'),
     [resolveDocumentCollision],
   );
+
+  // TC-068-09 — el botón físico "atrás" de Android no debe dejar la pantalla
+  // muerta mientras el aviso está visible. Nada se resolvió en el backend
+  // (la colisión sigue pendiente), así que no hace falta limpieza: al salir
+  // y reingresar, `run()` vuelve a llamar a `extractFarmer()`/
+  // `extractFarmerLocally()` y el aviso reaparece igual.
+  const handleDocumentCollisionRequestClose = useCallback(() => {
+    setDocumentCollisionPending(null);
+    router.back();
+  }, [router]);
 
   // ── effects ────────────────────────────────────────────────────────────────
 
@@ -732,6 +750,7 @@ export default function OrchestratorScreen() {
         onCorrectDocument={handleCorrectDocument}
         onSamePerson={handleSamePerson}
         onSeparatePerson={handleSeparatePerson}
+        onRequestClose={handleDocumentCollisionRequestClose}
       />
       <View style={styles.center}>
         <ActivityIndicator size="large" color={colors.brand} />

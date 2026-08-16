@@ -173,6 +173,30 @@ describe('spec68 — regla de comparación de nombres', () => {
     expect(isSameFarmerName('', NOMBRE_DIGITADO)).toBe(false);
     expect(isSameFarmerName(NOMBRE_REGISTRADO, '')).toBe(false);
   });
+
+  // Casos 6, 12, 14 y 15 usan pares de nombres distintos a los de arriba —
+  // no encajan en la tabla parametrizada de `casos`. Hallazgo del @reviewer
+  // (docs/reports/auditorias/24-auditoria-mobile-spec68.md): la batería
+  // completa es la red antidivergencia contra el precedente de
+  // CROP_FIELD_MAP (spec 49, Bug A); faltaban específicamente el caso 12
+  // (única cobertura de la rama de abreviaturas) y el 15 (el que justifica
+  // el umbral 0.93 frente al caso 7).
+
+  it('6. subconjunto en el sentido inverso', () => {
+    expect(isSameFarmerName('Santiago Suarez', NOMBRE_REGISTRADO)).toBe(true);
+  });
+
+  it('12. abreviatura tras normalizar puntuación', () => {
+    expect(isSameFarmerName('Ana Maria Lopez', 'Ana M. Lopez')).toBe(true);
+  });
+
+  it('14. nombres cortos idénticos', () => {
+    expect(isSameFarmerName('Juan Perez', 'Juan Perez')).toBe(true);
+  });
+
+  it('15. "Juan" vs "Juana" — nombres distintos, no una errata (confirmado por el usuario en Fase 0)', () => {
+    expect(isSameFarmerName('Juan Perez', 'Juana Perez')).toBe(false);
+  });
 });
 
 // ─── Criterios 10 y 11: detección offline contra la caché local ──────────────
