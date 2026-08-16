@@ -39,33 +39,19 @@
 import { flattenSections } from '../lib/flattenSections';
 import { isQuestionVisible } from '../lib/isQuestionVisible';
 import { isAnswerComplete } from '../lib/isAnswerComplete';
+// Fase 1 ya creó el módulo — import normal. Hallazgo menor del @reviewer
+// (docs/reports/auditorias/25-auditoria-mobile-spec69.md): el `require`
+// dinámico dentro de un try/catch que este archivo tuvo mientras el módulo
+// no existía enmascaraba errores de importación genuinos detrás de un
+// mensaje de "todavía no existe"; con el archivo ya en el árbol, un import
+// normal es más seguro y typechecked de punta a punta.
+import { resolveResumeIndex } from '../lib/resolveResumeIndex';
 import type {
   FlattenedQuestionItem,
   InstrumentDraftAnswer,
   InstrumentQuestion,
   InstrumentSection,
 } from '../types';
-
-// ─── SUT: pendiente de crear en la Fase 1 del spec 69 ────────────────────────
-
-type ResolveResumeIndex = (
-  visible: FlattenedQuestionItem[],
-  answers: Record<string, InstrumentDraftAnswer>,
-) => number;
-
-const resolveResumeIndex: ResolveResumeIndex = (() => {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    return require('../lib/resolveResumeIndex').resolveResumeIndex as ResolveResumeIndex;
-  } catch {
-    return () => {
-      throw new Error(
-        'src/lib/resolveResumeIndex.ts todavía no existe — spec 69, Fase 1. ' +
-          'Este rojo es esperado hasta que se apruebe e implemente la corrección.',
-      );
-    };
-  }
-})();
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
