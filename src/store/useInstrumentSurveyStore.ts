@@ -3,6 +3,7 @@ import { buildResponsesPayload } from '../lib/buildResponsesPayload';
 import { flattenSections } from '../lib/flattenSections';
 import { isQuestionVisible } from '../lib/isQuestionVisible';
 import { isAnswerComplete } from '../lib/isAnswerComplete';
+import { resolveResumeIndex } from '../lib/resolveResumeIndex';
 import { surveyDraftStore } from '../storage/surveyDraftStore';
 import { syncQueueStorage } from '../storage/syncQueue';
 import { SyncQueueService } from '../sync/SyncQueueService';
@@ -41,6 +42,13 @@ interface InstrumentSurveyState {
   goToIndex: (index: number) => void;
   canAdvance: () => boolean;
   visibleQuestions: () => FlattenedQuestionItem[];
+  // Spec 69 — fuente única del índice de reanudación de un borrador (ver
+  // `resolveResumeIndex.ts`), derivada de `visibleQuestions()` y `answers` ya
+  // presentes en el store tras `initializeSurvey({ restoredAnswers })`.
+  // `drafts/index.tsx` la llama *después* de inicializar, en vez de calcular
+  // su propio índice — así nunca puede divergir del que usa la pantalla de
+  // pregunta (criterio 6 del spec).
+  resumeIndex: () => number;
   enqueueSubmission: () => Promise<SubmitResult>;
   reset: () => void;
 }
@@ -128,6 +136,11 @@ export const useInstrumentSurveyStore = create<InstrumentSurveyState>((set, get)
   visibleQuestions() {
     const { flattenedQuestions, answers } = get();
     return flattenedQuestions.filter(({ question }) => isQuestionVisible(question, answers));
+  },
+
+  resumeIndex() {
+    const { visibleQuestions, answers } = get();
+    return resolveResumeIndex(visibleQuestions(), answers);
   },
 
   async enqueueSubmission(): Promise<SubmitResult> {

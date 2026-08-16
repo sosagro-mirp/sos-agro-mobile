@@ -15,9 +15,6 @@ import { surveyDraftStore, type SurveyDraft } from "../../../src/storage/surveyD
 import { instrumentCacheStorage } from "../../../src/storage/instrumentCache";
 import { farmerCacheStorage } from "../../../src/storage/farmerCache";
 import { useInstrumentSurveyStore } from "../../../src/store/useInstrumentSurveyStore";
-import { flattenSections } from "../../../src/lib/flattenSections";
-import { isQuestionVisible } from "../../../src/lib/isQuestionVisible";
-import { isAnswerComplete } from "../../../src/lib/isAnswerComplete";
 import { Fonts } from "../../../src/theme/fonts";
 import { useTheme } from "../../../src/theme/ThemeProvider";
 import type { ThemeColors } from "../../../src/theme/colors";
@@ -136,15 +133,10 @@ export default function DraftsScreen() {
         return;
       }
 
-      const flattenedQuestions = flattenSections(instrument.sections);
-      const visibleQuestions = flattenedQuestions.filter(({ question }) =>
-        isQuestionVisible(question, draft.answers)
-      );
-      const firstIncomplete = visibleQuestions.findIndex(
-        ({ question }) =>
-          !isAnswerComplete(question, draft.answers[question.questionId])
-      );
-
+      // Spec 69 — el índice de reanudación se lee del store *después* de
+      // inicializarlo, en vez de calcularse acá por su cuenta: es la misma
+      // fuente (`resolveResumeIndex` sobre `visibleQuestions()` + `answers`)
+      // que usa la pantalla de pregunta, así que no puede divergir.
       useInstrumentSurveyStore.getState().initializeSurvey({
         surveyId: draft.surveyId,
         instrumentId: instrument.instrumentId,
@@ -154,10 +146,12 @@ export default function DraftsScreen() {
         restoredAnswers: draft.answers,
       });
 
-      if (firstIncomplete === -1) {
+      const resumeIndex = useInstrumentSurveyStore.getState().resumeIndex();
+
+      if (resumeIndex === -1) {
         router.push(`/instrument/${instrument.instrumentId}/review`);
       } else {
-        router.push(`/instrument/${instrument.instrumentId}/question/${firstIncomplete}`);
+        router.push(`/instrument/${instrument.instrumentId}/question/${resumeIndex}`);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al reanudar borrador");
