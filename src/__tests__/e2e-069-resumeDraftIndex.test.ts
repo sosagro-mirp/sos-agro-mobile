@@ -4,12 +4,15 @@
  * Cubre los criterios de aceptación 1, 2, 3, 4, 5, 7 y 9 de
  * `spec/69_reanudacion_borradores_pregunta_correcta.md`.
  *
- * ─── Por qué arranca EN ROJO ─────────────────────────────────────────────────
+ * ─── Por qué arrancó EN ROJO (histórico) ─────────────────────────────────────
  *
  * El sujeto bajo prueba es `src/lib/resolveResumeIndex.ts`, la fuente única del
- * índice de reanudación que propone la Fase 1 del spec. **Ese archivo todavía
- * no existe**, así que cada caso que lo ejercita falla con un mensaje explícito
- * en vez de romper la importación de toda la suite.
+ * índice de reanudación que propuso la Fase 1 del spec. Al escribir esta suite
+ * (test-first) ese archivo todavía no existía, así que el import se resolvía
+ * con un `require()` dinámico en try/catch para que cada caso fallara con un
+ * mensaje explícito en vez de romper la importación de toda la suite. Ya está
+ * implementado — el import de más abajo es estático y normal (ver el
+ * comentario junto a él, hallazgo #1 de `docs/reports/auditorias/25-auditoria-mobile-spec69.md`).
  *
  * Hoy el cálculo vive duplicado y con la semántica equivocada en
  * `app/(tabs)/drafts/index.tsx:143-146`:
