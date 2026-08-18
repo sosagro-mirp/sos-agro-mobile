@@ -307,6 +307,33 @@ describe('spec-070 — beginSurvey: el registro no se crea antes de la primera r
     );
   });
 
+  it('TC-070-V · el borrador guarda el stepOrder, para que sobreviva a la creación diferida', async () => {
+    // Regresión hallada en la ronda de campo del 2026-08-18: el borrador no
+    // persistía `stepOrder`, así que al retomarlo desde la pestaña Borradores
+    // la encuesta se materializaba con `stepOrder: null`. `getNextStep()` arma
+    // `completedOrders` solo a partir de `stepOrder`, de modo que la campaña
+    // volvía a ofrecer un paso ya respondido → modal de duplicado → marcador
+    // de paso saltado vacío. Rompía el criterio de aceptación 3.
+    await beginSurvey({
+      instrumentId: 'inst-070',
+      campaignSessionId: 'session-070',
+      stepOrder: 1,
+    });
+
+    expect(mockCreateDraft).toHaveBeenCalledWith(
+      expect.objectContaining({ stepOrder: 1 }),
+    );
+  });
+
+  it('TC-070-W · fuera de una campaña, el borrador se crea sin stepOrder', async () => {
+    // Un instrumento suelto no tiene paso: la clave debe omitirse, no viajar
+    // como `undefined` explícito.
+    await beginSurvey({ instrumentId: 'inst-070' });
+
+    expect(mockCreateDraft).toHaveBeenCalledTimes(1);
+    expect(mockCreateDraft.mock.calls[0][0].stepOrder).toBeUndefined();
+  });
+
   it('TC-070-C · dos disparos concurrentes (doble toque en «Comenzar») producen un solo borrador', async () => {
     // Reproduce el patrón observado en producción: dos registros con `createdAt`
     // a 5 ms y 81 ms de distancia, imposible para un reingreso humano.

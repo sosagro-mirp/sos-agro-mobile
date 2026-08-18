@@ -8,6 +8,7 @@ export interface SurveyDraft {
   instrumentId: string;
   campaignSessionId?: string;
   farmerId?: string;
+  stepOrder?: number;
   answers: Record<string, InstrumentDraftAnswer>;
   updatedAt: Date;
 }
@@ -18,6 +19,7 @@ export const surveyDraftStore = {
     instrumentId: string;
     campaignSessionId?: string;
     farmerId?: string;
+    stepOrder?: number;
   }): Promise<void> {
     const now = new Date();
     await db.insert(surveys).values({
@@ -27,6 +29,13 @@ export const surveyDraftStore = {
       // Only include farmerId when present — omitting it entirely avoids
       // referencing the column on devices where m0001 hasn't applied yet.
       ...(params.farmerId != null ? { farmerId: params.farmerId } : {}),
+      // `stepOrder` has to survive in the draft until sync: with creation
+      // deferred (phase 2), a draft resumed from the Drafts tab has no
+      // campaign context left in memory, and materializeSurvey() would create
+      // the survey with stepOrder = null. getNextStep() builds completedOrders
+      // from stepOrder alone, so the campaign would re-offer an already
+      // answered step. Found in the field round of 2026-08-18.
+      ...(params.stepOrder != null ? { stepOrder: params.stepOrder } : {}),
       status: 'draft',
       createdAt: now,
       updatedAt: now,
@@ -153,6 +162,7 @@ export const surveyDraftStore = {
       instrumentId: survey.instrumentId,
       campaignSessionId: survey.campaignSessionId ?? undefined,
       farmerId: survey.farmerId ?? undefined,
+      stepOrder: survey.stepOrder ?? undefined,
       answers,
       updatedAt: survey.updatedAt,
     };

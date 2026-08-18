@@ -143,6 +143,11 @@ export default function DraftsScreen() {
         instrumentName: instrument.name,
         sections: instrument.sections,
         campaignSessionId: draft.campaignSessionId,
+        // Sin esto la encuesta se materializa con `stepOrder: null` y
+        // `getNextStep()` no cuenta el paso como completado, así que la
+        // campaña vuelve a ofrecer un instrumento ya respondido (hallazgo de
+        // la ronda de campo del 2026-08-18).
+        stepOrder: draft.stepOrder,
         restoredAnswers: draft.answers,
       });
 

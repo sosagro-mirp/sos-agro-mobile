@@ -44,6 +44,7 @@ export function beginSurvey(params: BeginSurveyParams): Promise<string> {
       instrumentId: params.instrumentId,
       campaignSessionId: params.campaignSessionId,
       farmerId: params.farmerId,
+      stepOrder: params.stepOrder,
     });
     return surveyId;
   })();

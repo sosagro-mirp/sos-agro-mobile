@@ -5,6 +5,14 @@ export const surveys = sqliteTable('surveys', {
   campaignSessionId: text('campaign_session_id'),
   instrumentId: text('instrument_id').notNull(),
   farmerId: text('farmer_id'),
+  // El paso de la campaña al que pertenece la encuesta. Tiene que vivir en el
+  // borrador, no solo en la cola de sincronización: con la creación diferida
+  // (spec 70, fase 2) un borrador retomado desde la pestaña Borradores ya no
+  // conserva el contexto de campaña en memoria, y la encuesta se materializaba
+  // con `stepOrder: null`. `getNextStep()` arma los pasos completados solo a
+  // partir de `stepOrder`, así que la campaña volvía a ofrecer un paso ya
+  // respondido. Hallado en la ronda de campo del 2026-08-18.
+  stepOrder: integer('step_order'),
   status: text('status', { enum: ['draft', 'completed', 'synced'] })
     .notNull()
     .default('draft'),
