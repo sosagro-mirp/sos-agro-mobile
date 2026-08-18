@@ -395,6 +395,49 @@ describe('spec-070 — SyncQueueService: una encuesta sin respuestas no llega al
     );
   });
 
+  it('TC-070-T · materializar propaga el farmerId del borrador (regresión de la Fase 2)', async () => {
+    // Al unificar la creación en `materializeSurvey()` se dejó de enviar el
+    // `farmerId` que el camino online de `start.tsx` sí mandaba, y toda
+    // encuesta nueva quedaba con `survey.farmer = NULL` en el backend.
+    // Hallado por @reviewer el 2026-08-18.
+    mockDequeueNextPending.mockResolvedValueOnce(makeEntry()).mockResolvedValue(null);
+    mockLoadDraft.mockResolvedValue(
+      makeDraft({
+        farmerId: 'farmer-070',
+        answers: { q1: { questionId: 'q1', textValue: 'sí' } },
+      }),
+    );
+    mockFlattenSections.mockReturnValue([{ question: { questionId: 'q1' } }]);
+    mockBuildResponsesPayload.mockReturnValue([
+      { surveyId: 'real-survey-070', questionId: 'q1', textValue: 'sí' },
+    ]);
+
+    await SyncQueueService.processAll();
+
+    expect(mockCreateSurvey).toHaveBeenCalledTimes(1);
+    expect(mockCreateSurvey).toHaveBeenCalledWith(
+      expect.objectContaining({ farmerId: 'farmer-070' }),
+    );
+  });
+
+  it('TC-070-U · sin farmerId en el borrador, la clave se omite del payload', async () => {
+    // El backend distingue "sin agricultor" de `farmerId: undefined`; omitir
+    // la clave es lo que hacía el camino original.
+    mockDequeueNextPending.mockResolvedValueOnce(makeEntry()).mockResolvedValue(null);
+    mockLoadDraft.mockResolvedValue(
+      makeDraft({ answers: { q1: { questionId: 'q1', textValue: 'sí' } } }),
+    );
+    mockFlattenSections.mockReturnValue([{ question: { questionId: 'q1' } }]);
+    mockBuildResponsesPayload.mockReturnValue([
+      { surveyId: 'real-survey-070', questionId: 'q1', textValue: 'sí' },
+    ]);
+
+    await SyncQueueService.processAll();
+
+    expect(mockCreateSurvey).toHaveBeenCalledTimes(1);
+    expect(mockCreateSurvey.mock.calls[0][0]).not.toHaveProperty('farmerId');
+  });
+
   it('TC-070-H · una encuesta ya materializada en un intento previo no se materializa dos veces', async () => {
     mockDequeueNextPending.mockResolvedValueOnce(makeEntry({ attempts: 1 })).mockResolvedValue(null);
     mockLoadDraft.mockResolvedValue(
