@@ -21,7 +21,7 @@ import { BackgroundSync } from "../src/sync/BackgroundSync";
 import { initSentry, captureError } from "../src/lib/sentry";
 import { logger } from "../src/lib/logger";
 import { ChangeRequestBanner } from "../src/components/requests/ChangeRequestBanner";
-import { ThemeProvider } from "../src/theme/ThemeProvider";
+import { ThemeProvider, useTheme } from "../src/theme/ThemeProvider";
 
 initSentry();
 
@@ -55,6 +55,24 @@ function AuthGuard() {
       router.replace("/campaign");
     }
   }, [user, isRestoring]);
+
+  return null;
+}
+
+// Oculta el splash solo cuando fuentes, DB, sesión Y tema están listos. Vive
+// dentro de <ThemeProvider> para poder leer `restored`: mantener el splash
+// hasta restaurar el tema es lo que evita el flash claro→oscuro, en lugar del
+// antiguo `return null` del propio ThemeProvider (ver el comentario en
+// src/theme/ThemeProvider.tsx: ese null causaba un bucle infinito de
+// remontaje en Samsung One UI 7 / Android 15).
+function SplashGate({ ready }: { ready: boolean }) {
+  const { restored } = useTheme();
+
+  useEffect(() => {
+    if (ready && restored) {
+      SplashScreen.hideAsync();
+    }
+  }, [ready, restored]);
 
   return null;
 }
@@ -120,15 +138,10 @@ export default function RootLayout() {
     return () => NetworkMonitor.stop();
   }, [dbReady]);
 
-  useEffect(() => {
-    if (fontsLoaded && !isRestoring && dbReady) {
-      SplashScreen.hideAsync();
-    }
-  }, [fontsLoaded, isRestoring, dbReady]);
-
   return (
     <ThemeProvider>
       <QueryClientProvider client={queryClient}>
+        <SplashGate ready={fontsLoaded && !isRestoring && dbReady} />
         <AuthGuard />
         <ChangeRequestBanner />
         <Stack screenOptions={{ headerShown: false }}>
