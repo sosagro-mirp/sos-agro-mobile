@@ -161,7 +161,7 @@ export default function DraftsScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.root} edges={["bottom"]}>
+    <SafeAreaView style={styles.root} edges={[]}>
       <View style={styles.header}>
         <Text style={styles.title}>Borradores</Text>
         {drafts.length > 0 && !isLoading ? (
