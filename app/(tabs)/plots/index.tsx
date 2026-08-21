@@ -1,25 +1,27 @@
-import React, { useRef, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
   Pressable,
-  SafeAreaView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { searchFarmers } from "../../../src/api/farmers";
 import { useSyncStatusStore } from "../../../src/store/useSyncStatusStore";
 import type { FarmerSearchResult } from "../../../src/types";
 import { Fonts } from "../../../src/theme/fonts";
-
-const GREEN = "#1B6B3A";
+import { useTheme } from "../../../src/theme/ThemeProvider";
+import type { ThemeColors } from "../../../src/theme/colors";
 
 export default function PlotsIndexScreen() {
   const router = useRouter();
   const { isOnline } = useSyncStatusStore();
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
 
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<FarmerSearchResult[]>([]);
@@ -58,7 +60,7 @@ export default function PlotsIndexScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.root}>
+    <SafeAreaView style={styles.root} edges={[]}>
       <View style={styles.header}>
         <Text style={styles.title}>Lotes</Text>
       </View>
@@ -77,7 +79,7 @@ export default function PlotsIndexScreen() {
         <TextInput
           style={[styles.searchInput, !isOnline && styles.searchInputDisabled]}
           placeholder="Nombre o número de documento"
-          placeholderTextColor="#9CA3AF"
+          placeholderTextColor={colors.textMuted}
           value={query}
           onChangeText={handleQueryChange}
           editable={isOnline}
@@ -85,7 +87,7 @@ export default function PlotsIndexScreen() {
         />
 
         {isSearching ? (
-          <ActivityIndicator size="small" color={GREEN} style={styles.spinner} />
+          <ActivityIndicator size="small" color={colors.brand} style={styles.spinner} />
         ) : null}
 
         {searchError ? (
@@ -115,6 +117,8 @@ function FarmerRow({
   farmer: FarmerSearchResult;
   onPress: (farmer: FarmerSearchResult) => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const hasFarm = !!farmer.farm?.farmId;
 
   return (
@@ -136,80 +140,82 @@ function FarmerRow({
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#F9FAFB" },
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    root: { flex: 1, backgroundColor: colors.surfaceMuted },
 
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    backgroundColor: "#fff",
-    borderBottomWidth: 1,
-    borderBottomColor: "#E5E7EB",
-  },
-  title: { fontSize: 17, fontFamily: Fonts.bold, color: "#111827" },
+    header: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingHorizontal: 20,
+      paddingVertical: 14,
+      backgroundColor: colors.surface,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    title: { fontSize: 17, fontFamily: Fonts.bold, color: colors.textPrimary },
 
-  offlineBanner: {
-    backgroundColor: "#FEF3C7",
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: "#FDE68A",
-  },
-  offlineText: { fontSize: 13, fontFamily: Fonts.regular, color: "#92400E" },
+    offlineBanner: {
+      backgroundColor: colors.warningBg,
+      paddingHorizontal: 20,
+      paddingVertical: 10,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.warningFg,
+    },
+    offlineText: { fontSize: 13, fontFamily: Fonts.regular, color: colors.warningFg },
 
-  body: {
-    padding: 20,
-    gap: 12,
-  },
-  label: {
-    fontSize: 14,
-    fontFamily: Fonts.regular,
-    color: "#6B7280",
-  },
-  searchInput: {
-    height: 48,
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#D1D5DB",
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    fontFamily: Fonts.regular,
-    fontSize: 15,
-    color: "#111827",
-  },
-  searchInputDisabled: {
-    backgroundColor: "#F3F4F6",
-    color: "#9CA3AF",
-  },
-  spinner: { alignSelf: "center" },
-  errorText: { fontSize: 13, fontFamily: Fonts.regular, color: "#DC2626" },
-  noResults: {
-    fontSize: 13,
-    fontFamily: Fonts.regular,
-    color: "#6B7280",
-    textAlign: "center",
-    paddingVertical: 8,
-  },
-  resultsList: {
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    borderRadius: 8,
-    backgroundColor: "#fff",
-    maxHeight: 320,
-  },
-  resultItem: {
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: "#F3F4F6",
-    gap: 2,
-  },
-  resultItemDisabled: { opacity: 0.5 },
-  resultName: { fontFamily: Fonts.semiBold, fontSize: 14, color: "#111827" },
-  resultDetail: { fontFamily: Fonts.regular, fontSize: 12, color: "#6B7280" },
-  resultFarm: { fontFamily: Fonts.regular, fontSize: 12, color: GREEN },
-  resultNoFarm: { fontFamily: Fonts.regular, fontSize: 12, color: "#EF4444" },
-});
+    body: {
+      padding: 20,
+      gap: 12,
+    },
+    label: {
+      fontSize: 14,
+      fontFamily: Fonts.regular,
+      color: colors.textMuted,
+    },
+    searchInput: {
+      height: 48,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.borderStrong,
+      borderRadius: 8,
+      paddingHorizontal: 12,
+      fontFamily: Fonts.regular,
+      fontSize: 15,
+      color: colors.textPrimary,
+    },
+    searchInputDisabled: {
+      backgroundColor: colors.surfaceMuted,
+      color: colors.textMuted,
+    },
+    spinner: { alignSelf: "center" },
+    errorText: { fontSize: 13, fontFamily: Fonts.regular, color: colors.dangerFg },
+    noResults: {
+      fontSize: 13,
+      fontFamily: Fonts.regular,
+      color: colors.textMuted,
+      textAlign: "center",
+      paddingVertical: 8,
+    },
+    resultsList: {
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 8,
+      backgroundColor: colors.surface,
+      maxHeight: 320,
+    },
+    resultItem: {
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+      gap: 2,
+    },
+    resultItemDisabled: { opacity: 0.5 },
+    resultName: { fontFamily: Fonts.semiBold, fontSize: 14, color: colors.textPrimary },
+    resultDetail: { fontFamily: Fonts.regular, fontSize: 12, color: colors.textMuted },
+    resultFarm: { fontFamily: Fonts.regular, fontSize: 12, color: colors.brand },
+    resultNoFarm: { fontFamily: Fonts.regular, fontSize: 12, color: colors.dangerFg },
+  });
+}

@@ -1,5 +1,5 @@
 import { Tabs } from "expo-router";
-import { Map, FileText, RefreshCw, MessageSquare } from "lucide-react-native";
+import { Map, FileText, RefreshCw, MessageSquare, LandPlot } from "lucide-react-native";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuthStore } from "../../src/store/useAuthStore";
@@ -129,8 +129,8 @@ export default function TabsLayout() {
           name="plots"
           options={{
             title: "Lotes",
-            tabBarIcon: ({ color }) => (
-              <Text style={{ fontSize: 20, color }}>🗺️</Text>
+            tabBarIcon: ({ color, size }) => (
+              <LandPlot size={size} color={color} />
             ),
           }}
         />
