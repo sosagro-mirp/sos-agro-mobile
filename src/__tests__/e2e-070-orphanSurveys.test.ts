@@ -307,6 +307,33 @@ describe('spec-070 — beginSurvey: el registro no se crea antes de la primera r
     );
   });
 
+  it('TC-070-V · el borrador guarda el stepOrder, para que sobreviva a la creación diferida', async () => {
+    // Regresión hallada en la ronda de campo del 2026-08-18: el borrador no
+    // persistía `stepOrder`, así que al retomarlo desde la pestaña Borradores
+    // la encuesta se materializaba con `stepOrder: null`. `getNextStep()` arma
+    // `completedOrders` solo a partir de `stepOrder`, de modo que la campaña
+    // volvía a ofrecer un paso ya respondido → modal de duplicado → marcador
+    // de paso saltado vacío. Rompía el criterio de aceptación 3.
+    await beginSurvey({
+      instrumentId: 'inst-070',
+      campaignSessionId: 'session-070',
+      stepOrder: 1,
+    });
+
+    expect(mockCreateDraft).toHaveBeenCalledWith(
+      expect.objectContaining({ stepOrder: 1 }),
+    );
+  });
+
+  it('TC-070-W · fuera de una campaña, el borrador se crea sin stepOrder', async () => {
+    // Un instrumento suelto no tiene paso: la clave debe omitirse, no viajar
+    // como `undefined` explícito.
+    await beginSurvey({ instrumentId: 'inst-070' });
+
+    expect(mockCreateDraft).toHaveBeenCalledTimes(1);
+    expect(mockCreateDraft.mock.calls[0][0].stepOrder).toBeUndefined();
+  });
+
   it('TC-070-C · dos disparos concurrentes (doble toque en «Comenzar») producen un solo borrador', async () => {
     // Reproduce el patrón observado en producción: dos registros con `createdAt`
     // a 5 ms y 81 ms de distancia, imposible para un reingreso humano.
@@ -393,6 +420,49 @@ describe('spec-070 — SyncQueueService: una encuesta sin respuestas no llega al
       'local_survey_11111111-1111-4111-8111-111111111111',
       'real-survey-070',
     );
+  });
+
+  it('TC-070-T · materializar propaga el farmerId del borrador (regresión de la Fase 2)', async () => {
+    // Al unificar la creación en `materializeSurvey()` se dejó de enviar el
+    // `farmerId` que el camino online de `start.tsx` sí mandaba, y toda
+    // encuesta nueva quedaba con `survey.farmer = NULL` en el backend.
+    // Hallado por @reviewer el 2026-08-18.
+    mockDequeueNextPending.mockResolvedValueOnce(makeEntry()).mockResolvedValue(null);
+    mockLoadDraft.mockResolvedValue(
+      makeDraft({
+        farmerId: 'farmer-070',
+        answers: { q1: { questionId: 'q1', textValue: 'sí' } },
+      }),
+    );
+    mockFlattenSections.mockReturnValue([{ question: { questionId: 'q1' } }]);
+    mockBuildResponsesPayload.mockReturnValue([
+      { surveyId: 'real-survey-070', questionId: 'q1', textValue: 'sí' },
+    ]);
+
+    await SyncQueueService.processAll();
+
+    expect(mockCreateSurvey).toHaveBeenCalledTimes(1);
+    expect(mockCreateSurvey).toHaveBeenCalledWith(
+      expect.objectContaining({ farmerId: 'farmer-070' }),
+    );
+  });
+
+  it('TC-070-U · sin farmerId en el borrador, la clave se omite del payload', async () => {
+    // El backend distingue "sin agricultor" de `farmerId: undefined`; omitir
+    // la clave es lo que hacía el camino original.
+    mockDequeueNextPending.mockResolvedValueOnce(makeEntry()).mockResolvedValue(null);
+    mockLoadDraft.mockResolvedValue(
+      makeDraft({ answers: { q1: { questionId: 'q1', textValue: 'sí' } } }),
+    );
+    mockFlattenSections.mockReturnValue([{ question: { questionId: 'q1' } }]);
+    mockBuildResponsesPayload.mockReturnValue([
+      { surveyId: 'real-survey-070', questionId: 'q1', textValue: 'sí' },
+    ]);
+
+    await SyncQueueService.processAll();
+
+    expect(mockCreateSurvey).toHaveBeenCalledTimes(1);
+    expect(mockCreateSurvey.mock.calls[0][0]).not.toHaveProperty('farmerId');
   });
 
   it('TC-070-H · una encuesta ya materializada en un intento previo no se materializa dos veces', async () => {

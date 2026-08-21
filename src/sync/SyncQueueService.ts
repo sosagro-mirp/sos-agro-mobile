@@ -385,9 +385,15 @@ class SyncQueueServiceClass {
     const draft = await surveyDraftStore.loadDraft(entry.surveyId);
     if (!draft) throw new Error(`Draft not found for local survey ${entry.surveyId}`);
 
+    // `farmerId` viaja desde el borrador: al unificar la creación en este
+    // único camino (Fase 2) se perdió el vínculo que el camino online de
+    // `start.tsx` sí enviaba, y toda encuesta nueva quedaba con
+    // `survey.farmer = NULL`. Las consultas caían a `campaignSession.farmer`,
+    // así que no se notaba, pero el dato se perdía igual.
     const { surveyId: realSurveyId } = await createSurvey({
       instrumentIds: [draft.instrumentId],
       campaignSessionId: entry.campaignSessionId,
+      ...(draft.farmerId != null ? { farmerId: draft.farmerId } : {}),
       ...(entry.stepOrder != null ? { stepOrder: entry.stepOrder } : {}),
     });
 

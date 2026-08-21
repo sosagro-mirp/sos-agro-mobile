@@ -13,9 +13,14 @@ const migrations = {
       { idx: 7, when: 7, tag: 'm0007', breakpoints: true },
       { idx: 8, when: 8, tag: 'm0008', breakpoints: true },
       { idx: 9, when: 9, tag: 'm0009', breakpoints: true },
+      { idx: 10, when: 10, tag: 'm0010', breakpoints: true },
     ],
   },
   migrations: {
+    m0010: [
+      'ALTER TABLE `surveys` ADD COLUMN `step_order` integer',
+    ].join('\n'),
+
     m0009: [
       "ALTER TABLE `sync_queue` ADD COLUMN `item_type` text NOT NULL DEFAULT 'survey'",
       '--> statement-breakpoint',
