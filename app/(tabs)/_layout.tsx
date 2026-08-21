@@ -1,7 +1,7 @@
 import { Tabs } from "expo-router";
 import { Map, FileText, RefreshCw, MessageSquare } from "lucide-react-native";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuthStore } from "../../src/store/useAuthStore";
 import { useSyncStatusStore } from "../../src/store/useSyncStatusStore";
 import { Fonts } from "../../src/theme/fonts";
@@ -10,6 +10,7 @@ import type { ThemeColors } from "../../src/theme/colors";
 import type { EffectiveTheme } from "../../src/theme/resolveTheme";
 import { AppText } from "../../src/components/common/AppText";
 import { ThemeToggle } from "../../src/components/common/ThemeToggle";
+import { resolveTabBarStyle } from "../../src/lib/resolveTabBarStyle";
 import { useMemo, useRef } from "react";
 import { useRouter } from "expo-router";
 
@@ -46,13 +47,13 @@ function TabsHeader() {
         <View style={styles.headerRight}>
           <View style={styles.statusPill}>
             <View style={[styles.dot, isOnline ? styles.dotOnline : styles.dotOffline]} />
-            <AppText style={styles.statusText} numberOfLines={1}>
+            <AppText style={styles.statusText}>
               {isOnline ? "En línea" : "Sin conexión"}
             </AppText>
           </View>
           <ThemeToggle color={colors.brandForeground} />
           <Pressable onPress={logout} style={styles.logoutBtn} accessibilityRole="button">
-            <AppText style={styles.logoutText} numberOfLines={1}>Salir</AppText>
+            <AppText style={styles.logoutText}>Salir</AppText>
           </Pressable>
         </View>
       </View>
@@ -70,6 +71,11 @@ function TabsHeader() {
 export default function TabsLayout() {
   const { colors, effectiveTheme } = useTheme();
   const styles = useMemo(() => createStyles(colors, effectiveTheme), [colors, effectiveTheme]);
+  const insets = useSafeAreaInsets();
+  const tabBarStyle = useMemo(
+    () => resolveTabBarStyle({ bottomInset: insets.bottom, colors }),
+    [insets.bottom, colors],
+  );
 
   return (
     <View style={{ flex: 1 }}>
@@ -79,7 +85,7 @@ export default function TabsLayout() {
           headerShown: false,
           tabBarActiveTintColor: colors.brand,
           tabBarInactiveTintColor: colors.textMuted,
-          tabBarStyle: styles.tabBar,
+          tabBarStyle,
           tabBarLabelStyle: styles.tabLabel,
         }}
       >
@@ -223,14 +229,6 @@ function createStyles(colors: ThemeColors, effectiveTheme: EffectiveTheme) {
       fontSize: 12,
       fontFamily: Fonts.regular,
       color: "#FEF3C7",
-    },
-    tabBar: {
-      backgroundColor: colors.surface,
-      borderTopColor: colors.border,
-      borderTopWidth: 1,
-      height: 62,
-      paddingBottom: 8,
-      paddingTop: 6,
     },
     tabLabel: {
       fontFamily: Fonts.semiBold,

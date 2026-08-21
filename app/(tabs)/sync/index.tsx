@@ -139,7 +139,7 @@ export default function SyncScreen() {
   const statusLabel = isOnline ? "En línea" : "Sin conexión";
 
   return (
-    <SafeAreaView style={styles.root} edges={["bottom"]}>
+    <SafeAreaView style={styles.root} edges={[]}>
       <View style={styles.header}>
         <Text style={styles.title}>Sincronización</Text>
       </View>
