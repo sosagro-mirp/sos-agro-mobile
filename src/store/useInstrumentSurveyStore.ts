@@ -144,7 +144,7 @@ export const useInstrumentSurveyStore = create<InstrumentSurveyState>((set, get)
   },
 
   async enqueueSubmission(): Promise<SubmitResult> {
-    const { surveyId, flattenedQuestions, answers, campaignSessionId, stepOrder } = get();
+    const { surveyId, flattenedQuestions, answers } = get();
 
     if (!surveyId) {
       return { outcome: 'error', message: 'No hay encuesta activa' };
@@ -162,11 +162,20 @@ export const useInstrumentSurveyStore = create<InstrumentSurveyState>((set, get)
       await surveyDraftStore.saveMultipleAnswers(surveyId, answers);
       await surveyDraftStore.markCompleted(surveyId);
 
+      // Spec 71 — leer campaignSessionId/stepOrder del borrador persistido,
+      // no del estado en memoria de este store. Si la sesión de campaña se
+      // resolvió (offline → online) mientras el usuario llenaba la encuesta,
+      // el remapeo de SyncQueueService.resolveLocalSessions() actualiza la
+      // fila de `surveys` pero no esta copia en memoria — encolar con el id
+      // en memoria produce una entrada con un `campaignSessionId` local que
+      // ya no tiene resolución posible y queda congelada para siempre.
+      const draft = await surveyDraftStore.loadDraft(surveyId);
+
       await syncQueueStorage.enqueue({
         id: generateId(),
         surveyId,
-        campaignSessionId: campaignSessionId ?? undefined,
-        stepOrder: stepOrder ?? undefined,
+        campaignSessionId: draft?.campaignSessionId,
+        stepOrder: draft?.stepOrder,
       });
 
       const { isOnline } = useSyncStatusStore.getState();

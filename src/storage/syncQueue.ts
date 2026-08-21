@@ -157,6 +157,18 @@ export const syncQueueStorage = {
     return row ? mapRow(row) : null;
   },
 
+  // Spec 71 — repara una entrada cuyo `campaignSessionId` quedó apuntando a
+  // un id local (`local_*`) cuya sesión ya se resolvió en el backend. Se usa
+  // cuando `resolveLocalSessions()` no vuelve a ofrecer esa sesión (porque su
+  // fila en `pendingSessions` ya no está `pending`) pero otra fuente local
+  // (el borrador, o la propia `pendingSessions`) sí conserva el id real.
+  async updateCampaignSessionId(id: string, realSessionId: string): Promise<void> {
+    await db
+      .update(syncQueue)
+      .set({ campaignSessionId: realSessionId })
+      .where(eq(syncQueue.id, id));
+  },
+
   async getActiveBySurveyId(surveyId: string): Promise<SyncQueueEntry | null> {
     const rows = await db
       .select()
