@@ -26,6 +26,17 @@ jest.mock('../storage/surveyDraftStore', () => ({
   },
 }));
 
+jest.mock('../storage/farmPlotStore', () => ({
+  farmPlotStore: {
+    loadDraft: jest.fn(),
+    markSynced: jest.fn(),
+  },
+}));
+
+jest.mock('../api/farmPlots', () => ({
+  createFarmPlot: jest.fn(),
+}));
+
 jest.mock('../storage/instrumentCache', () => ({
   instrumentCacheStorage: {
     get: jest.fn(),
@@ -165,6 +176,8 @@ import { flattenSections } from '../lib/flattenSections';
 import { buildResponsesPayload } from '../lib/buildResponsesPayload';
 import { farmerCacheStorage } from '../storage/farmerCache';
 import { cacheFarmerIdentity } from '../lib/cacheFarmerIdentity';
+import { farmPlotStore } from '../storage/farmPlotStore';
+import { createFarmPlot } from '../api/farmPlots';
 
 // ─── Typed mock aliases ───────────────────────────────────────────────────────
 
@@ -196,6 +209,10 @@ const mockResolveSession = pendingSessionStorage.resolve as jest.Mock;
 const mockFlattenSections = flattenSections as jest.Mock;
 const mockBuildResponsesPayload = buildResponsesPayload as jest.Mock;
 
+const mockFarmPlotLoadDraft = farmPlotStore.loadDraft as jest.Mock;
+const mockFarmPlotMarkSynced = farmPlotStore.markSynced as jest.Mock;
+const mockCreateFarmPlot = createFarmPlot as jest.Mock;
+
 let mockSetSyncingId: jest.Mock;
 let mockMarkSyncCompleted: jest.Mock;
 let mockRefreshPendingCount: jest.Mock;
@@ -220,6 +237,22 @@ function makeDraft(instrumentId = 'inst-1') {
     instrumentId,
     answers: { q1: { questionId: 'q1', textValue: 'answer' } },
     updatedAt: new Date(),
+  };
+}
+
+function makeFarmPlotDraft(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'plot-1',
+    farmId: 'farm-1',
+    name: 'Lote norte',
+    description: undefined,
+    area: undefined,
+    polygon: { points: [{ lat: 1, lng: 1 }, { lat: 2, lng: 2 }, { lat: 3, lng: 3 }] },
+    status: 'draft' as const,
+    capturedOffline: true,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    ...overrides,
   };
 }
 
@@ -275,6 +308,9 @@ beforeEach(() => {
   mockFarmerCacheListRecent.mockResolvedValue([]);
   mockFarmerCacheRemove.mockResolvedValue(undefined);
   mockCacheFarmerIdentity.mockResolvedValue(undefined);
+  mockFarmPlotLoadDraft.mockResolvedValue(null);
+  mockFarmPlotMarkSynced.mockResolvedValue(undefined);
+  mockCreateFarmPlot.mockResolvedValue({ farmPlotId: 'backend-plot-1' });
   (useCampaignSessionStore.getState as jest.Mock).mockReturnValue({
     localSessionId: null,
     localFarmerId: null,
@@ -677,5 +713,85 @@ describe('resetNetworkFailures', () => {
 
     await SyncQueueService.processAll();
     expect(mockMarkSynced).toHaveBeenCalledWith('after-reset');
+  });
+});
+
+// ─── processEntry — farm-plot (spec 29) ──────────────────────────────────────
+//
+// Escrito retroactivamente (2026-08-21): processFarmPlotEntry() no tenía
+// ninguna prueba, hallazgo M-2 de `@reviewer`
+// (docs/reports/auditorias/29-auditoria-mobile-development-lote-merges.md).
+// Cubre también la guarda de idempotencia agregada el mismo día (evita
+// duplicar el lote en el backend si la entrada se reprocesa).
+
+describe('processEntry — farm-plot', () => {
+  it('crea el lote en el backend y marca todo synced cuando el borrador está en draft', async () => {
+    const entry = makeEntry({ id: 'plot-entry-1', surveyId: 'plot-1', itemType: 'farm-plot' });
+    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
+    const draft = makeFarmPlotDraft();
+    mockFarmPlotLoadDraft.mockResolvedValue(draft);
+
+    await SyncQueueService.processAll();
+
+    expect(mockCreateFarmPlot).toHaveBeenCalledWith({
+      farmId: draft.farmId,
+      name: draft.name,
+      description: draft.description,
+      area: draft.area,
+      capturedOffline: draft.capturedOffline,
+      polygon: draft.polygon,
+    });
+    expect(mockFarmPlotMarkSynced).toHaveBeenCalledWith('plot-1');
+    expect(mockMarkSynced).toHaveBeenCalledWith('plot-entry-1');
+  });
+
+  it('marca la entrada synced sin crear nada si el borrador ya no existe localmente', async () => {
+    const entry = makeEntry({ id: 'plot-entry-2', surveyId: 'plot-missing', itemType: 'farm-plot' });
+    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
+    mockFarmPlotLoadDraft.mockResolvedValue(null);
+
+    await SyncQueueService.processAll();
+
+    expect(mockCreateFarmPlot).not.toHaveBeenCalled();
+    expect(mockMarkSynced).toHaveBeenCalledWith('plot-entry-2');
+  });
+
+  it('no vuelve a crear el lote si ya está synced localmente (guarda de idempotencia)', async () => {
+    const entry = makeEntry({ id: 'plot-entry-3', surveyId: 'plot-1', itemType: 'farm-plot' });
+    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
+    mockFarmPlotLoadDraft.mockResolvedValue(makeFarmPlotDraft({ status: 'synced' }));
+
+    await SyncQueueService.processAll();
+
+    expect(mockCreateFarmPlot).not.toHaveBeenCalled();
+    expect(mockMarkSynced).toHaveBeenCalledWith('plot-entry-3');
+  });
+
+  it('deja la entrada para reintentar ante un error de red, sin marcar fallo de validación', async () => {
+    const entry = makeEntry({ id: 'plot-entry-4', surveyId: 'plot-1', itemType: 'farm-plot' });
+    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
+    mockFarmPlotLoadDraft.mockResolvedValue(makeFarmPlotDraft());
+    mockCreateFarmPlot.mockRejectedValue(new NetworkError());
+
+    await SyncQueueService.processAll();
+
+    expect(mockFarmPlotMarkSynced).not.toHaveBeenCalled();
+    expect(mockMarkFailedValidation).not.toHaveBeenCalled();
+    expect(mockMarkSynced).not.toHaveBeenCalledWith('plot-entry-4');
+  });
+
+  it('marca fallo de validación ante un error no relacionado con la red', async () => {
+    const entry = makeEntry({ id: 'plot-entry-5', surveyId: 'plot-1', itemType: 'farm-plot' });
+    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
+    mockFarmPlotLoadDraft.mockResolvedValue(makeFarmPlotDraft());
+    mockCreateFarmPlot.mockRejectedValue(new Error('polygon must have at least 3 points'));
+
+    await SyncQueueService.processAll();
+
+    expect(mockMarkFailedValidation).toHaveBeenCalledWith(
+      'plot-entry-5',
+      expect.stringContaining('polygon must have at least 3 points'),
+    );
+    expect(mockMarkSynced).not.toHaveBeenCalledWith('plot-entry-5');
   });
 });
