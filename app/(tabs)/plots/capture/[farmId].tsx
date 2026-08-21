@@ -138,7 +138,7 @@ export default function CapturePlotScreen() {
           <Text style={styles.permissionDesc}>
             SOSAgro necesita acceso a tu ubicación para capturar los puntos del polígono. Ve a
             Ajustes del dispositivo {">"} Aplicaciones {">"} SOSAgro {">"} Permisos y activa
-            "Ubicación".
+            &quot;Ubicación&quot;.
           </Text>
           <Pressable style={styles.retryBtn} onPress={requestPermissions}>
             <Text style={styles.retryBtnText}>Reintentar</Text>
@@ -194,7 +194,7 @@ export default function CapturePlotScreen() {
         ListEmptyComponent={
           <View style={styles.empty}>
             <Text style={styles.emptyText}>
-              Toca "Agregar punto GPS" para capturar el primer vértice del polígono.
+              Toca &quot;Agregar punto GPS&quot; para capturar el primer vértice del polígono.
             </Text>
           </View>
         }

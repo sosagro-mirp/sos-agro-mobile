@@ -106,7 +106,7 @@ export default function FarmPlotsScreen() {
           ListEmptyComponent={
             <View style={styles.empty}>
               <Text style={styles.emptyTitle}>Sin lotes registrados</Text>
-              <Text style={styles.emptyDesc}>Toca "Capturar nuevo lote" para comenzar.</Text>
+              <Text style={styles.emptyDesc}>Toca &quot;Capturar nuevo lote&quot; para comenzar.</Text>
             </View>
           }
           renderItem={({ item }) => <PlotRow plot={item} />}

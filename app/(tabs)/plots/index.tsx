@@ -101,7 +101,7 @@ export default function PlotsIndexScreen() {
             renderItem={({ item }) => <FarmerRow farmer={item} onPress={handleSelect} />}
           />
         ) : query.trim() && !isSearching ? (
-          <Text style={styles.noResults}>Sin resultados para "{query}"</Text>
+          <Text style={styles.noResults}>Sin resultados para &quot;{query}&quot;</Text>
         ) : null}
       </View>
     </SafeAreaView>
@@ -123,9 +123,7 @@ function FarmerRow({
       onPress={() => { if (hasFarm) onPress(farmer); }}
       disabled={!hasFarm}
     >
-      <Text style={styles.resultName}>
-        {farmer.name} {farmer.lastName ?? ""}
-      </Text>
+      <Text style={styles.resultName}>{farmer.name}</Text>
       {farmer.documentId ? (
         <Text style={styles.resultDetail}>Doc: {farmer.documentId}</Text>
       ) : null}
