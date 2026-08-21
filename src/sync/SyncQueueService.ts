@@ -217,6 +217,41 @@ class SyncQueueServiceClass {
     }
   }
 
+  // Spec 71 — intenta reparar una entrada de la cola cuyo `campaignSessionId`
+  // apunta a un id local que `resolveLocalSessions()` ya no va a resolver
+  // (porque la fila de `pendingSessions` correspondiente dejó de estar
+  // `pending`). Dos fuentes locales pueden conservar el id real:
+  //   1. El borrador (`surveys.campaignSessionId`): existía cuando
+  //      `resolveLocalSessions()` hizo el remapeo, así que si el id ya no es
+  //      local, es el id real.
+  //   2. `pendingSessions.realSessionId`: se persiste en `resolve()` aunque
+  //      la fila ya no aparezca en `listPending()`.
+  // Devuelve el id real si logró repararla, o `null` si ninguna fuente local
+  // lo tiene (llamador decide si sigue esperando o reporta el bloqueo).
+  private async repairLocalCampaignSession(entry: SyncQueueEntry): Promise<string | null> {
+    const localSessionId = entry.campaignSessionId!;
+
+    const draft = await surveyDraftStore.loadDraft(entry.surveyId);
+    if (draft?.campaignSessionId && !isLocalId(draft.campaignSessionId)) {
+      await syncQueueStorage.updateCampaignSessionId(entry.id, draft.campaignSessionId);
+      logger.info(
+        `[Sync] repaired entry ${entry.id}: campaignSessionId ${localSessionId} → ${draft.campaignSessionId} (from draft)`,
+      );
+      return draft.campaignSessionId;
+    }
+
+    const pendingSession = await pendingSessionStorage.getByLocal(localSessionId);
+    if (pendingSession?.status === 'resolved' && pendingSession.realSessionId) {
+      await syncQueueStorage.updateCampaignSessionId(entry.id, pendingSession.realSessionId);
+      logger.info(
+        `[Sync] repaired entry ${entry.id}: campaignSessionId ${localSessionId} → ${pendingSession.realSessionId} (from pendingSessions)`,
+      );
+      return pendingSession.realSessionId;
+    }
+
+    return null;
+  }
+
   private async processEntry(entry: SyncQueueEntry): Promise<void> {
     if (entry.itemType === 'farm-plot') {
       await this.processFarmPlotEntry(entry);
@@ -229,12 +264,39 @@ class SyncQueueServiceClass {
     await syncQueueStorage.markInFlight(entry.id);
 
     try {
-      // If the campaign session is still provisional (resolveLocalSessions failed earlier),
-      // leave the entry in_flight so this run's dequeue loop skips it.
-      // resetInFlightToRetry() in the finally block resets it to pending for the next sync run.
+      // If the campaign session is still provisional, try to repair it before
+      // giving up. Spec 71 — antes esto solo aplazaba la entrada de forma
+      // indefinida: si la fila de `pendingSessions` que le correspondía ya no
+      // está `pending` (porque se resolvió *después* de que esta entrada se
+      // encoló — condición de carrera entre el remapeo de
+      // resolveLocalSessions() y la copia de campaignSessionId en memoria de
+      // useInstrumentSurveyStore), `resolveLocalSessions()` nunca vuelve a
+      // ofrecerla y la entrada quedaba congelada para siempre, en silencio.
       if (entry.campaignSessionId && isLocalId(entry.campaignSessionId)) {
-        logger.warn(`[Sync] campaign session not yet resolved for entry ${entry.id}, deferring`);
-        return;
+        const repaired = await this.repairLocalCampaignSession(entry);
+        if (repaired) {
+          entry = { ...entry, campaignSessionId: repaired };
+        } else {
+          const pendingSession = await pendingSessionStorage.getByLocal(entry.campaignSessionId);
+          if (pendingSession?.status === 'pending') {
+            // Espera legítima: la sesión sigue en cola de resolución.
+            logger.warn(`[Sync] campaign session not yet resolved for entry ${entry.id}, deferring`);
+            return;
+          }
+
+          // No hay ninguna fuente local que resuelva este id (la fila no
+          // existe, o quedó `failed`) — no aplazar más. Reportar en vez de
+          // callar.
+          const detail = `Sesión de campaña local sin resolución posible: ${entry.campaignSessionId}`;
+          logger.error(`[Sync] ${detail} — entry ${entry.id}`);
+          captureError(new Error(detail), {
+            surveyId: entry.surveyId,
+            entryId: entry.id,
+            localSessionId: entry.campaignSessionId,
+          });
+          await syncQueueStorage.markFailedValidation(entry.id, detail);
+          return;
+        }
       }
 
       // Spec 70, Fase 3 — decidir si hay contenido real ANTES de materializar,

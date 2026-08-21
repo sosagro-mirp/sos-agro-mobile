@@ -75,19 +75,29 @@ export const QuestionScreen: React.FC<QuestionScreenProps> = ({
     });
   };
 
+  // `replace`, no `push`: con `push`, cada pregunta apilaba una pantalla que
+  // quedaba montada por debajo (este repo no usa freezeOnBlur/enableFreeze).
+  // Un flujo de campaña completo son ~83 preguntas, y react-native-screens
+  // crea un Fragment de Android por pantalla: el estado que Android debe
+  // serializar al pasar la app a segundo plano llegaba a ~911 KB, contra el
+  // límite de ~1 MB del Binder, y la app moría con
+  // TransactionTooLargeException (Sentry REACT-NATIVE-3, 2026-08-18).
+  // Con `replace` solo vive una pantalla de pregunta a la vez.
   const handleNext = () => {
     if (isLast) {
       onFinished();
       return;
     }
     goToNext();
-    router.push(`/instrument/${instrumentId}/question/${currentIndex + 1}`);
+    router.replace(`/instrument/${instrumentId}/question/${currentIndex + 1}`);
   };
 
+  // Navegación explícita en vez de `router.back()`: ya no hay una pregunta
+  // anterior en el stack a la que volver.
   const handlePrev = () => {
     if (isFirst) return;
     goToPrev();
-    router.back();
+    router.replace(`/instrument/${instrumentId}/question/${currentIndex - 1}`);
   };
 
   if (!currentItem) {

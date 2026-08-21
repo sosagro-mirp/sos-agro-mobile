@@ -11,6 +11,8 @@ interface ThemeContextValue {
   colors: ThemeColors;
   setPreference: (preference: ThemePreference) => void;
   cyclePreference: () => void;
+  /** true cuando la preferencia guardada ya se leyó de storage. */
+  restored: boolean;
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
@@ -52,11 +54,17 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const effectiveTheme = resolveEffectiveTheme(preference, deviceScheme);
   const colors = getColors(effectiveTheme);
 
-  const value: ThemeContextValue = { preference, effectiveTheme, colors, setPreference, cyclePreference };
+  const value: ThemeContextValue = { preference, effectiveTheme, colors, setPreference, cyclePreference, restored };
 
-  // Evita un flash claro→oscuro: no monta a los hijos hasta restaurar la
-  // preferencia guardada (equivalente móvil del script anti-FOUC de la web).
-  if (!restored) return null;
+  // NUNCA devolver null aquí mientras se restaura la preferencia: desmontar y
+  // volver a montar a los hijos (todo el árbol de expo-router) dispara en
+  // Samsung One UI 7 / Android 15 un reset nativo del contenedor de navegación
+  // que remonta el RootLayout completo en bucle infinito (~30 veces/segundo) y
+  // deja la app en pantalla blanca antes del login, con crashes por
+  // TransactionTooLargeException al pasar a background (Sentry REACT-NATIVE-3,
+  // 5, 6 y 7 — incidente del 2026-08-18 en Tab S9). El anti-parpadeo
+  // claro→oscuro se logra sin desmontar nada: el RootLayout mantiene el splash
+  // visible hasta que `restored` sea true (ver SplashGate en app/_layout.tsx).
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
