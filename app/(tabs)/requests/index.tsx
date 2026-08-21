@@ -1,12 +1,12 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { ChangeRequestForm } from "../../../src/components/requests/ChangeRequestForm";
 import { useChangeRequestStore } from "../../../src/store/useChangeRequestStore";
 import { Fonts } from "../../../src/theme/fonts";
+import { useTheme } from "../../../src/theme/ThemeProvider";
+import type { ThemeColors } from "../../../src/theme/colors";
 import { logger } from "../../../src/lib/logger";
-
-const GREEN = "#1B6B3A";
 
 const STATUS_LABELS: Record<string, string> = {
   pending_sync: "Pendiente",
@@ -14,14 +14,19 @@ const STATUS_LABELS: Record<string, string> = {
   resolved: "Resuelta",
 };
 
-const STATUS_COLORS: Record<string, string> = {
-  pending_sync: "#F59E0B",
-  open: "#3B82F6",
-  resolved: "#16A34A",
-};
+function getStatusColors(colors: ThemeColors): Record<string, string> {
+  return {
+    pending_sync: colors.warningFg,
+    open: colors.infoFg,
+    resolved: colors.successFg,
+  };
+}
 
 export default function RequestsScreen() {
   const { requests, loadAll } = useChangeRequestStore();
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const statusColors = useMemo(() => getStatusColors(colors), [colors]);
 
   useEffect(() => {
     loadAll().catch((err) => logger.error('[Requests] loadAll failed', err));
@@ -45,7 +50,7 @@ export default function RequestsScreen() {
                   <Text
                     style={[
                       styles.statusBadge,
-                      { color: STATUS_COLORS[r.status] ?? "#6B7280" },
+                      { color: statusColors[r.status] ?? colors.textMuted },
                     ]}
                   >
                     {STATUS_LABELS[r.status] ?? r.status}
@@ -71,56 +76,58 @@ export default function RequestsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#F9FAFB" },
-  header: {
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    backgroundColor: "#fff",
-    borderBottomWidth: 1,
-    borderBottomColor: "#E5E7EB",
-  },
-  title: { fontSize: 17, fontFamily: Fonts.bold, color: "#111827" },
-  content: { padding: 20, gap: 20 },
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    root: { flex: 1, backgroundColor: colors.surfaceMuted },
+    header: {
+      paddingHorizontal: 20,
+      paddingVertical: 14,
+      backgroundColor: colors.surface,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    title: { fontSize: 17, fontFamily: Fonts.bold, color: colors.textPrimary },
+    content: { padding: 20, gap: 20 },
 
-  section: { gap: 10 },
-  sectionTitle: {
-    fontSize: 15,
-    fontFamily: Fonts.semiBold,
-    color: "#374151",
-  },
+    section: { gap: 10 },
+    sectionTitle: {
+      fontSize: 15,
+      fontFamily: Fonts.semiBold,
+      color: colors.textPrimary,
+    },
 
-  card: {
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    gap: 6,
-  },
-  cardHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  statusBadge: {
-    fontSize: 12,
-    fontFamily: Fonts.semiBold,
-  },
-  dateText: {
-    fontSize: 12,
-    fontFamily: Fonts.regular,
-    color: "#9CA3AF",
-  },
-  description: {
-    fontSize: 14,
-    fontFamily: Fonts.regular,
-    color: "#374151",
-    lineHeight: 20,
-  },
-  resolvedAt: {
-    fontSize: 12,
-    fontFamily: Fonts.regular,
-    color: GREEN,
-  },
-});
+    card: {
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      padding: 14,
+      borderWidth: 1,
+      borderColor: colors.border,
+      gap: 6,
+    },
+    cardHeader: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+    },
+    statusBadge: {
+      fontSize: 12,
+      fontFamily: Fonts.semiBold,
+    },
+    dateText: {
+      fontSize: 12,
+      fontFamily: Fonts.regular,
+      color: colors.textMuted,
+    },
+    description: {
+      fontSize: 14,
+      fontFamily: Fonts.regular,
+      color: colors.textPrimary,
+      lineHeight: 20,
+    },
+    resolvedAt: {
+      fontSize: 12,
+      fontFamily: Fonts.regular,
+      color: colors.brand,
+    },
+  });
+}

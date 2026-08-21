@@ -1,7 +1,9 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { Pressable, View, Text, StyleSheet } from "react-native";
 import { InstrumentResponse } from "../../types";
 import { Fonts } from "../../theme/fonts";
+import { useTheme } from "../../theme/ThemeProvider";
+import type { ThemeColors } from "../../theme/colors";
 
 interface CachedInstrumentCardProps {
   instrument: InstrumentResponse;
@@ -12,6 +14,8 @@ export const CachedInstrumentCard: React.FC<CachedInstrumentCardProps> = ({
   instrument,
   onPress,
 }) => {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const totalQuestions = instrument.sections.reduce(
     (sum, section) => sum + section.questions.length,
     0
@@ -44,56 +48,58 @@ export const CachedInstrumentCard: React.FC<CachedInstrumentCardProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
-  card: {
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    borderRadius: 8,
-    padding: 16,
-  },
-  cardPressed: {
-    opacity: 0.75,
-  },
-  header: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    gap: 12,
-    marginBottom: 10,
-  },
-  name: {
-    fontFamily: Fonts.bold,
-    fontSize: 18,
-    color: "#111827",
-    flex: 1,
-    lineHeight: 24,
-  },
-  versionBadge: {
-    backgroundColor: "#EFF6FF",
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-    alignSelf: "flex-start",
-  },
-  versionText: {
-    fontFamily: Fonts.semiBold,
-    fontSize: 12,
-    color: "#1D4ED8",
-  },
-  meta: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  metaText: {
-    fontFamily: Fonts.regular,
-    fontSize: 14,
-    color: "#6B7280",
-  },
-  metaSeparator: {
-    fontFamily: Fonts.regular,
-    fontSize: 14,
-    color: "#9CA3AF",
-  },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    card: {
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 8,
+      padding: 16,
+    },
+    cardPressed: {
+      opacity: 0.75,
+    },
+    header: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      justifyContent: "space-between",
+      gap: 12,
+      marginBottom: 10,
+    },
+    name: {
+      fontFamily: Fonts.bold,
+      fontSize: 18,
+      color: colors.textPrimary,
+      flex: 1,
+      lineHeight: 24,
+    },
+    versionBadge: {
+      backgroundColor: colors.infoBg,
+      borderRadius: 999,
+      paddingHorizontal: 10,
+      paddingVertical: 3,
+      alignSelf: "flex-start",
+    },
+    versionText: {
+      fontFamily: Fonts.semiBold,
+      fontSize: 12,
+      color: colors.infoFg,
+    },
+    meta: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+    },
+    metaText: {
+      fontFamily: Fonts.regular,
+      fontSize: 14,
+      color: colors.textMuted,
+    },
+    metaSeparator: {
+      fontFamily: Fonts.regular,
+      fontSize: 14,
+      color: colors.textMuted,
+    },
+  });
+}

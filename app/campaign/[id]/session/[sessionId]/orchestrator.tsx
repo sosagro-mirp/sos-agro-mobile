@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -26,6 +26,8 @@ import { DuplicateAlertModal } from "../../../../../src/components/campaign/Dupl
 import { NetworkError } from "../../../../../src/api/httpClient";
 import { advanceWithinCampaign, returnToPreSurvey } from "../../../../../src/lib/campaignNavigation";
 import { Fonts } from "../../../../../src/theme/fonts";
+import { useTheme } from "../../../../../src/theme/ThemeProvider";
+import type { ThemeColors } from "../../../../../src/theme/colors";
 
 type ScreenState = 'loading' | 'offline' | 'injection_error' | 'error' | 'duplicate_pending' | 'offline_extraction_pending';
 
@@ -54,6 +56,8 @@ export default function OrchestratorScreen() {
   } | null>(null);
   const [modalLoading, setModalLoading] = useState(false);
   const hasStarted = useRef(false);
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
 
   // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -578,53 +582,53 @@ export default function OrchestratorScreen() {
         onCancel={handleCancel}
       />
       <View style={styles.center}>
-        <ActivityIndicator size="large" color={GREEN} />
+        <ActivityIndicator size="large" color={colors.brand} />
         <Text style={styles.loadingLabel}>Cargando siguiente paso…</Text>
       </View>
     </SafeAreaView>
   );
 }
 
-const GREEN = "#1B6B3A";
-
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#F9FAFB" },
-  center: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    paddingHorizontal: 32,
-    gap: 16,
-  },
-  loadingLabel: { fontSize: 15, fontFamily: Fonts.regular, color: "#6B7280" },
-  bigIcon: { fontSize: 48 },
-  title: { fontSize: 20, fontFamily: Fonts.bold, color: "#111827" },
-  desc: {
-    fontSize: 15,
-    fontFamily: Fonts.regular,
-    color: "#6B7280",
-    textAlign: "center",
-    lineHeight: 22,
-  },
-  errorDesc: {
-    fontSize: 14,
-    fontFamily: Fonts.regular,
-    color: "#DC2626",
-    textAlign: "center",
-  },
-  button: {
-    backgroundColor: "#9CA3AF",
-    borderRadius: 12,
-    paddingVertical: 16,
-    paddingHorizontal: 40,
-    marginTop: 8,
-  },
-  buttonActive: {
-    backgroundColor: GREEN,
-    borderRadius: 12,
-    paddingVertical: 16,
-    paddingHorizontal: 40,
-    marginTop: 8,
-  },
-  buttonText: { fontSize: 16, fontFamily: Fonts.semiBold, color: "#fff" },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    root: { flex: 1, backgroundColor: colors.surfaceMuted },
+    center: {
+      flex: 1,
+      justifyContent: "center",
+      alignItems: "center",
+      paddingHorizontal: 32,
+      gap: 16,
+    },
+    loadingLabel: { fontSize: 15, fontFamily: Fonts.regular, color: colors.textMuted },
+    bigIcon: { fontSize: 48 },
+    title: { fontSize: 20, fontFamily: Fonts.bold, color: colors.textPrimary },
+    desc: {
+      fontSize: 15,
+      fontFamily: Fonts.regular,
+      color: colors.textMuted,
+      textAlign: "center",
+      lineHeight: 22,
+    },
+    errorDesc: {
+      fontSize: 14,
+      fontFamily: Fonts.regular,
+      color: colors.dangerFg,
+      textAlign: "center",
+    },
+    button: {
+      backgroundColor: colors.textMuted,
+      borderRadius: 12,
+      paddingVertical: 16,
+      paddingHorizontal: 40,
+      marginTop: 8,
+    },
+    buttonActive: {
+      backgroundColor: colors.brand,
+      borderRadius: 12,
+      paddingVertical: 16,
+      paddingHorizontal: 40,
+      marginTop: 8,
+    },
+    buttonText: { fontSize: 16, fontFamily: Fonts.semiBold, color: colors.brandForeground },
+  });
+}

@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo } from "react";
 import {
   SafeAreaView,
   ScrollView,
@@ -8,6 +8,8 @@ import {
   StyleSheet,
   ViewStyle,
 } from "react-native";
+import { useTheme } from "../../theme/ThemeProvider";
+import type { ThemeColors } from "../../theme/colors";
 
 interface ScreenProps {
   children: React.ReactNode;
@@ -22,6 +24,9 @@ export const Screen: React.FC<ScreenProps> = ({
   style,
   contentStyle,
 }) => {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+
   if (scrollable) {
     return (
       <SafeAreaView style={[styles.safeArea, style]}>
@@ -49,15 +54,17 @@ export const Screen: React.FC<ScreenProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: "#F9FAFB",
-  },
-  flex: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-  },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    safeArea: {
+      flex: 1,
+      backgroundColor: colors.surfaceMuted,
+    },
+    flex: {
+      flex: 1,
+    },
+    scrollContent: {
+      flexGrow: 1,
+    },
+  });
+}

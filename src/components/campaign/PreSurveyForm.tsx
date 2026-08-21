@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -8,6 +8,8 @@ import {
   View,
 } from "react-native";
 import { Fonts } from "../../theme/fonts";
+import { useTheme } from "../../theme/ThemeProvider";
+import type { ThemeColors } from "../../theme/colors";
 import { searchFarmers } from "../../api/farmers";
 import { farmerCacheStorage } from "../../storage/farmerCache";
 import type { FarmerSearchResult } from "../../types";
@@ -28,6 +30,8 @@ export const PreSurveyForm: React.FC<PreSurveyFormProps> = ({
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -82,7 +86,7 @@ export const PreSurveyForm: React.FC<PreSurveyFormProps> = ({
       <TextInput
         style={styles.searchInput}
         placeholder="Nombre o número de documento"
-        placeholderTextColor="#9CA3AF"
+        placeholderTextColor={colors.textMuted}
         value={query}
         onChangeText={setQuery}
         autoFocus
@@ -96,7 +100,7 @@ export const PreSurveyForm: React.FC<PreSurveyFormProps> = ({
       ) : null}
 
       {isSearching ? (
-        <ActivityIndicator size="small" color={GREEN} style={styles.searchSpinner} />
+        <ActivityIndicator size="small" color={colors.brand} style={styles.searchSpinner} />
       ) : null}
 
       {searchError ? (
@@ -137,74 +141,74 @@ export const PreSurveyForm: React.FC<PreSurveyFormProps> = ({
   );
 };
 
-const GREEN = "#1B6B3A";
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    paddingHorizontal: 20,
-    paddingTop: 24,
-    gap: 12,
-  },
-  heading: {
-    fontFamily: Fonts.bold,
-    fontSize: 18,
-    color: "#111827",
-    marginBottom: 4,
-  },
-  offlineSearchHint: {
-    fontFamily: Fonts.regular,
-    fontSize: 12,
-    color: "#6B7280",
-  },
-  searchInput: {
-    height: 48,
-    backgroundColor: "#F9FAFB",
-    borderWidth: 1,
-    borderColor: "#D1D5DB",
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    fontFamily: Fonts.regular,
-    fontSize: 15,
-    color: "#111827",
-  },
-  searchSpinner: {
-    alignSelf: "center",
-  },
-  searchError: {
-    fontFamily: Fonts.regular,
-    fontSize: 13,
-    color: "#DC2626",
-  },
-  resultsList: {
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    borderRadius: 8,
-    backgroundColor: "#fff",
-  },
-  resultItem: {
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: "#F3F4F6",
-    gap: 2,
-  },
-  resultName: {
-    fontFamily: Fonts.semiBold,
-    fontSize: 14,
-    color: "#111827",
-  },
-  resultDetail: {
-    fontFamily: Fonts.regular,
-    fontSize: 12,
-    color: "#6B7280",
-  },
-  newFarmerItem: {
-    borderBottomWidth: 0,
-  },
-  newFarmerText: {
-    fontFamily: Fonts.semiBold,
-    fontSize: 14,
-    color: GREEN,
-  },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      paddingHorizontal: 20,
+      paddingTop: 24,
+      gap: 12,
+    },
+    heading: {
+      fontFamily: Fonts.bold,
+      fontSize: 18,
+      color: colors.textPrimary,
+      marginBottom: 4,
+    },
+    offlineSearchHint: {
+      fontFamily: Fonts.regular,
+      fontSize: 12,
+      color: colors.textMuted,
+    },
+    searchInput: {
+      height: 48,
+      backgroundColor: colors.surfaceMuted,
+      borderWidth: 1,
+      borderColor: colors.borderStrong,
+      borderRadius: 8,
+      paddingHorizontal: 12,
+      fontFamily: Fonts.regular,
+      fontSize: 15,
+      color: colors.textPrimary,
+    },
+    searchSpinner: {
+      alignSelf: "center",
+    },
+    searchError: {
+      fontFamily: Fonts.regular,
+      fontSize: 13,
+      color: colors.dangerFg,
+    },
+    resultsList: {
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 8,
+      backgroundColor: colors.surface,
+    },
+    resultItem: {
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.surfaceMuted,
+      gap: 2,
+    },
+    resultName: {
+      fontFamily: Fonts.semiBold,
+      fontSize: 14,
+      color: colors.textPrimary,
+    },
+    resultDetail: {
+      fontFamily: Fonts.regular,
+      fontSize: 12,
+      color: colors.textMuted,
+    },
+    newFarmerItem: {
+      borderBottomWidth: 0,
+    },
+    newFarmerText: {
+      fontFamily: Fonts.semiBold,
+      fontSize: 14,
+      color: colors.brand,
+    },
+  });
+}

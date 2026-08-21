@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { StyleSheet, Text, View, Pressable } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -10,6 +10,8 @@ import { useAuthStore } from "../../../src/store/useAuthStore";
 import { PreSurveyForm } from "../../../src/components/campaign/PreSurveyForm";
 import { OfflineBanner } from "../../../src/components/network/OfflineBanner";
 import { Fonts } from "../../../src/theme/fonts";
+import { useTheme } from "../../../src/theme/ThemeProvider";
+import type { ThemeColors } from "../../../src/theme/colors";
 import { generateLocalId } from "../../../src/lib/generateLocalId";
 import { pendingSessionStorage } from "../../../src/storage/pendingSessions";
 import { cacheFarmerIdentity } from "../../../src/lib/cacheFarmerIdentity";
@@ -36,6 +38,8 @@ export default function PreSurveyScreen() {
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
 
   if (!campaign) {
     return (
@@ -226,51 +230,51 @@ export default function PreSurveyScreen() {
   );
 }
 
-const GREEN = "#1B6B3A";
-
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#F9FAFB" },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    backgroundColor: "#fff",
-    borderBottomWidth: 1,
-    borderBottomColor: "#E5E7EB",
-  },
-  back: { fontSize: 15, fontFamily: Fonts.regular, color: GREEN },
-  title: {
-    flex: 1,
-    fontSize: 17,
-    fontFamily: Fonts.bold,
-    color: "#111827",
-    textAlign: "center",
-  },
-  errorBox: {
-    margin: 16,
-    padding: 12,
-    backgroundColor: "#FEF2F2",
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#FECACA",
-  },
-  errorBoxText: { fontSize: 14, fontFamily: Fonts.regular, color: "#DC2626" },
-  errorText: {
-    fontSize: 16,
-    fontFamily: Fonts.regular,
-    color: "#DC2626",
-    margin: 24,
-  },
-  loadingOverlay: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  loadingText: {
-    fontSize: 15,
-    fontFamily: Fonts.regular,
-    color: "#6B7280",
-  },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    root: { flex: 1, backgroundColor: colors.surfaceMuted },
+    header: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingHorizontal: 20,
+      paddingVertical: 16,
+      backgroundColor: colors.surface,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    back: { fontSize: 15, fontFamily: Fonts.regular, color: colors.brand },
+    title: {
+      flex: 1,
+      fontSize: 17,
+      fontFamily: Fonts.bold,
+      color: colors.textPrimary,
+      textAlign: "center",
+    },
+    errorBox: {
+      margin: 16,
+      padding: 12,
+      backgroundColor: colors.dangerBg,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: colors.dangerFg,
+    },
+    errorBoxText: { fontSize: 14, fontFamily: Fonts.regular, color: colors.dangerFg },
+    errorText: {
+      fontSize: 16,
+      fontFamily: Fonts.regular,
+      color: colors.dangerFg,
+      margin: 24,
+    },
+    loadingOverlay: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    loadingText: {
+      fontSize: 15,
+      fontFamily: Fonts.regular,
+      color: colors.textMuted,
+    },
+  });
+}

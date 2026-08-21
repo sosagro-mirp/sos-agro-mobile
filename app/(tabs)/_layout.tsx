@@ -5,15 +5,19 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuthStore } from "../../src/store/useAuthStore";
 import { useSyncStatusStore } from "../../src/store/useSyncStatusStore";
 import { Fonts } from "../../src/theme/fonts";
+import { useTheme } from "../../src/theme/ThemeProvider";
+import type { ThemeColors } from "../../src/theme/colors";
+import type { EffectiveTheme } from "../../src/theme/resolveTheme";
 import { AppText } from "../../src/components/common/AppText";
-import { useRef } from "react";
+import { ThemeToggle } from "../../src/components/common/ThemeToggle";
+import { useMemo, useRef } from "react";
 import { useRouter } from "expo-router";
-
-const GREEN = "#1B6B3A";
 
 function TabsHeader() {
   const { user, logout } = useAuthStore();
   const { isOnline, pendingCount } = useSyncStatusStore();
+  const { colors, effectiveTheme } = useTheme();
+  const styles = useMemo(() => createStyles(colors, effectiveTheme), [colors, effectiveTheme]);
   const router = useRouter();
 
   const tapCount = useRef(0);
@@ -46,6 +50,7 @@ function TabsHeader() {
               {isOnline ? "En línea" : "Sin conexión"}
             </AppText>
           </View>
+          <ThemeToggle color={colors.brandForeground} />
           <Pressable onPress={logout} style={styles.logoutBtn} accessibilityRole="button">
             <AppText style={styles.logoutText} numberOfLines={1}>Salir</AppText>
           </Pressable>
@@ -63,14 +68,17 @@ function TabsHeader() {
 }
 
 export default function TabsLayout() {
+  const { colors, effectiveTheme } = useTheme();
+  const styles = useMemo(() => createStyles(colors, effectiveTheme), [colors, effectiveTheme]);
+
   return (
     <View style={{ flex: 1 }}>
       <TabsHeader />
       <Tabs
         screenOptions={{
           headerShown: false,
-          tabBarActiveTintColor: GREEN,
-          tabBarInactiveTintColor: "#9CA3AF",
+          tabBarActiveTintColor: colors.brand,
+          tabBarInactiveTintColor: colors.textMuted,
           tabBarStyle: styles.tabBar,
           tabBarLabelStyle: styles.tabLabel,
         }}
@@ -116,94 +124,108 @@ export default function TabsLayout() {
   );
 }
 
-const styles = StyleSheet.create({
-  headerContainer: {
-    backgroundColor: GREEN,
-  },
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-  },
-  headerLeft: {
-    flexShrink: 1,
-  },
-  appName: {
-    fontSize: 18,
-    fontFamily: Fonts.bold,
-    color: "#fff",
-  },
-  userName: {
-    fontSize: 12,
-    fontFamily: Fonts.regular,
-    color: "rgba(255,255,255,0.75)",
-    marginTop: 1,
-  },
-  headerRight: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    // Fixed size: the connection-status pill and "Salir" are operationally
-    // critical in the field and must stay fully visible even when the
-    // left-side username is long or the system font scale is high (spec 24).
-    // Only headerLeft (and userName inside it) shrinks/truncates.
-    flexShrink: 0,
-  },
-  statusPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    backgroundColor: "rgba(255,255,255,0.15)",
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 20,
-  },
-  dot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-  },
-  dotOnline: { backgroundColor: "#86EFAC" },
-  dotOffline: { backgroundColor: "#FCA5A5" },
-  statusText: {
-    fontSize: 12,
-    fontFamily: Fonts.regular,
-    color: "#fff",
-  },
-  logoutBtn: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.4)",
-  },
-  logoutText: {
-    fontSize: 13,
-    fontFamily: Fonts.semiBold,
-    color: "#fff",
-  },
-  pendingBanner: {
-    backgroundColor: "#B45309",
-    paddingHorizontal: 20,
-    paddingVertical: 6,
-  },
-  pendingText: {
-    fontSize: 12,
-    fontFamily: Fonts.regular,
-    color: "#FEF3C7",
-  },
-  tabBar: {
-    backgroundColor: "#fff",
-    borderTopColor: "#E5E7EB",
-    borderTopWidth: 1,
-    height: 62,
-    paddingBottom: 8,
-    paddingTop: 6,
-  },
-  tabLabel: {
-    fontFamily: Fonts.semiBold,
-    fontSize: 11,
-  },
-});
+function createStyles(colors: ThemeColors, effectiveTheme: EffectiveTheme) {
+  // El header usa colors.brand como fondo (verde en claro, amarillo en
+  // oscuro). Los overlays y los puntos de estado deben leerse bien sobre
+  // ambos: derivarlos de brandForeground (blanco en claro / azul oscuro en
+  // oscuro) los mantiene en el extremo de contraste correcto en cada caso —
+  // un overlay blanco translúcido es casi invisible sobre el amarillo del
+  // header en oscuro (hallazgo de la auditoría del spec 63).
+  const overlaySoft = effectiveTheme === "dark" ? `${colors.brandForeground}33` : "rgba(255,255,255,0.15)";
+  const overlayBorder = effectiveTheme === "dark" ? `${colors.brandForeground}66` : "rgba(255,255,255,0.4)";
+  const dotOnlineColor = effectiveTheme === "dark" ? "#166534" : "#86EFAC";
+  const dotOfflineColor = effectiveTheme === "dark" ? "#991B1B" : "#FCA5A5";
+
+  return StyleSheet.create({
+    headerContainer: {
+      backgroundColor: colors.brand,
+    },
+    header: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      paddingHorizontal: 20,
+      paddingVertical: 12,
+    },
+    headerLeft: {
+      flexShrink: 1,
+    },
+    appName: {
+      fontSize: 18,
+      fontFamily: Fonts.bold,
+      color: colors.brandForeground,
+    },
+    userName: {
+      fontSize: 12,
+      fontFamily: Fonts.regular,
+      color: colors.brandForeground,
+      opacity: 0.75,
+      marginTop: 1,
+    },
+    headerRight: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+      // Fixed size: the connection-status pill and "Salir" are operationally
+      // critical in the field and must stay fully visible even when the
+      // left-side username is long or the system font scale is high (spec 24).
+      // Only headerLeft (and userName inside it) shrinks/truncates.
+      flexShrink: 0,
+    },
+    statusPill: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 5,
+      backgroundColor: overlaySoft,
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+      borderRadius: 20,
+    },
+    dot: {
+      width: 7,
+      height: 7,
+      borderRadius: 4,
+    },
+    dotOnline: { backgroundColor: dotOnlineColor },
+    dotOffline: { backgroundColor: dotOfflineColor },
+    statusText: {
+      fontSize: 12,
+      fontFamily: Fonts.regular,
+      color: colors.brandForeground,
+    },
+    logoutBtn: {
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: overlayBorder,
+    },
+    logoutText: {
+      fontSize: 13,
+      fontFamily: Fonts.semiBold,
+      color: colors.brandForeground,
+    },
+    pendingBanner: {
+      backgroundColor: "#B45309",
+      paddingHorizontal: 20,
+      paddingVertical: 6,
+    },
+    pendingText: {
+      fontSize: 12,
+      fontFamily: Fonts.regular,
+      color: "#FEF3C7",
+    },
+    tabBar: {
+      backgroundColor: colors.surface,
+      borderTopColor: colors.border,
+      borderTopWidth: 1,
+      height: 62,
+      paddingBottom: 8,
+      paddingTop: 6,
+    },
+    tabLabel: {
+      fontFamily: Fonts.semiBold,
+      fontSize: 11,
+    },
+  });
+}

@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo } from "react";
 import {
   TouchableOpacity,
   Text,
@@ -6,6 +6,8 @@ import {
   StyleSheet,
 } from "react-native";
 import { Fonts } from "../../theme/fonts";
+import { useTheme } from "../../theme/ThemeProvider";
+import type { ThemeColors } from "../../theme/colors";
 
 interface PrimaryButtonProps {
   label: string;
@@ -20,6 +22,8 @@ export const PrimaryButton: React.FC<PrimaryButtonProps> = ({
   disabled = false,
   loading = false,
 }) => {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const isDisabled = disabled || loading;
 
   return (
@@ -30,7 +34,7 @@ export const PrimaryButton: React.FC<PrimaryButtonProps> = ({
       activeOpacity={0.8}
     >
       {loading ? (
-        <ActivityIndicator color="#FFFFFF" size="small" />
+        <ActivityIndicator color={colors.brandForeground} size="small" />
       ) : (
         <Text style={styles.label}>{label}</Text>
       )}
@@ -38,23 +42,25 @@ export const PrimaryButton: React.FC<PrimaryButtonProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
-  button: {
-    width: "100%",
-    minHeight: 56,
-    backgroundColor: "#1B6B3A",
-    borderRadius: 8,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 16,
-  },
-  buttonDisabled: {
-    backgroundColor: "#9CA3AF",
-  },
-  label: {
-    fontFamily: Fonts.semiBold,
-    fontSize: 18,
-    color: "#FFFFFF",
-    textAlign: "center",
-  },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    button: {
+      width: "100%",
+      minHeight: 56,
+      backgroundColor: colors.brand,
+      borderRadius: 8,
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: 16,
+    },
+    buttonDisabled: {
+      backgroundColor: colors.borderStrong,
+    },
+    label: {
+      fontFamily: Fonts.semiBold,
+      fontSize: 18,
+      color: colors.brandForeground,
+      textAlign: "center",
+    },
+  });
+}
