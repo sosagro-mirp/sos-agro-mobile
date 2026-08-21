@@ -413,6 +413,17 @@ class SyncQueueServiceClass {
         return;
       }
 
+      // Guarda de idempotencia: si el lote ya se marcó `synced` (ej. un
+      // intento anterior creó el lote en el backend pero la entrada de la
+      // cola no llegó a marcarse sincronizada antes de un cierre de la app,
+      // y quedó para reintentar), no volver a crearlo — createFarmPlot() no
+      // es idempotente y duplicaría el lote en el backend.
+      if (draft.status === 'synced') {
+        await syncQueueStorage.markSynced(entry.id);
+        logger.info(`[Sync] farm-plot entry ${entry.id} already synced locally, skipping re-create`);
+        return;
+      }
+
       const { farmPlotId } = await createFarmPlot({
         farmId: draft.farmId,
         name: draft.name,
