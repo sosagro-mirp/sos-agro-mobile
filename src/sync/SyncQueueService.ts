@@ -26,6 +26,8 @@ import { MediaUploadService } from './MediaUploadService';
 import { changeRequestStorage } from '../storage/changeRequestStorage';
 import { postChangeRequest, fetchMyResolved } from '../api/changeRequests';
 import { useChangeRequestStore } from '../store/useChangeRequestStore';
+import { farmPlotStore } from '../storage/farmPlotStore';
+import { createFarmPlot } from '../api/farmPlots';
 import type { CampaignSessionResponse } from '../types/campaign';
 
 const MAX_CONSECUTIVE_NETWORK_FAILURES = 5;
@@ -216,6 +218,14 @@ class SyncQueueServiceClass {
   }
 
   private async processEntry(entry: SyncQueueEntry): Promise<void> {
+    if (entry.itemType === 'farm-plot') {
+      await this.processFarmPlotEntry(entry);
+    } else {
+      await this.processSurveyEntry(entry);
+    }
+  }
+
+  private async processSurveyEntry(entry: SyncQueueEntry): Promise<void> {
     await syncQueueStorage.markInFlight(entry.id);
 
     try {
@@ -322,6 +332,46 @@ class SyncQueueServiceClass {
       } else {
         logger.error('[Sync] validation error', error);
         captureError(error, { surveyId: entry.surveyId, entryId: entry.id });
+        const detail = error instanceof Error ? error.message : String(error);
+        await syncQueueStorage.markFailedValidation(entry.id, detail);
+        this.consecutiveNetworkFailures = 0;
+      }
+    }
+  }
+
+  // Handles entries with itemType 'farm-plot'; entry.surveyId holds the local farmPlotId (per D5).
+  private async processFarmPlotEntry(entry: SyncQueueEntry): Promise<void> {
+    await syncQueueStorage.markInFlight(entry.id);
+
+    try {
+      const draft = await farmPlotStore.loadDraft(entry.surveyId);
+
+      if (!draft) {
+        await syncQueueStorage.markSynced(entry.id);
+        return;
+      }
+
+      const { farmPlotId } = await createFarmPlot({
+        farmId: draft.farmId,
+        name: draft.name,
+        description: draft.description,
+        area: draft.area,
+        capturedOffline: draft.capturedOffline,
+        polygon: draft.polygon,
+      });
+
+      await farmPlotStore.markSynced(draft.id);
+      await syncQueueStorage.markSynced(entry.id);
+
+      logger.info(`[Sync] processed farm-plot entry ${entry.id} for plot ${farmPlotId}`);
+      this.consecutiveNetworkFailures = 0;
+    } catch (error) {
+      if (error instanceof NetworkError) {
+        logger.error('[Sync] network error (farm-plot)', error);
+        await this.handleNetworkError(entry);
+      } else {
+        logger.error('[Sync] validation error (farm-plot)', error);
+        captureError(error, { farmPlotId: entry.surveyId, entryId: entry.id });
         const detail = error instanceof Error ? error.message : String(error);
         await syncQueueStorage.markFailedValidation(entry.id, detail);
         this.consecutiveNetworkFailures = 0;

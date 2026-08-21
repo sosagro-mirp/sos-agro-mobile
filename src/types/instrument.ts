@@ -127,7 +127,11 @@ export interface FarmerSearchResult {
   name: string;
   documentId: string | null;
   phone?: string | null;
-  farm?: { name: string; crops?: CropSummary[] | null } | null;
+  farm?: {
+    farmId?: string;
+    name: string;
+    crops?: CropSummary[] | null;
+  } | null;
 }
 
 export interface ExtractFarmerResult {

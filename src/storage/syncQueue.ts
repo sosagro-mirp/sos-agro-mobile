@@ -4,6 +4,8 @@ import { syncQueue } from './db/schema';
 
 export type SyncStatus = 'pending' | 'in_flight' | 'failed_validation';
 
+export type ItemType = 'survey' | 'farm-plot';
+
 export interface SyncQueueEntry {
   id: string;
   surveyId: string;
@@ -15,6 +17,7 @@ export interface SyncQueueEntry {
   payloadPath?: string;
   errorDetail?: string;
   createdAt: Date;
+  itemType: ItemType;
 }
 
 export interface EnqueueParams {
@@ -23,6 +26,7 @@ export interface EnqueueParams {
   campaignSessionId?: string;
   stepOrder?: number;
   payloadPath?: string;
+  itemType?: ItemType;
 }
 
 export const syncQueueStorage = {
@@ -38,6 +42,7 @@ export const syncQueueStorage = {
       payloadPath: params.payloadPath ?? null,
       errorDetail: null,
       createdAt: new Date(),
+      itemType: params.itemType ?? 'survey',
     });
   },
 
@@ -175,5 +180,6 @@ function mapRow(row: typeof syncQueue.$inferSelect): SyncQueueEntry {
     payloadPath: row.payloadPath ?? undefined,
     errorDetail: row.errorDetail ?? undefined,
     createdAt: row.createdAt,
+    itemType: (row.itemType ?? 'survey') as ItemType,
   };
 }

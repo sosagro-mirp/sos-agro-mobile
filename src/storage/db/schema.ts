@@ -64,6 +64,22 @@ export const syncQueue = sqliteTable('sync_queue', {
   payloadPath: text('payload_path'),
   errorDetail: text('error_detail'),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  itemType: text('item_type', { enum: ['survey', 'farm-plot'] })
+    .notNull()
+    .default('survey'),
+});
+
+export const farmPlots = sqliteTable('farm_plots', {
+  id: text('id').primaryKey(),
+  farmId: text('farm_id').notNull(),
+  name: text('name').notNull(),
+  description: text('description'),
+  area: real('area'),
+  polygon: text('polygon').notNull(), // JSON serializado: PolygonDto
+  status: text('status', { enum: ['draft', 'synced'] }).notNull().default('draft'),
+  capturedOffline: integer('captured_offline', { mode: 'boolean' }).notNull().default(true),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
 });
 
 export const instrumentCache = sqliteTable('instrument_cache', {
