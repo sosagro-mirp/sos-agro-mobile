@@ -227,11 +227,38 @@ class SyncQueueServiceClass {
         return;
       }
 
-      // If the survey was created offline, it doesn't exist on the backend yet.
-      // Create it now to obtain a real surveyId before sending responses.
+      // Spec 70, Fase 3 — decidir si hay contenido real ANTES de materializar,
+      // usando el borrador (`draft.answers`), no el payload de envío. Antes,
+      // materializar pasaba siempre que `isLocalId(entry.surveyId)`, sin mirar
+      // si había respuestas — eso es exactamente el vector 2: una fila vacía
+      // quedaba creada en el backend para siempre. El payload de envío NO
+      // sirve como señal aquí: una encuesta con solo una respuesta multimedia
+      // aún sin subir construye un payload vacío a propósito
+      // (`buildResponsesPayload` la omite hasta que resuelva `attachmentId`),
+      // pero sí tiene contenido real y debe materializarse igual — de lo
+      // contrario `MediaUploadService` nunca consigue un `surveyId` real para
+      // pedir la URL prefirmada.
+      const draft = await surveyDraftStore.loadDraft(entry.surveyId);
+      const hasAnswers = !!draft && Object.keys(draft.answers).length > 0;
+
+      if (!hasAnswers) {
+        logger.warn(
+          `[Sync] entry ${entry.id} has no answers — not materializing survey ${entry.surveyId}`,
+        );
+        await syncQueueStorage.markSynced(entry.id);
+        await surveyDraftStore.markSynced(entry.surveyId);
+        return;
+      }
+
+      // If the survey was created offline (or deferred — see beginSurvey.ts),
+      // it doesn't exist on the backend yet. Create it now that we know
+      // there's real content, to obtain a real surveyId — needed unconditionally
+      // from here on, including by MediaUploadService for any pending attachment.
       let realSurveyId = entry.surveyId;
       if (isLocalId(entry.surveyId)) {
-        realSurveyId = await this.materializeSurvey(entry);
+        realSurveyId =
+          (await surveyDraftStore.getBackendSurveyId(entry.surveyId)) ??
+          (await this.materializeSurvey(entry));
         // Persisted so a failed media attachment can still be retried after
         // this survey syncs and its local `id` (still the local one) is all
         // that's left to look it up by — see surveyDraftStore.getBackendSurveyId.
@@ -241,6 +268,17 @@ class SyncQueueServiceClass {
       const payload = await this.buildPayload(entry, realSurveyId);
 
       if (!payload || payload.length === 0) {
+        // Every answer is media still pending upload/confirmation (or
+        // otherwise unresolved) — the survey is already materialized (it has
+        // real content) but there's nothing to submit yet. The manual retry
+        // flow (MediaUploadService.retryEntry) links the response once the
+        // upload confirms; see its docs for why that's safe here. Logged
+        // explicitly so this doesn't read as a silent "synced with nothing
+        // sent" (see the `!hasAnswers` branch above for the case this isn't).
+        logger.warn(
+          `[Sync] entry ${entry.id} materialized survey ${realSurveyId} but has nothing to submit yet ` +
+            '(pending media attachment, most likely) — closing the queue entry locally',
+        );
         await syncQueueStorage.markSynced(entry.id);
         await surveyDraftStore.markSynced(entry.surveyId);
         return;
