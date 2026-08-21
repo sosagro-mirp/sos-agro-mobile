@@ -10,13 +10,14 @@ import { submitResponsesBatch } from '../api/responses';
 import { createSurvey, markSurveyAsSynced } from '../api/surveys';
 import { markSessionAsSynced, createCampaignSession } from '../api/campaignSessions';
 import { extractFarmer, extractCrops } from '../api/farmers';
+import { cacheFarmerIdentity } from '../lib/cacheFarmerIdentity';
 import { buildResponsesPayload } from '../lib/buildResponsesPayload';
 import { flattenSections } from '../lib/flattenSections';
 import { resolveOtherOptions } from '../lib/resolveOtherOptions';
 import { isLocalId } from '../lib/isLocalId';
 import { useSyncStatusStore } from '../store/useSyncStatusStore';
 import { useCampaignSessionStore } from '../store/useCampaignSessionStore';
-import { NetworkError, httpClient } from '../api/httpClient';
+import { NetworkError, ServerError, httpClient } from '../api/httpClient';
 import { endpoints } from '../api/endpoints';
 import { logger } from '../lib/logger';
 import { sessionCropsStorage } from '../storage/sessionCropsStorage';
@@ -27,6 +28,7 @@ import { postChangeRequest, fetchMyResolved } from '../api/changeRequests';
 import { useChangeRequestStore } from '../store/useChangeRequestStore';
 import { farmPlotStore } from '../storage/farmPlotStore';
 import { createFarmPlot } from '../api/farmPlots';
+import type { CampaignSessionResponse } from '../types/campaign';
 
 const MAX_CONSECUTIVE_NETWORK_FAILURES = 5;
 const BACKOFF_BASE_MS = 1000;
@@ -78,12 +80,20 @@ class SyncQueueServiceClass {
         logger.error('[Sync] pullResolvedChangeRequests failed, continuing anyway', err);
       }
     } finally {
-      // Reset any entries left in_flight (e.g., deferred due to unresolved session)
-      // so they're retried on the next sync run.
-      await syncQueueStorage.resetInFlightToRetry();
+      // isProcessing must clear even if the cleanup below throws, or every
+      // future processAll() call silently no-ops forever (see the guard at
+      // the top of this method).
       this.isProcessing = false;
       setSyncingId(null);
       markSyncCompleted();
+
+      // Reset any entries left in_flight (e.g., deferred due to unresolved session)
+      // so they're retried on the next sync run.
+      try {
+        await syncQueueStorage.resetInFlightToRetry();
+      } catch (err) {
+        logger.error('[Sync] resetInFlightToRetry failed', err);
+      }
       await refreshPendingCount();
     }
   }
@@ -135,11 +145,41 @@ class SyncQueueServiceClass {
           farmerIdForBackend = undefined;
         }
 
-        const sessionResponse = await createCampaignSession({
-          campaignId: session.campaignId,
-          userId: session.userId,
-          ...(farmerIdForBackend ? { farmerId: farmerIdForBackend } : {}),
-        });
+        const localCrops = await sessionCropsStorage.get(session.localSessionId);
+        const cropIds = localCrops.map((c) => c.cropId);
+
+        let sessionResponse: CampaignSessionResponse;
+        try {
+          sessionResponse = await createCampaignSession({
+            campaignId: session.campaignId,
+            userId: session.userId,
+            ...(farmerIdForBackend ? { farmerId: farmerIdForBackend } : {}),
+            ...(cropIds.length > 0 ? { cropIds } : {}),
+          });
+        } catch (createErr) {
+          // The farmerId was cached on this device but has since been
+          // deleted on the backend (e.g. cleanup of a prior test round):
+          // invalidate the stale entry and retry as a new farmer instead of
+          // marking the whole session as failed (see spec 49, Bug C).
+          if (
+            createErr instanceof ServerError &&
+            createErr.status === 404 &&
+            createErr.message === 'Farmer not found' &&
+            farmerIdForBackend
+          ) {
+            await farmerCacheStorage.remove(farmerIdForBackend);
+            logger.warn(
+              `[Sync] farmerId ${farmerIdForBackend} no longer exists on the backend, retrying session ${session.localSessionId} without it`,
+            );
+            sessionResponse = await createCampaignSession({
+              campaignId: session.campaignId,
+              userId: session.userId,
+              ...(cropIds.length > 0 ? { cropIds } : {}),
+            });
+          } else {
+            throw createErr;
+          }
+        }
 
         const realSessionId = sessionResponse.sessionId;
         const localSessionId = session.localSessionId;
@@ -197,16 +237,58 @@ class SyncQueueServiceClass {
         return;
       }
 
-      // If the survey was created offline, it doesn't exist on the backend yet.
-      // Create it now to obtain a real surveyId before sending responses.
+      // Spec 70, Fase 3 — decidir si hay contenido real ANTES de materializar,
+      // usando el borrador (`draft.answers`), no el payload de envío. Antes,
+      // materializar pasaba siempre que `isLocalId(entry.surveyId)`, sin mirar
+      // si había respuestas — eso es exactamente el vector 2: una fila vacía
+      // quedaba creada en el backend para siempre. El payload de envío NO
+      // sirve como señal aquí: una encuesta con solo una respuesta multimedia
+      // aún sin subir construye un payload vacío a propósito
+      // (`buildResponsesPayload` la omite hasta que resuelva `attachmentId`),
+      // pero sí tiene contenido real y debe materializarse igual — de lo
+      // contrario `MediaUploadService` nunca consigue un `surveyId` real para
+      // pedir la URL prefirmada.
+      const draft = await surveyDraftStore.loadDraft(entry.surveyId);
+      const hasAnswers = !!draft && Object.keys(draft.answers).length > 0;
+
+      if (!hasAnswers) {
+        logger.warn(
+          `[Sync] entry ${entry.id} has no answers — not materializing survey ${entry.surveyId}`,
+        );
+        await syncQueueStorage.markSynced(entry.id);
+        await surveyDraftStore.markSynced(entry.surveyId);
+        return;
+      }
+
+      // If the survey was created offline (or deferred — see beginSurvey.ts),
+      // it doesn't exist on the backend yet. Create it now that we know
+      // there's real content, to obtain a real surveyId — needed unconditionally
+      // from here on, including by MediaUploadService for any pending attachment.
       let realSurveyId = entry.surveyId;
       if (isLocalId(entry.surveyId)) {
-        realSurveyId = await this.materializeSurvey(entry);
+        realSurveyId =
+          (await surveyDraftStore.getBackendSurveyId(entry.surveyId)) ??
+          (await this.materializeSurvey(entry));
+        // Persisted so a failed media attachment can still be retried after
+        // this survey syncs and its local `id` (still the local one) is all
+        // that's left to look it up by — see surveyDraftStore.getBackendSurveyId.
+        await surveyDraftStore.setBackendSurveyId(entry.surveyId, realSurveyId);
       }
 
       const payload = await this.buildPayload(entry, realSurveyId);
 
       if (!payload || payload.length === 0) {
+        // Every answer is media still pending upload/confirmation (or
+        // otherwise unresolved) — the survey is already materialized (it has
+        // real content) but there's nothing to submit yet. The manual retry
+        // flow (MediaUploadService.retryEntry) links the response once the
+        // upload confirms; see its docs for why that's safe here. Logged
+        // explicitly so this doesn't read as a silent "synced with nothing
+        // sent" (see the `!hasAnswers` branch above for the case this isn't).
+        logger.warn(
+          `[Sync] entry ${entry.id} materialized survey ${realSurveyId} but has nothing to submit yet ` +
+            '(pending media attachment, most likely) — closing the queue entry locally',
+        );
         await syncQueueStorage.markSynced(entry.id);
         await surveyDraftStore.markSynced(entry.surveyId);
         return;
@@ -218,7 +300,6 @@ class SyncQueueServiceClass {
         if (item.optionId !== undefined && !UUID_RE.test(item.optionId)) {
           const msg = `[Sync] NON-UUID optionId detected before submit — questionId: ${item.questionId}, optionId: "${item.optionId}", surveyId: ${realSurveyId}`;
           logger.error(msg);
-          console.error(msg);
         }
       }
 
@@ -348,13 +429,25 @@ class SyncQueueServiceClass {
         if (storeState.localFarmerId === localFarmerId) {
           storeState.resolveFarmer(farmer.farmerId);
         }
+
+        try {
+          await farmerCacheStorage.remove(localFarmerId);
+        } catch (err) {
+          logger.warn(
+            `[Sync] failed to remove provisional farmer cache entry ${localFarmerId}: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
       }
 
-      await farmerCacheStorage.upsert({
+      await cacheFarmerIdentity({
         farmerId: farmer.farmerId,
         name: farmer.name,
         documentId: farmer.documentId ?? undefined,
-        cachedAt: new Date(),
+        phone: farmer.phone ?? undefined,
+        farmName: farmer.farm?.name ?? undefined,
+        crops: farmer.farm?.crops ?? undefined,
       });
 
       logger.info(`[Sync] extractFarmer completed for survey ${realSurveyId}`);
@@ -374,7 +467,10 @@ class SyncQueueServiceClass {
     const instrument = await instrumentCacheStorage.get(draft.instrumentId);
     if (!instrument) return [];
 
-    const attachmentIds = await MediaUploadService.processPendingForSurvey(entry.surveyId);
+    const attachmentIds = await MediaUploadService.processPendingForSurvey(
+      entry.surveyId,
+      realSurveyId,
+    );
 
     const flattenedQuestions = flattenSections(instrument.sections);
 

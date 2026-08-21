@@ -1,15 +1,21 @@
+import { useMemo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useInstrumentSurveyStore } from "../../../src/store/useInstrumentSurveyStore";
 import { useCampaignSessionStore } from "../../../src/store/useCampaignSessionStore";
+import { advanceWithinCampaign } from "../../../src/lib/campaignNavigation";
 import { Fonts } from "../../../src/theme/fonts";
+import { useTheme } from "../../../src/theme/ThemeProvider";
+import type { ThemeColors } from "../../../src/theme/colors";
 
 export default function InstrumentCompletedScreen() {
   const router = useRouter();
   const { instrumentName, campaignSessionId, reset } = useInstrumentSurveyStore();
   const { campaign, currentStep, sessionId, markStepCompleted } =
     useCampaignSessionStore();
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
 
   const isInsideCampaign = Boolean(campaignSessionId && campaign);
 
@@ -17,8 +23,14 @@ export default function InstrumentCompletedScreen() {
     reset();
     if (isInsideCampaign && sessionId) {
       markStepCompleted();
-      router.replace(
-        `/campaign/${campaign!.campaignId}/session/${sessionId}/orchestrator`
+      // dismissTo(pre-survey) + push, not replace: question/start screens for
+      // the instrument just finished were reached via push and would
+      // otherwise remain reachable via the native back button (see
+      // src/lib/campaignNavigation.ts).
+      advanceWithinCampaign(
+        router,
+        campaign!.campaignId,
+        `/campaign/${campaign!.campaignId}/session/${sessionId}/orchestrator`,
       );
     } else {
       router.replace("/");
@@ -54,43 +66,43 @@ export default function InstrumentCompletedScreen() {
   );
 }
 
-const GREEN = "#1B6B3A";
-
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#F9FAFB" },
-  content: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    paddingHorizontal: 32,
-    gap: 14,
-  },
-  icon: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: GREEN,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 8,
-  },
-  iconText: { fontSize: 36, color: "#fff" },
-  title: { fontSize: 24, fontFamily: Fonts.bold, color: "#111827" },
-  subtitle: { fontSize: 15, fontFamily: Fonts.semiBold, color: "#6B7280" },
-  progress: { fontSize: 13, fontFamily: Fonts.regular, color: GREEN },
-  description: {
-    fontSize: 14,
-    fontFamily: Fonts.regular,
-    color: "#9CA3AF",
-    textAlign: "center",
-    lineHeight: 20,
-  },
-  button: {
-    backgroundColor: GREEN,
-    borderRadius: 12,
-    paddingVertical: 18,
-    paddingHorizontal: 48,
-    marginTop: 12,
-  },
-  buttonText: { fontSize: 17, fontFamily: Fonts.bold, color: "#fff" },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    root: { flex: 1, backgroundColor: colors.surfaceMuted },
+    content: {
+      flex: 1,
+      justifyContent: "center",
+      alignItems: "center",
+      paddingHorizontal: 32,
+      gap: 14,
+    },
+    icon: {
+      width: 72,
+      height: 72,
+      borderRadius: 36,
+      backgroundColor: colors.brand,
+      alignItems: "center",
+      justifyContent: "center",
+      marginBottom: 8,
+    },
+    iconText: { fontSize: 36, color: colors.brandForeground },
+    title: { fontSize: 24, fontFamily: Fonts.bold, color: colors.textPrimary },
+    subtitle: { fontSize: 15, fontFamily: Fonts.semiBold, color: colors.textMuted },
+    progress: { fontSize: 13, fontFamily: Fonts.regular, color: colors.brand },
+    description: {
+      fontSize: 14,
+      fontFamily: Fonts.regular,
+      color: colors.textMuted,
+      textAlign: "center",
+      lineHeight: 20,
+    },
+    button: {
+      backgroundColor: colors.brand,
+      borderRadius: 12,
+      paddingVertical: 18,
+      paddingHorizontal: 48,
+      marginTop: 12,
+    },
+    buttonText: { fontSize: 17, fontFamily: Fonts.bold, color: colors.brandForeground },
+  });
+}

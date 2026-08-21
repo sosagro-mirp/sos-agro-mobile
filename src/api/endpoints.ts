@@ -7,6 +7,7 @@ export const endpoints = {
   surveySync: (id: string) => `/api/surveys/${id}/sync`,
 
   // Responses
+  responses: "/api/responses",
   responsesBatch: "/api/responses/batch",
 
   // Campaigns

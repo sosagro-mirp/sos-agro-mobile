@@ -13,7 +13,7 @@ import { useRouter } from "expo-router";
 import { useFocusEffect } from "expo-router";
 import * as FileSystem from "expo-file-system/legacy";
 import { logger, type LogFile } from "../../src/lib/logger";
-import { farmerCacheStorage } from "../../src/storage/farmerCache";
+import { farmerCacheStorage, type FarmerCacheEntry } from "../../src/storage/farmerCache";
 import { Fonts } from "../../src/theme/fonts";
 
 const LOG_DIR = (FileSystem.documentDirectory ?? "") + "logs/";
@@ -30,6 +30,8 @@ export default function DevLogsScreen() {
   const [loading, setLoading] = useState(false);
   const [clearingFarmers, setClearingFarmers] = useState(false);
   const [farmerClearResult, setFarmerClearResult] = useState<string | null>(null);
+  const [loadingFarmers, setLoadingFarmers] = useState(false);
+  const [farmerCache, setFarmerCache] = useState<FarmerCacheEntry[] | null>(null);
 
   async function loadFileList() {
     setLoading(true);
@@ -74,6 +76,19 @@ export default function DevLogsScreen() {
     Share.share({ message: content });
   }
 
+  async function handleViewFarmers() {
+    if (loadingFarmers) return;
+    setLoadingFarmers(true);
+    try {
+      const entries = await farmerCacheStorage.listRecent(50);
+      setFarmerCache(entries);
+    } catch (e) {
+      logger.error("[DevLogs] viewFarmers error", e);
+    } finally {
+      setLoadingFarmers(false);
+    }
+  }
+
   async function handleClearFarmers() {
     if (clearingFarmers) return;
     setClearingFarmers(true);
@@ -83,7 +98,7 @@ export default function DevLogsScreen() {
       setFarmerClearResult(`${count} agricultor${count !== 1 ? 'es' : ''} eliminado${count !== 1 ? 's' : ''}`);
     } catch (e) {
       setFarmerClearResult('Error al limpiar');
-      console.error("[DevLogs] clearFarmers error", e);
+      logger.error("[DevLogs] clearFarmers error", e);
     } finally {
       setClearingFarmers(false);
     }
@@ -102,7 +117,7 @@ export default function DevLogsScreen() {
       setSelectedLog(null);
       await loadFileList();
     } catch (e) {
-      console.error("[DevLogs] clear error", e);
+      logger.error("[DevLogs] clear error", e);
     }
   }
 
@@ -150,6 +165,34 @@ export default function DevLogsScreen() {
                 <Text style={[styles.actionText, styles.clearText]}>Limpiar logs</Text>
               </Pressable>
             </View>
+            <Pressable
+              style={[styles.actionButton, loadingFarmers && styles.buttonDisabled]}
+              onPress={handleViewFarmers}
+              disabled={loadingFarmers}
+            >
+              {loadingFarmers
+                ? <ActivityIndicator color="#fff" size="small" />
+                : <Text style={styles.actionText}>Ver caché de agricultores</Text>
+              }
+            </Pressable>
+            {farmerCache ? (
+              <View style={styles.farmerCacheBox}>
+                <Text style={styles.devResult}>
+                  {farmerCache.length} entrada{farmerCache.length !== 1 ? "s" : ""}
+                </Text>
+                {farmerCache.map((f) => (
+                  <View key={f.farmerId} style={styles.farmerRow}>
+                    <Text style={styles.farmerRowText}>
+                      farmerId: {f.farmerId}{"\n"}
+                      documentId: {f.documentId ?? "(sin documento)"}{"\n"}
+                      name: {f.name}{"\n"}
+                      phone: {f.phone ?? "-"} · farmName: {f.farmName ?? "-"} · crops: {f.crops?.length ?? 0}{"\n"}
+                      cachedAt: {f.cachedAt.toISOString()}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            ) : null}
             <Pressable
               style={[styles.actionButton, styles.clearButton, clearingFarmers && styles.buttonDisabled]}
               onPress={handleClearFarmers}
@@ -282,5 +325,19 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.regular,
     fontSize: 13,
     textAlign: "center",
+  },
+  farmerCacheBox: {
+    gap: 8,
+  },
+  farmerRow: {
+    backgroundColor: "#1E293B",
+    borderRadius: 8,
+    padding: 10,
+  },
+  farmerRowText: {
+    color: "#E2E8F0",
+    fontFamily: Fonts.regular,
+    fontSize: 11,
+    lineHeight: 16,
   },
 });

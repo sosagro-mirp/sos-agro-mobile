@@ -1,6 +1,8 @@
 import React, { useMemo, useState } from "react";
 import { FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { Fonts } from "../../theme/fonts";
+import { useTheme } from "../../theme/ThemeProvider";
+import type { ThemeColors } from "../../theme/colors";
 import type { InstrumentDraftAnswer, InstrumentOption } from "../../types/instrument";
 import { OPTION_SEARCH_THRESHOLD, normalizeSearchText } from "../../lib/optionSearch";
 
@@ -23,6 +25,8 @@ export function MultipleChoiceList({
 }: Props): React.JSX.Element {
   const [otherFocused, setOtherFocused] = useState(false);
   const [query, setQuery] = useState("");
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const isSearchable = options.length > searchThreshold;
 
   const visibleOptions = useMemo(() => {
@@ -90,7 +94,7 @@ export function MultipleChoiceList({
             onFocus={() => setOtherFocused(true)}
             onBlur={() => setOtherFocused(false)}
             placeholder="Especifica aquí..."
-            placeholderTextColor="#9CA3AF"
+            placeholderTextColor={colors.textMuted}
             multiline
             numberOfLines={2}
             textAlignVertical="top"
@@ -125,7 +129,7 @@ export function MultipleChoiceList({
           value={query}
           onChangeText={setQuery}
           placeholder="Buscar opción..."
-          placeholderTextColor="#9CA3AF"
+          placeholderTextColor={colors.textMuted}
           returnKeyType="search"
           autoCapitalize="none"
         />
@@ -158,132 +162,134 @@ export function MultipleChoiceList({
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    width: "100%",
-    gap: 8,
-  },
-  containerFill: {
-    flex: 1,
-  },
-  searchInput: {
-    fontFamily: Fonts.regular,
-    fontSize: 18,
-    color: "#111827",
-    backgroundColor: "#FFFFFF",
-    borderWidth: 2,
-    borderColor: "#D1D5DB",
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    height: 52,
-  },
-  noResults: {
-    fontFamily: Fonts.regular,
-    fontSize: 15,
-    color: "#6B7280",
-    paddingHorizontal: 4,
-  },
-  chipsRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  chip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    maxWidth: "100%",
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: "#1B6B3A",
-    backgroundColor: "#F0FDF4",
-  },
-  chipText: {
-    fontFamily: Fonts.regular,
-    fontSize: 14,
-    color: "#14532D",
-    flexShrink: 1,
-  },
-  chipRemove: {
-    fontFamily: Fonts.bold,
-    fontSize: 14,
-    color: "#1B6B3A",
-  },
-  virtualizedList: {
-    flex: 1,
-  },
-  virtualizedListContent: {
-    paddingBottom: 8,
-  },
-  separator: {
-    height: 8,
-  },
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    minHeight: 56,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    backgroundColor: "#FFFFFF",
-    borderWidth: 2,
-    borderColor: "#D1D5DB",
-    borderRadius: 12,
-    gap: 14,
-  },
-  rowSelected: {
-    borderLeftWidth: 4,
-    borderLeftColor: "#1B6B3A",
-    borderColor: "#1B6B3A",
-    backgroundColor: "#F0FDF4",
-  },
-  checkbox: {
-    width: 24,
-    height: 24,
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: "#9CA3AF",
-    alignItems: "center",
-    justifyContent: "center",
-    flexShrink: 0,
-  },
-  checkboxSelected: {
-    borderColor: "#1B6B3A",
-    backgroundColor: "#1B6B3A",
-  },
-  checkmark: {
-    color: "#FFFFFF",
-    fontSize: 14,
-    fontFamily: Fonts.bold,
-    lineHeight: 18,
-  },
-  label: {
-    fontFamily: Fonts.regular,
-    fontSize: 18,
-    lineHeight: 24,
-    color: "#374151",
-    flex: 1,
-  },
-  labelSelected: {
-    fontFamily: Fonts.semiBold,
-    color: "#14532D",
-  },
-  otherInput: {
-    fontFamily: Fonts.regular,
-    fontSize: 18,
-    lineHeight: 26,
-    color: "#111827",
-    backgroundColor: "#FFFFFF",
-    borderWidth: 2,
-    borderColor: "#D1D5DB",
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    minHeight: 72,
-    marginTop: 4,
-  },
-  otherInputFocused: {
-    borderColor: "#1B6B3A",
-  },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    container: {
+      width: "100%",
+      gap: 8,
+    },
+    containerFill: {
+      flex: 1,
+    },
+    searchInput: {
+      fontFamily: Fonts.regular,
+      fontSize: 18,
+      color: colors.textPrimary,
+      backgroundColor: colors.surface,
+      borderWidth: 2,
+      borderColor: colors.borderStrong,
+      borderRadius: 12,
+      paddingHorizontal: 16,
+      height: 52,
+    },
+    noResults: {
+      fontFamily: Fonts.regular,
+      fontSize: 15,
+      color: colors.textMuted,
+      paddingHorizontal: 4,
+    },
+    chipsRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8,
+    },
+    chip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      maxWidth: "100%",
+      paddingVertical: 6,
+      paddingHorizontal: 12,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: colors.brand,
+      backgroundColor: colors.brandSubtleBg,
+    },
+    chipText: {
+      fontFamily: Fonts.regular,
+      fontSize: 14,
+      color: colors.brandHover,
+      flexShrink: 1,
+    },
+    chipRemove: {
+      fontFamily: Fonts.bold,
+      fontSize: 14,
+      color: colors.brand,
+    },
+    virtualizedList: {
+      flex: 1,
+    },
+    virtualizedListContent: {
+      paddingBottom: 8,
+    },
+    separator: {
+      height: 8,
+    },
+    row: {
+      flexDirection: "row",
+      alignItems: "center",
+      minHeight: 56,
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+      backgroundColor: colors.surface,
+      borderWidth: 2,
+      borderColor: colors.borderStrong,
+      borderRadius: 12,
+      gap: 14,
+    },
+    rowSelected: {
+      borderLeftWidth: 4,
+      borderLeftColor: colors.brand,
+      borderColor: colors.brand,
+      backgroundColor: colors.brandSubtleBg,
+    },
+    checkbox: {
+      width: 24,
+      height: 24,
+      borderRadius: 6,
+      borderWidth: 2,
+      borderColor: colors.textMuted,
+      alignItems: "center",
+      justifyContent: "center",
+      flexShrink: 0,
+    },
+    checkboxSelected: {
+      borderColor: colors.brand,
+      backgroundColor: colors.brand,
+    },
+    checkmark: {
+      color: colors.brandForeground,
+      fontSize: 14,
+      fontFamily: Fonts.bold,
+      lineHeight: 18,
+    },
+    label: {
+      fontFamily: Fonts.regular,
+      fontSize: 18,
+      lineHeight: 24,
+      color: colors.textPrimary,
+      flex: 1,
+    },
+    labelSelected: {
+      fontFamily: Fonts.semiBold,
+      color: colors.brandHover,
+    },
+    otherInput: {
+      fontFamily: Fonts.regular,
+      fontSize: 18,
+      lineHeight: 26,
+      color: colors.textPrimary,
+      backgroundColor: colors.surface,
+      borderWidth: 2,
+      borderColor: colors.borderStrong,
+      borderRadius: 12,
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+      minHeight: 72,
+      marginTop: 4,
+    },
+    otherInputFocused: {
+      borderColor: colors.brand,
+    },
+  });
+}

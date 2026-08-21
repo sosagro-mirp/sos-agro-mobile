@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { StyleSheet, Text, View, Pressable } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -10,10 +10,16 @@ import { useAuthStore } from "../../../src/store/useAuthStore";
 import { PreSurveyForm } from "../../../src/components/campaign/PreSurveyForm";
 import { OfflineBanner } from "../../../src/components/network/OfflineBanner";
 import { Fonts } from "../../../src/theme/fonts";
+import { useTheme } from "../../../src/theme/ThemeProvider";
+import type { ThemeColors } from "../../../src/theme/colors";
 import { generateLocalId } from "../../../src/lib/generateLocalId";
 import { pendingSessionStorage } from "../../../src/storage/pendingSessions";
+import { cacheFarmerIdentity } from "../../../src/lib/cacheFarmerIdentity";
 import { farmerCacheStorage } from "../../../src/storage/farmerCache";
-import type { FarmerSearchResult } from "../../../src/types";
+import { sessionCropsStorage } from "../../../src/storage/sessionCropsStorage";
+import { ServerError } from "../../../src/api/httpClient";
+import { logger } from "../../../src/lib/logger";
+import type { CropSummary, FarmerSearchResult } from "../../../src/types";
 
 export default function PreSurveyScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -32,6 +38,8 @@ export default function PreSurveyScreen() {
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
 
   if (!campaign) {
     return (
@@ -44,10 +52,32 @@ export default function PreSurveyScreen() {
     );
   }
 
+  const createOnlineSession = async (
+    farmerId: string | undefined,
+    crops: CropSummary[] | undefined,
+  ) => {
+    const cropIds = crops?.map((c) => c.cropId);
+    const sessionResponse = await createCampaignSession({
+      campaignId: campaign.campaignId,
+      userId: user?.userId,
+      ...(farmerId ? { farmerId } : {}),
+      ...(cropIds && cropIds.length > 0 ? { cropIds } : {}),
+    });
+
+    // Known crop for an existing farmer: seed it locally too so offline
+    // navigation (getNextStepOffline) can unlock crop-conditioned steps
+    // even if the device loses connection later in this same session.
+    await sessionCropsStorage.save(sessionResponse.sessionId, crops ?? []);
+
+    applySessionResponse(sessionResponse);
+    router.push(`/campaign/${id}/session/${sessionResponse.sessionId}/orchestrator`);
+  };
+
   const startSessionOnline = async (options?: {
     farmerId?: string;
     farmerName?: string;
     isNew?: boolean;
+    crops?: CropSummary[];
   }) => {
     setError(null);
     setIsLoading(true);
@@ -60,16 +90,39 @@ export default function PreSurveyScreen() {
     }
 
     try {
-      const sessionResponse = await createCampaignSession({
-        campaignId: campaign.campaignId,
-        userId: user?.userId,
-        ...(options?.farmerId ? { farmerId: options.farmerId } : {}),
-      });
-
-      applySessionResponse(sessionResponse);
-      router.push(`/campaign/${id}/session/${sessionResponse.sessionId}/orchestrator`);
+      await createOnlineSession(options?.farmerId, options?.crops);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Error al crear la sesión");
+      // The farmer was cached on this device (e.g. from a prior test round)
+      // but has since been deleted on the backend: invalidate the stale
+      // entry and continue the flow as a new farmer instead of leaving the
+      // pollster stuck (see spec 49, Bug C).
+      if (
+        err instanceof ServerError &&
+        err.status === 404 &&
+        err.message === "Farmer not found" &&
+        options?.farmerId
+      ) {
+        try {
+          await farmerCacheStorage.remove(options.farmerId);
+        } catch (removeErr) {
+          // Best-effort invalidation: a cache failure here must not block
+          // the retry below, which is what actually unblocks the pollster.
+          logger.warn(
+            `[pre-survey] failed to invalidate stale farmerCache entry ${options.farmerId}: ${
+              removeErr instanceof Error ? removeErr.message : String(removeErr)
+            }`,
+          );
+        }
+        setNewFarmerMode();
+        try {
+          await createOnlineSession(undefined, options.crops);
+          setError("El agricultor seleccionado ya no existe en el servidor. Se registró como agricultor nuevo.");
+        } catch (retryErr) {
+          setError(retryErr instanceof Error ? retryErr.message : "Error al crear la sesión");
+        }
+      } else {
+        setError(err instanceof Error ? err.message : "Error al crear la sesión");
+      }
     } finally {
       setIsLoading(false);
     }
@@ -79,6 +132,7 @@ export default function PreSurveyScreen() {
     farmerId?: string;
     farmerName?: string;
     isNew?: boolean;
+    crops?: CropSummary[];
   }) => {
     setError(null);
     setIsLoading(true);
@@ -100,6 +154,8 @@ export default function PreSurveyScreen() {
         userId: user?.userId,
       });
 
+      await sessionCropsStorage.save(localSessionId, options?.crops ?? []);
+
       applyOfflineSession(localSessionId);
       router.push(`/campaign/${id}/session/${localSessionId}/orchestrator`);
     } catch (err) {
@@ -113,6 +169,7 @@ export default function PreSurveyScreen() {
     farmerId?: string;
     farmerName?: string;
     isNew?: boolean;
+    crops?: CropSummary[];
   }) => {
     if (isOnline) {
       await startSessionOnline(options);
@@ -123,16 +180,16 @@ export default function PreSurveyScreen() {
 
   const handleSearchSelect = async (farmerId: string, farmerName: string, farmer?: FarmerSearchResult) => {
     if (isOnline && farmer) {
-      await farmerCacheStorage.upsert({
+      await cacheFarmerIdentity({
         farmerId: farmer.farmerId,
         name: farmer.name,
-        documentId: farmer.documentId ?? undefined,
-        phone: farmer.phone ?? undefined,
-        farmName: farmer.farm?.name ?? undefined,
-        cachedAt: new Date(),
+        documentId: farmer.documentId,
+        phone: farmer.phone,
+        farmName: farmer.farm?.name,
+        crops: farmer.farm?.crops ?? undefined,
       });
     }
-    await startSession_({ farmerId, farmerName });
+    await startSession_({ farmerId, farmerName, crops: farmer?.farm?.crops ?? undefined });
   };
 
   const handleNewFarmer = async () => {
@@ -173,51 +230,51 @@ export default function PreSurveyScreen() {
   );
 }
 
-const GREEN = "#1B6B3A";
-
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#F9FAFB" },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    backgroundColor: "#fff",
-    borderBottomWidth: 1,
-    borderBottomColor: "#E5E7EB",
-  },
-  back: { fontSize: 15, fontFamily: Fonts.regular, color: GREEN },
-  title: {
-    flex: 1,
-    fontSize: 17,
-    fontFamily: Fonts.bold,
-    color: "#111827",
-    textAlign: "center",
-  },
-  errorBox: {
-    margin: 16,
-    padding: 12,
-    backgroundColor: "#FEF2F2",
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#FECACA",
-  },
-  errorBoxText: { fontSize: 14, fontFamily: Fonts.regular, color: "#DC2626" },
-  errorText: {
-    fontSize: 16,
-    fontFamily: Fonts.regular,
-    color: "#DC2626",
-    margin: 24,
-  },
-  loadingOverlay: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  loadingText: {
-    fontSize: 15,
-    fontFamily: Fonts.regular,
-    color: "#6B7280",
-  },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    root: { flex: 1, backgroundColor: colors.surfaceMuted },
+    header: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingHorizontal: 20,
+      paddingVertical: 16,
+      backgroundColor: colors.surface,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    back: { fontSize: 15, fontFamily: Fonts.regular, color: colors.brand },
+    title: {
+      flex: 1,
+      fontSize: 17,
+      fontFamily: Fonts.bold,
+      color: colors.textPrimary,
+      textAlign: "center",
+    },
+    errorBox: {
+      margin: 16,
+      padding: 12,
+      backgroundColor: colors.dangerBg,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: colors.dangerFg,
+    },
+    errorBoxText: { fontSize: 14, fontFamily: Fonts.regular, color: colors.dangerFg },
+    errorText: {
+      fontSize: 16,
+      fontFamily: Fonts.regular,
+      color: colors.dangerFg,
+      margin: 24,
+    },
+    loadingOverlay: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    loadingText: {
+      fontSize: 15,
+      fontFamily: Fonts.regular,
+      color: colors.textMuted,
+    },
+  });
+}

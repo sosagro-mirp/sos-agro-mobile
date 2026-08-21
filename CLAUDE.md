@@ -68,6 +68,10 @@ pnpm ios                # Simulador iOS
 pnpm test               # Jest unit tests
 pnpm test --watch       # Watch mode
 
+# Typecheck / Lint
+pnpm typecheck           # tsc --noEmit
+pnpm lint                # expo lint (ESLint)
+
 # Migraciones SQLite (Drizzle)
 pnpm drizzle-kit generate   # Generar migración a partir de cambios en schema.ts
 
@@ -78,6 +82,19 @@ eas build --profile production --platform android    # AAB para Google Play
 ```
 
 > **Nota:** El background sync **no funciona en Expo Go**. Requiere un EAS dev build (`development` profile) para probar tareas en background.
+
+> **Nota (spec 52, 2026-07-29):** el disparo de sincronización al reconectar
+> (`NetworkMonitor`, basado en `@react-native-community/netinfo`) también
+> puede diferir entre Expo Go y un build nativo, aunque en teoría no depende
+> de `expo-background-task`. Se confirmó que Expo Go no emite la secuencia de
+> eventos de `NetInfo` con la misma fidelidad que un APK real: un caso que no
+> sincronizaba solo en Expo Go sí lo hizo correctamente (~3.7s) en APK
+> `preview`. Para cualquier caso de prueba que dependa de transiciones de
+> conectividad (no solo de si hay red o no), reproducir en APK real antes de
+> asumir que es un bug — Expo Go no es una base confiable para ese tipo de
+> diagnóstico. Detalle completo en
+> `spec/52_sincronizacion_automatica_al_reconectar.md` y
+> `docs/testing/25-test-spec52.md`.
 
 ---
 
@@ -108,7 +125,10 @@ Los perfiles en `eas.json` inyectan automáticamente el valor correcto al hacer 
 - **Base URL local:** `http://localhost:3000`
 - **Base URL producción:** `https://sosagroapi.up.railway.app`
 - **Autenticación:** JWT Bearer — token guardado en `expo-secure-store` (cifrado)
-- **Cliente HTTP:** `src/api/httpClient.ts` — timeout 15s, 3 reintentos con backoff exponencial
+- **Cliente HTTP:** `src/api/httpClient.ts` — timeout 15s por request; reintenta internamente solo
+  errores 5xx (máx 3 reintentos, backoff exponencial). Los errores de red (sin conexión, timeout)
+  se propagan de inmediato como `NetworkError` — el reintento de esos casos ocurre una capa arriba,
+  en `SyncQueueService` (ver "Reintentos" más abajo).
 
 Módulos de API (`src/api/`):
 
@@ -124,7 +144,10 @@ Módulos de API (`src/api/`):
 | `endpoints.ts` | Definiciones centralizadas de todas las rutas |
 
 **Manejo de errores:**
-- 5xx / timeout → reintentables (backoff exponencial, máx 3 intentos)
+- 5xx → reintentable dentro de `httpClient` (backoff exponencial, máx 3 intentos por request).
+- Timeout / sin conexión (`NetworkError`) → no se reintenta dentro de `httpClient`; se propaga a
+  `SyncQueueService`, que reintenta en la siguiente corrida de sync (backoff exponencial hasta
+  `MAX_CONSECUTIVE_NETWORK_FAILURES = 5` fallos consecutivos).
 - 4xx → no reintentables; `syncQueue` los marca como `failed_validation`
 
 ---
@@ -136,10 +159,11 @@ mobile/
 ├── app/                          # Rutas Expo Router (file-based)
 │   ├── _layout.tsx               # Root: auth check + inicialización DB
 │   ├── login.tsx
-│   ├── (tabs)/                   # Tab navigator con 3 pestañas
+│   ├── (tabs)/                   # Tab navigator con 4 pestañas
 │   │   ├── campaign/index.tsx    # Lista de campañas activas
 │   │   ├── drafts/index.tsx      # Encuestas guardadas sin enviar
-│   │   └── sync/index.tsx        # Estado de cola de sincronización
+│   │   ├── sync/index.tsx        # Estado de cola de sincronización
+│   │   └── requests/index.tsx    # Solicitudes de cambio
 │   └── campaign/[id]/
 │       ├── pre-survey.tsx        # Identificación del agricultor (S1/S2 flow)
 │       └── session/[sessionId]/
@@ -151,12 +175,19 @@ mobile/
     │
     ├── components/               # Componentes React Native reutilizables
     │   ├── campaign/             # CampaignCard, CampaignProgress, DuplicateAlertModal, PreSurveyForm
-    │   ├── common/               # PrimaryButton, SecondaryButton, Screen (safe-area wrapper)
+    │   ├── common/               # PrimaryButton, SecondaryButton, Screen (safe-area wrapper),
+    │   │                          # ThemeToggle (spec 63)
     │   ├── drafts/               # DraftListItem
     │   ├── inputs/               # Todos los inputs de encuesta (ver tabla de tipos)
     │   ├── instrument/           # QuestionRenderer, QuestionScreen, ProgressBar, QuestionContainer
     │   ├── network/              # OfflineBanner
+    │   ├── requests/             # ChangeRequestBanner, ChangeRequestForm
     │   └── sync/                 # SyncStatusBadge
+    │
+    ├── theme/                    # resolveTheme.ts (funciones puras), colors.ts
+    │   │                          # (lightColors/darkColors), ThemeProvider.tsx + useTheme()
+    │   │                          # — spec 63. Persistencia en storage/themeStorage.ts
+    │   └── fonts.ts               # JetBrains Mono
     │
     ├── lib/                      # Utilidades puras
     │   ├── buildResponsesPayload.ts  # Serializa respuestas para el batch API
@@ -176,6 +207,7 @@ mobile/
     │   ├── instrumentCache.ts    # Cache de definiciones de instrumentos
     │   ├── campaignCache.ts      # Cache de campañas renderizadas
     │   ├── secureStorage.ts      # Token cifrado (expo-secure-store)
+    │   ├── themeStorage.ts       # Preferencia de tema (expo-secure-store) — spec 63
     │   └── duplicateDetection.ts # Detecta encuestas duplicadas por agricultor + timestamp
     │
     ├── store/                    # Zustand stores (estado en memoria)
@@ -305,8 +337,11 @@ No borrar ni modificar tests existentes sin instrucción explícita.
 
 ## Specs de funcionalidades
 
-- Carpeta: `specs/`
-- Nomenclatura: `spec{{NN}}.md` (ej. `spec19.md`)
+- Carpeta: `spec/` en la raíz del ecosistema (`../spec/` desde este repositorio).
+  Todos los specs viven ahí, sin importar cuántos repositorios afecten —
+  ver el `CLAUDE.md` raíz. Este repositorio ya no tiene una carpeta `specs/` propia.
+- Nomenclatura: `NN_slug_descriptivo.md` (ej. `57_mejoras_post_lanzamiento_mobile.md`),
+  con numeración continua compartida por todo el ecosistema.
 - Antes de implementar, el spec debe estar aprobado por el usuario.
 - Los specs completados **no se borran**; se marcan con `[DONE]` en el título.
 
@@ -321,7 +356,7 @@ No borrar ni modificar tests existentes sin instrucción explícita.
    - El schema SQLite (¿necesita migración Drizzle?)
    - La cola de sync (¿cambia el payload al backend?)
 2. Usar el subagente `architect` para el plan (fases y archivos; **sin código**).
-3. Guardar el plan en `specs/`.
+3. Guardar el plan en `../spec/` (raíz del ecosistema).
 4. Esperar aprobación del usuario.
 5. Crear rama nueva desde `development`.
 

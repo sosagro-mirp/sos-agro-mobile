@@ -1,11 +1,15 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useChangeRequestStore } from '../../store/useChangeRequestStore';
 import { Fonts } from '../../theme/fonts';
+import { useTheme } from '../../theme/ThemeProvider';
+import type { ThemeColors } from '../../theme/colors';
 
 export const ChangeRequestBanner: React.FC = () => {
   const hasNewResolved = useChangeRequestStore((s) => s.hasNewResolved);
   const setHasNewResolved = useChangeRequestStore((s) => s.setHasNewResolved);
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
 
   if (!hasNewResolved) return null;
 
@@ -21,30 +25,32 @@ export const ChangeRequestBanner: React.FC = () => {
   );
 };
 
-const styles = StyleSheet.create({
-  banner: {
-    backgroundColor: '#D1FAE5',
-    borderLeftWidth: 4,
-    borderLeftColor: '#1B6B3A',
-    padding: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  text: {
-    fontFamily: Fonts.regular,
-    fontSize: 13,
-    color: '#065F46',
-    flex: 1,
-  },
-  dismiss: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  dismissText: {
-    fontFamily: Fonts.semiBold,
-    fontSize: 13,
-    color: '#1B6B3A',
-  },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    banner: {
+      backgroundColor: colors.brandSubtleBg,
+      borderLeftWidth: 4,
+      borderLeftColor: colors.brand,
+      padding: 12,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 8,
+    },
+    text: {
+      fontFamily: Fonts.regular,
+      fontSize: 13,
+      color: colors.brandSubtleFg,
+      flex: 1,
+    },
+    dismiss: {
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+    },
+    dismissText: {
+      fontFamily: Fonts.semiBold,
+      fontSize: 13,
+      color: colors.brand,
+    },
+  });
+}

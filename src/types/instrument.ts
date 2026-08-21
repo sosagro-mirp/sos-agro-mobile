@@ -1,6 +1,7 @@
 export type QuestionTypeName =
   | "open_text"
   | "numeric"
+  | "numeric_with_unit"
   | "yes_no"
   | "single_choice"
   | "multiple_choice"
@@ -126,7 +127,11 @@ export interface FarmerSearchResult {
   name: string;
   documentId: string | null;
   phone?: string | null;
-  farm?: { farmId: string; name: string } | null;
+  farm?: {
+    farmId?: string;
+    name: string;
+    crops?: CropSummary[] | null;
+  } | null;
 }
 
 export interface ExtractFarmerResult {

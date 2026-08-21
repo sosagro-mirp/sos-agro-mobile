@@ -1,6 +1,8 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { Pressable, Text, View, StyleSheet } from "react-native";
 import { Fonts } from "../../theme/fonts";
+import { useTheme } from "../../theme/ThemeProvider";
+import type { ThemeColors } from "../../theme/colors";
 import type { CampaignRender } from "../../types/campaign";
 
 interface CampaignCardProps {
@@ -12,11 +14,14 @@ export const CampaignCard: React.FC<CampaignCardProps> = ({
   campaign,
   onPress,
 }) => {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+
   return (
     <Pressable
       style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
       onPress={onPress}
-      android_ripple={{ color: "#D1FAE5" }}
+      android_ripple={{ color: colors.brandSubtleBg }}
       hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
     >
       <View style={styles.accentBar} />
@@ -47,70 +52,72 @@ export const CampaignCard: React.FC<CampaignCardProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
-  card: {
-    flexDirection: "row",
-    backgroundColor: "#FFFFFF",
-    borderRadius: 10,
-    overflow: "hidden",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-    elevation: 2,
-    minHeight: 72,
-  },
-  cardPressed: {
-    opacity: 0.85,
-  },
-  accentBar: {
-    width: 4,
-    backgroundColor: "#1B6B3A",
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    gap: 6,
-  },
-  name: {
-    fontFamily: Fonts.semiBold,
-    fontSize: 16,
-    color: "#111827",
-    lineHeight: 22,
-  },
-  description: {
-    fontFamily: Fonts.regular,
-    fontSize: 13,
-    color: "#6B7280",
-    lineHeight: 18,
-  },
-  footer: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    marginTop: 2,
-  },
-  stepsBadge: {
-    backgroundColor: "#D1FAE5",
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 12,
-  },
-  stepsText: {
-    fontFamily: Fonts.medium,
-    fontSize: 12,
-    color: "#1B6B3A",
-  },
-  inactiveBadge: {
-    backgroundColor: "#F3F4F6",
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 12,
-  },
-  inactiveText: {
-    fontFamily: Fonts.medium,
-    fontSize: 12,
-    color: "#9CA3AF",
-  },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    card: {
+      flexDirection: "row",
+      backgroundColor: colors.surface,
+      borderRadius: 10,
+      overflow: "hidden",
+      shadowColor: "#000",
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.08,
+      shadowRadius: 4,
+      elevation: 2,
+      minHeight: 72,
+    },
+    cardPressed: {
+      opacity: 0.85,
+    },
+    accentBar: {
+      width: 4,
+      backgroundColor: colors.brand,
+    },
+    content: {
+      flex: 1,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      gap: 6,
+    },
+    name: {
+      fontFamily: Fonts.semiBold,
+      fontSize: 16,
+      color: colors.textPrimary,
+      lineHeight: 22,
+    },
+    description: {
+      fontFamily: Fonts.regular,
+      fontSize: 13,
+      color: colors.textMuted,
+      lineHeight: 18,
+    },
+    footer: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      marginTop: 2,
+    },
+    stepsBadge: {
+      backgroundColor: colors.brandSubtleBg,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 12,
+    },
+    stepsText: {
+      fontFamily: Fonts.medium,
+      fontSize: 12,
+      color: colors.brandSubtleFg,
+    },
+    inactiveBadge: {
+      backgroundColor: colors.surfaceMuted,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 12,
+    },
+    inactiveText: {
+      fontFamily: Fonts.medium,
+      fontSize: 12,
+      color: colors.textMuted,
+    },
+  });
+}

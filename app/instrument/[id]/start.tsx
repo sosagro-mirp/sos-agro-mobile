@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -13,14 +13,17 @@ import { useCachedInstrumentsStore } from "../../../src/store/useCachedInstrumen
 import { useInstrumentSurveyStore } from "../../../src/store/useInstrumentSurveyStore";
 import { useCampaignSessionStore } from "../../../src/store/useCampaignSessionStore";
 import { useSyncStatusStore } from "../../../src/store/useSyncStatusStore";
-import { createSurvey } from "../../../src/api/surveys";
-import { surveyDraftStore } from "../../../src/storage/surveyDraftStore";
-import { generateLocalId } from "../../../src/lib/generateLocalId";
+import { beginSurvey } from "../../../src/lib/beginSurvey";
 import { OfflineBanner } from "../../../src/components/network/OfflineBanner";
 import { Fonts } from "../../../src/theme/fonts";
+import { useTheme } from "../../../src/theme/ThemeProvider";
+import type { ThemeColors } from "../../../src/theme/colors";
 
 export default function InstrumentStartScreen() {
-  const { id, existingSurveyId } = useLocalSearchParams<{ id: string; existingSurveyId?: string }>();
+  // `existingSurveyId` se retiró en spec 70, Fase 4: el flujo de
+  // sobrescritura ya no crea la encuesta de reemplazo por adelantado, así
+  // que este screen tiene un único camino de inicio (ver `beginSurvey()`).
+  const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
 
   const instrument = useCachedInstrumentsStore((s) =>
@@ -29,9 +32,18 @@ export default function InstrumentStartScreen() {
   const { initializeSurvey } = useInstrumentSurveyStore();
   const { sessionId: campaignSessionId, currentStep, farmerId } = useCampaignSessionStore();
   const { isOnline } = useSyncStatusStore();
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
 
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Guarda efectiva contra el doble disparo del botón «Comenzar»: `starting`
+  // (estado de React) no se refleja de forma síncrona en la clausura ya
+  // capturada por un segundo `onPress` dentro del mismo tick, así que dos
+  // toques rápidos podían pasar ambos la guarda de estado. `useRef` sí es
+  // síncrono — ver spec 70, Fase 1. `starting` se conserva solo para el
+  // estado visual del botón (spinner + disabled).
+  const startingRef = useRef(false);
 
   if (!instrument) {
     return (
@@ -50,47 +62,23 @@ export default function InstrumentStartScreen() {
   );
 
   const handleStart = async () => {
-    if (starting) return;
+    if (startingRef.current) return;
+    startingRef.current = true;
     setError(null);
     setStarting(true);
 
     try {
-      let surveyId: string;
-
-      if (existingSurveyId) {
-        // Overwrite flow: backend already created the survey via /overwrite.
-        surveyId = existingSurveyId;
-        await surveyDraftStore.createDraft({
-          surveyId,
-          instrumentId: instrument.instrumentId,
-          campaignSessionId: campaignSessionId ?? undefined,
-          farmerId: farmerId ?? undefined,
-        });
-      } else if (isOnline) {
-        const response = await createSurvey({
-          instrumentIds: [instrument.instrumentId],
-          ...(campaignSessionId ? { campaignSessionId } : {}),
-          ...(currentStep ? { stepOrder: currentStep.order } : {}),
-          ...(farmerId ? { farmerId } : {}),
-        });
-        surveyId = response.surveyId;
-
-        await surveyDraftStore.createDraft({
-          surveyId,
-          instrumentId: instrument.instrumentId,
-          campaignSessionId: campaignSessionId ?? undefined,
-          farmerId: farmerId ?? undefined,
-        });
-      } else {
-        // Offline: generate a local id; SyncQueueService materializes it on reconnect.
-        surveyId = generateLocalId('survey');
-        await surveyDraftStore.createDraft({
-          surveyId,
-          instrumentId: instrument.instrumentId,
-          campaignSessionId: campaignSessionId ?? undefined,
-          farmerId: farmerId ?? undefined,
-        });
-      }
+      // Camino único, online y offline, incluida la sobrescritura de un
+      // duplicado (spec 70, Fases 2 y 4): el registro en el backend se
+      // difiere hasta que exista al menos una respuesta. `beginSurvey()`
+      // siempre genera un id local y crea el borrador; el backend recibe la
+      // fila real recién al sincronizar.
+      const surveyId = await beginSurvey({
+        instrumentId: instrument.instrumentId,
+        campaignSessionId: campaignSessionId ?? undefined,
+        farmerId: farmerId ?? undefined,
+        stepOrder: currentStep?.order,
+      });
 
       initializeSurvey({
         surveyId,
@@ -107,6 +95,7 @@ export default function InstrumentStartScreen() {
         err instanceof Error ? err.message : "Error al iniciar la encuesta"
       );
     } finally {
+      startingRef.current = false;
       setStarting(false);
     }
   };
@@ -172,7 +161,7 @@ export default function InstrumentStartScreen() {
           disabled={starting}
         >
           {starting ? (
-            <ActivityIndicator color="#fff" />
+            <ActivityIndicator color={colors.brandForeground} />
           ) : (
             <Text style={styles.buttonText}>Comenzar</Text>
           )}
@@ -183,6 +172,9 @@ export default function InstrumentStartScreen() {
 }
 
 function SummaryItem({ label, value }: { label: string; value: number }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+
   return (
     <View style={styles.summaryItem}>
       <Text style={styles.summaryValue}>{value}</Text>
@@ -191,91 +183,91 @@ function SummaryItem({ label, value }: { label: string; value: number }) {
   );
 }
 
-const GREEN = "#1B6B3A";
-
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#F9FAFB" },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    backgroundColor: "#fff",
-    borderBottomWidth: 1,
-    borderBottomColor: "#E5E7EB",
-  },
-  back: { fontSize: 15, fontFamily: Fonts.regular, color: GREEN },
-  headerTitle: { fontSize: 17, fontFamily: Fonts.bold, color: "#111827" },
-  content: { padding: 24, gap: 16 },
-  name: { fontSize: 22, fontFamily: Fonts.bold, color: "#111827" },
-  meta: { fontSize: 14, fontFamily: Fonts.regular, color: "#9CA3AF" },
-  stepBadge: {
-    alignSelf: "flex-start",
-    backgroundColor: "#DCFCE7",
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  stepText: { fontSize: 13, fontFamily: Fonts.semiBold, color: GREEN },
-  summaryRow: { flexDirection: "row", gap: 16 },
-  summaryItem: {
-    flex: 1,
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    padding: 16,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-  },
-  summaryValue: { fontSize: 28, fontFamily: Fonts.bold, color: GREEN },
-  summaryLabel: {
-    fontSize: 13,
-    fontFamily: Fonts.regular,
-    color: "#6B7280",
-    marginTop: 2,
-  },
-  sections: { gap: 8 },
-  sectionRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    backgroundColor: "#fff",
-    borderRadius: 8,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-  },
-  sectionName: { fontSize: 14, fontFamily: Fonts.semiBold, color: "#374151" },
-  sectionCount: { fontSize: 13, fontFamily: Fonts.regular, color: "#9CA3AF" },
-  offlineBanner: {
-    backgroundColor: "#FEF3C7",
-    borderRadius: 8,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: "#FDE68A",
-  },
-  offlineText: { fontSize: 14, fontFamily: Fonts.regular, color: "#92400E" },
-  errorBox: {
-    backgroundColor: "#FEF2F2",
-    borderRadius: 8,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: "#FECACA",
-  },
-  errorBoxText: { fontSize: 14, fontFamily: Fonts.regular, color: "#DC2626" },
-  errorText: {
-    fontSize: 16,
-    fontFamily: Fonts.regular,
-    color: "#DC2626",
-    margin: 24,
-  },
-  footer: { padding: 20, backgroundColor: "#fff", borderTopWidth: 1, borderTopColor: "#E5E7EB" },
-  button: {
-    backgroundColor: GREEN,
-    borderRadius: 12,
-    paddingVertical: 18,
-    alignItems: "center",
-  },
-  buttonDisabled: { backgroundColor: "#9CA3AF" },
-  buttonText: { fontSize: 17, fontFamily: Fonts.bold, color: "#fff" },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    root: { flex: 1, backgroundColor: colors.surfaceMuted },
+    header: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingHorizontal: 20,
+      paddingVertical: 16,
+      backgroundColor: colors.surface,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    back: { fontSize: 15, fontFamily: Fonts.regular, color: colors.brand },
+    headerTitle: { fontSize: 17, fontFamily: Fonts.bold, color: colors.textPrimary },
+    content: { padding: 24, gap: 16 },
+    name: { fontSize: 22, fontFamily: Fonts.bold, color: colors.textPrimary },
+    meta: { fontSize: 14, fontFamily: Fonts.regular, color: colors.textMuted },
+    stepBadge: {
+      alignSelf: "flex-start",
+      backgroundColor: colors.successBg,
+      borderRadius: 8,
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+    },
+    stepText: { fontSize: 13, fontFamily: Fonts.semiBold, color: colors.brand },
+    summaryRow: { flexDirection: "row", gap: 16 },
+    summaryItem: {
+      flex: 1,
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      padding: 16,
+      alignItems: "center",
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    summaryValue: { fontSize: 28, fontFamily: Fonts.bold, color: colors.brand },
+    summaryLabel: {
+      fontSize: 13,
+      fontFamily: Fonts.regular,
+      color: colors.textMuted,
+      marginTop: 2,
+    },
+    sections: { gap: 8 },
+    sectionRow: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      backgroundColor: colors.surface,
+      borderRadius: 8,
+      padding: 14,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    sectionName: { fontSize: 14, fontFamily: Fonts.semiBold, color: colors.textPrimary },
+    sectionCount: { fontSize: 13, fontFamily: Fonts.regular, color: colors.textMuted },
+    offlineBanner: {
+      backgroundColor: colors.warningBg,
+      borderRadius: 8,
+      padding: 12,
+      borderWidth: 1,
+      borderColor: colors.warningFg,
+    },
+    offlineText: { fontSize: 14, fontFamily: Fonts.regular, color: colors.warningFg },
+    errorBox: {
+      backgroundColor: colors.dangerBg,
+      borderRadius: 8,
+      padding: 12,
+      borderWidth: 1,
+      borderColor: colors.dangerFg,
+    },
+    errorBoxText: { fontSize: 14, fontFamily: Fonts.regular, color: colors.dangerFg },
+    errorText: {
+      fontSize: 16,
+      fontFamily: Fonts.regular,
+      color: colors.dangerFg,
+      margin: 24,
+    },
+    footer: { padding: 20, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border },
+    button: {
+      backgroundColor: colors.brand,
+      borderRadius: 12,
+      paddingVertical: 18,
+      alignItems: "center",
+    },
+    buttonDisabled: { backgroundColor: colors.textMuted },
+    buttonText: { fontSize: 17, fontFamily: Fonts.bold, color: colors.brandForeground },
+  });
+}

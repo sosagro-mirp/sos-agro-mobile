@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { captureError } from '../lib/sentry';
 import { campaignCacheStorage } from '../storage/campaignCache';
 import { instrumentCacheStorage } from '../storage/instrumentCache';
 import { farmerCacheStorage } from '../storage/farmerCache';
@@ -49,6 +50,7 @@ export const useCachedCampaignsStore = create<CachedCampaignsState>((set, get) =
       ]);
       set({ campaigns, cachedInstrumentIds: new Set(cachedIds) });
     } catch (error) {
+      captureError(error, { store: 'useCachedCampaignsStore', action: 'loadFromCache' });
       set({ error: error instanceof Error ? error.message : 'Error cargando caché' });
     }
   },
@@ -164,6 +166,7 @@ export const useCachedCampaignsStore = create<CachedCampaignsState>((set, get) =
             documentId: farmer.documentId ?? undefined,
             phone: farmer.phone ?? undefined,
             farmName: farmer.farm?.name ?? undefined,
+            crops: farmer.farm?.crops ?? undefined,
             cachedAt: new Date(),
           });
           set((s) => ({

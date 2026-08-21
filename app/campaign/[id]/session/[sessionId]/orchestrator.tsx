@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -9,22 +9,24 @@ import { useSyncStatusStore } from "../../../../../src/store/useSyncStatusStore"
 import { getNextStep } from "../../../../../src/api/campaignSessions";
 import { fetchInstrumentByCode } from "../../../../../src/api/instruments";
 import { extractFarmer, extractCrops } from "../../../../../src/api/farmers";
-import { createSurvey } from "../../../../../src/api/surveys";
 import { overwriteSurvey, skipStepApi } from "../../../../../src/api/surveys";
 import { surveyDraftStore } from "../../../../../src/storage/surveyDraftStore";
 import { syncQueueStorage } from "../../../../../src/storage/syncQueue";
 import { instrumentCacheStorage } from "../../../../../src/storage/instrumentCache";
-import { farmerCacheStorage } from "../../../../../src/storage/farmerCache";
 import { SyncQueueService } from "../../../../../src/sync/SyncQueueService";
 import { checkDuplicate } from "../../../../../src/storage/duplicateDetection";
 import { getNextStepOffline } from "../../../../../src/lib/getNextStepOffline";
 import { extractCropsOffline } from "../../../../../src/lib/extractCropsOffline";
 import { generateLocalId } from "../../../../../src/lib/generateLocalId";
 import { extractFarmerLocally } from "../../../../../src/lib/extractFarmerLocally";
+import { cacheFarmerIdentity } from "../../../../../src/lib/cacheFarmerIdentity";
 import { sessionCropsStorage } from "../../../../../src/storage/sessionCropsStorage";
 import { DuplicateAlertModal } from "../../../../../src/components/campaign/DuplicateAlertModal";
 import { NetworkError } from "../../../../../src/api/httpClient";
+import { advanceWithinCampaign, returnToPreSurvey } from "../../../../../src/lib/campaignNavigation";
 import { Fonts } from "../../../../../src/theme/fonts";
+import { useTheme } from "../../../../../src/theme/ThemeProvider";
+import type { ThemeColors } from "../../../../../src/theme/colors";
 
 type ScreenState = 'loading' | 'offline' | 'injection_error' | 'error' | 'duplicate_pending' | 'offline_extraction_pending';
 
@@ -53,6 +55,8 @@ export default function OrchestratorScreen() {
   } | null>(null);
   const [modalLoading, setModalLoading] = useState(false);
   const hasStarted = useRef(false);
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
 
   // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -68,10 +72,13 @@ export default function OrchestratorScreen() {
     const { instrumentId, name } = await fetchInstrumentByCode(code);
     const instrument = await getOrDownloadInstrument(instrumentId);
 
-    const { surveyId } = await createSurvey({
-      instrumentIds: [instrumentId],
-      campaignSessionId: resolvedSessionId,
-    });
+    // Spec 70, Fase 4 (vector 3) — igual que `injectInstrumentOffline`: el
+    // registro real se difiere hasta que exista contenido. Antes, esto
+    // llamaba a `createSurvey()` de inmediato; si la app se cerraba durante
+    // la fase de inyección, `s1SurveyId`/`s2SurveyId` (solo en memoria) se
+    // perdía y la reentrada creaba una fila nueva, dejando la anterior
+    // huérfana.
+    const surveyId = generateLocalId('survey');
 
     await surveyDraftStore.createDraft({
       surveyId,
@@ -93,8 +100,8 @@ export default function OrchestratorScreen() {
       campaignSessionId: resolvedSessionId,
     });
 
-    router.replace(`/instrument/${instrumentId}/question/0`);
-  }, [resolvedSessionId, getOrDownloadInstrument, store, initializeSurvey, router]);
+    advanceWithinCampaign(router, id, `/instrument/${instrumentId}/question/0`);
+  }, [resolvedSessionId, getOrDownloadInstrument, store, initializeSurvey, router, id]);
 
   const injectInstrumentOffline = useCallback(async (code: 'S1' | 'S2') => {
     if (!resolvedSessionId) return;
@@ -133,8 +140,8 @@ export default function OrchestratorScreen() {
       campaignSessionId: resolvedSessionId,
     });
 
-    router.replace(`/instrument/${instrument.instrumentId}/question/0`);
-  }, [resolvedSessionId, store, initializeSurvey, router]);
+    advanceWithinCampaign(router, id, `/instrument/${instrument.instrumentId}/question/0`);
+  }, [resolvedSessionId, store, initializeSurvey, router, id]);
 
   const injectInstrument = useCallback(async (code: 'S1' | 'S2') => {
     if (isOnline) {
@@ -152,7 +159,7 @@ export default function OrchestratorScreen() {
     instrument?: { instrumentId: string; name: string; isActive: boolean };
   }) => {
     if (!nextStep.instrument) {
-      router.replace(`/campaign/${id}/session/${resolvedSessionId}/completed`);
+      advanceWithinCampaign(router, id, `/campaign/${id}/session/${resolvedSessionId}/completed`);
       return;
     }
 
@@ -179,7 +186,7 @@ export default function OrchestratorScreen() {
     }
 
     await getOrDownloadInstrument(nextStep.instrument.instrumentId);
-    router.replace(`/instrument/${nextStep.instrument.instrumentId}/start`);
+    advanceWithinCampaign(router, id, `/instrument/${nextStep.instrument.instrumentId}/start`);
   }, [id, resolvedSessionId, getOrDownloadInstrument, router]);
 
   // Check for duplicates and either navigate or set duplicate_pending state.
@@ -189,7 +196,7 @@ export default function OrchestratorScreen() {
     instrument?: { instrumentId: string; name: string; isActive: boolean };
   }) => {
     if (!nextStep.stepId || !nextStep.instrument) {
-      router.replace(`/campaign/${id}/session/${resolvedSessionId}/completed`);
+      advanceWithinCampaign(router, id, `/campaign/${id}/session/${resolvedSessionId}/completed`);
       return;
     }
 
@@ -216,7 +223,7 @@ export default function OrchestratorScreen() {
     }
 
     await getOrDownloadInstrument(nextStep.instrument.instrumentId);
-    router.replace(`/instrument/${nextStep.instrument.instrumentId}/start`);
+    advanceWithinCampaign(router, id, `/instrument/${nextStep.instrument.instrumentId}/start`);
   }, [id, resolvedSessionId, isOnline, getOrDownloadInstrument, router]);
 
   // ── main entry logic ───────────────────────────────────────────────────────
@@ -235,24 +242,46 @@ export default function OrchestratorScreen() {
         if (!s1SurveyId) {
           await injectInstrument('S1');
         } else if (isOnline) {
-          // Online: sync S1, extract farmer, inject S2
+          // Online: sync S1, extract farmer, inject S2.
+          // `s1SurveyId` is local (spec 70, Fase 4) — processSurveyNow()
+          // materializes it on the backend; extractFarmer() needs the real id.
           await SyncQueueService.processSurveyNow(s1SurveyId);
-          const { farmer } = await extractFarmer(s1SurveyId);
+          const realS1SurveyId = await surveyDraftStore.getBackendSurveyId(s1SurveyId);
+          if (!realS1SurveyId) {
+            // Sync didn't materialize it (e.g. S1 has no answers yet) —
+            // sending the local id to extractFarmer() would 404 against the
+            // backend. Surface it as an injection error instead of a silent
+            // fallback (caught below, sets screenState to 'injection_error').
+            throw new Error(
+              `No se pudo sincronizar la encuesta S1 (${s1SurveyId}) antes de extraer el agricultor`,
+            );
+          }
+          const { farmer } = await extractFarmer(realS1SurveyId);
+          await cacheFarmerIdentity({
+            farmerId: farmer.farmerId,
+            name: farmer.name,
+            documentId: farmer.documentId,
+            phone: farmer.phone,
+            farmName: farmer.farm?.name,
+            crops: farmer.farm?.crops ?? undefined,
+          });
           store.completeS1Injection(farmer.farmerId, farmer.name);
           await injectInstrument('S2');
         } else {
           // Offline: extract farmer locally from S1 responses
           const draft = await extractFarmerLocally(s1SurveyId);
           if (draft) {
-            if (draft.isProvisional) {
-              await farmerCacheStorage.upsert({
-                farmerId: draft.farmerId,
-                name: draft.name,
-                documentId: draft.documentId ?? undefined,
-                phone: draft.phone ?? undefined,
-                cachedAt: new Date(),
-              });
-            }
+            // Re-caching an already-resolved identity (isProvisional: false)
+            // just refreshes cachedAt — harmless, and keeps this branch
+            // symmetric with the online one instead of only caching new
+            // provisional farmers.
+            await cacheFarmerIdentity({
+              farmerId: draft.farmerId,
+              name: draft.name,
+              documentId: draft.documentId,
+              phone: draft.phone,
+              farmName: draft.farmName,
+            });
             store.applyLocalFarmer(draft);
             store.completeS1Injection(draft.farmerId, draft.name);
             await injectInstrument('S2');
@@ -264,9 +293,19 @@ export default function OrchestratorScreen() {
         if (!s2SurveyId) {
           await injectInstrument('S2');
         } else if (isOnline) {
-          // Online: sync S2, extract crops, get next step
+          // Online: sync S2, extract crops, get next step.
+          // `s2SurveyId` is local (spec 70, Fase 4) — resolve the real id
+          // materialized by processSurveyNow() before calling extractCrops().
           await SyncQueueService.processSurveyNow(s2SurveyId);
-          const cropsResult = await extractCrops(s2SurveyId);
+          const realS2SurveyId = await surveyDraftStore.getBackendSurveyId(s2SurveyId);
+          if (!realS2SurveyId) {
+            // Same reasoning as the S1 branch above — never fall back to the
+            // local id silently.
+            throw new Error(
+              `No se pudo sincronizar la encuesta S2 (${s2SurveyId}) antes de extraer los cultivos`,
+            );
+          }
+          const cropsResult = await extractCrops(realS2SurveyId);
           if (resolvedSessionId) {
             await sessionCropsStorage.save(resolvedSessionId, cropsResult.crops);
           }
@@ -285,12 +324,12 @@ export default function OrchestratorScreen() {
           }
           store.completeS2Injection();
           if (!campaign?.campaignId) {
-            router.replace(`/campaign/${id}/session/${resolvedSessionId}/completed`);
+            advanceWithinCampaign(router, id, `/campaign/${id}/session/${resolvedSessionId}/completed`);
             return;
           }
           const nextStep = await getNextStepOffline(campaign.campaignId, resolvedSessionId, -1);
           if (!nextStep || (!nextStep.stepId && !nextStep.instrument)) {
-            router.replace(`/campaign/${id}/session/${resolvedSessionId}/completed`);
+            advanceWithinCampaign(router, id, `/campaign/${id}/session/${resolvedSessionId}/completed`);
             return;
           }
           store.applyNextStep(nextStep);
@@ -310,7 +349,7 @@ export default function OrchestratorScreen() {
           const lastOrder = currentStep?.order ?? -1;
           const nextStep = await getNextStepOffline(campaign.campaignId, resolvedSessionId, lastOrder);
           if (!nextStep || (!nextStep.stepId && !nextStep.instrument)) {
-            router.replace(`/campaign/${id}/session/${resolvedSessionId}/completed`);
+            advanceWithinCampaign(router, id, `/campaign/${id}/session/${resolvedSessionId}/completed`);
             return;
           }
           store.applyNextStep(nextStep);
@@ -338,19 +377,21 @@ export default function OrchestratorScreen() {
     try {
       if (isOnline) {
         const { sessionId: storeSessionId } = useCampaignSessionStore.getState();
-        const { surveyId: newSurveyId } = await overwriteSurvey({
+        // Spec 70, Fase 4 — el endpoint solo descarta el duplicado. El
+        // reemplazo se inicia igual que cualquier otro instrumento: navegar
+        // a `start` sin id previo, para que `beginSurvey()` cree el borrador
+        // local y el registro real solo exista al haber respuestas. Antes,
+        // el backend creaba de inmediato la fila de reemplazo vacía, que
+        // quedaba huérfana si el encuestador abandonaba tras sobrescribir.
+        await overwriteSurvey({
           surveyId: duplicatePending.remoteSurveyId!,
           sessionId: storeSessionId!,
-          instrumentId: duplicatePending.instrument.instrumentId,
-          stepOrder: duplicatePending.stepOrder,
         });
 
         await getOrDownloadInstrument(duplicatePending.instrument.instrumentId);
         setDuplicatePending(null);
         setScreenState('loading');
-        router.replace(
-          `/instrument/${duplicatePending.instrument.instrumentId}/start?existingSurveyId=${newSurveyId}`
-        );
+        advanceWithinCampaign(router, id, `/instrument/${duplicatePending.instrument.instrumentId}/start`);
       } else {
         if (duplicatePending.localSurveyId) {
           await syncQueueStorage.deleteBySurveyId(duplicatePending.localSurveyId);
@@ -359,14 +400,14 @@ export default function OrchestratorScreen() {
         await getOrDownloadInstrument(duplicatePending.instrument.instrumentId);
         setDuplicatePending(null);
         setScreenState('loading');
-        router.replace(`/instrument/${duplicatePending.instrument.instrumentId}/start`);
+        advanceWithinCampaign(router, id, `/instrument/${duplicatePending.instrument.instrumentId}/start`);
       }
     } catch (err) {
       setModalLoading(false);
       setScreenState('error');
       setErrorMessage(err instanceof Error ? err.message : 'Error al sobrescribir');
     }
-  }, [duplicatePending, resolvedSessionId, isOnline, getOrDownloadInstrument, router]);
+  }, [duplicatePending, resolvedSessionId, isOnline, getOrDownloadInstrument, router, id]);
 
   const handleSkip = useCallback(async () => {
     if (!duplicatePending || !resolvedSessionId) return;
@@ -406,7 +447,7 @@ export default function OrchestratorScreen() {
 
         const campaignId = campaign?.campaignId;
         if (!campaignId) {
-          router.replace(`/campaign/${id}/session/${resolvedSessionId}/completed`);
+          advanceWithinCampaign(router, id, `/campaign/${id}/session/${resolvedSessionId}/completed`);
           return;
         }
 
@@ -417,13 +458,13 @@ export default function OrchestratorScreen() {
         );
 
         if (!nextStepOffline || (!nextStepOffline.stepId && !nextStepOffline.instrument)) {
-          router.replace(`/campaign/${id}/session/${resolvedSessionId}/completed`);
+          advanceWithinCampaign(router, id, `/campaign/${id}/session/${resolvedSessionId}/completed`);
           return;
         }
 
         store.applyNextStep(nextStepOffline);
         await getOrDownloadInstrument(nextStepOffline.instrument!.instrumentId);
-        router.replace(`/instrument/${nextStepOffline.instrument!.instrumentId}/start`);
+        advanceWithinCampaign(router, id, `/instrument/${nextStepOffline.instrument!.instrumentId}/start`);
       }
     } catch (err) {
       setModalLoading(false);
@@ -434,7 +475,7 @@ export default function OrchestratorScreen() {
 
   const handleCancel = useCallback(() => {
     setDuplicatePending(null);
-    router.replace(`/campaign/${id}/pre-survey`);
+    returnToPreSurvey(router, id);
   }, [id, router]);
 
   // ── effects ────────────────────────────────────────────────────────────────
@@ -527,7 +568,7 @@ export default function OrchestratorScreen() {
           </Pressable>
           <Pressable
             style={styles.button}
-            onPress={() => router.replace(`/campaign/${id}/pre-survey`)}
+            onPress={() => returnToPreSurvey(router, id)}
           >
             <Text style={styles.buttonText}>← Volver a identificar</Text>
           </Pressable>
@@ -565,53 +606,53 @@ export default function OrchestratorScreen() {
         onCancel={handleCancel}
       />
       <View style={styles.center}>
-        <ActivityIndicator size="large" color={GREEN} />
+        <ActivityIndicator size="large" color={colors.brand} />
         <Text style={styles.loadingLabel}>Cargando siguiente paso…</Text>
       </View>
     </SafeAreaView>
   );
 }
 
-const GREEN = "#1B6B3A";
-
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#F9FAFB" },
-  center: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    paddingHorizontal: 32,
-    gap: 16,
-  },
-  loadingLabel: { fontSize: 15, fontFamily: Fonts.regular, color: "#6B7280" },
-  bigIcon: { fontSize: 48 },
-  title: { fontSize: 20, fontFamily: Fonts.bold, color: "#111827" },
-  desc: {
-    fontSize: 15,
-    fontFamily: Fonts.regular,
-    color: "#6B7280",
-    textAlign: "center",
-    lineHeight: 22,
-  },
-  errorDesc: {
-    fontSize: 14,
-    fontFamily: Fonts.regular,
-    color: "#DC2626",
-    textAlign: "center",
-  },
-  button: {
-    backgroundColor: "#9CA3AF",
-    borderRadius: 12,
-    paddingVertical: 16,
-    paddingHorizontal: 40,
-    marginTop: 8,
-  },
-  buttonActive: {
-    backgroundColor: GREEN,
-    borderRadius: 12,
-    paddingVertical: 16,
-    paddingHorizontal: 40,
-    marginTop: 8,
-  },
-  buttonText: { fontSize: 16, fontFamily: Fonts.semiBold, color: "#fff" },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    root: { flex: 1, backgroundColor: colors.surfaceMuted },
+    center: {
+      flex: 1,
+      justifyContent: "center",
+      alignItems: "center",
+      paddingHorizontal: 32,
+      gap: 16,
+    },
+    loadingLabel: { fontSize: 15, fontFamily: Fonts.regular, color: colors.textMuted },
+    bigIcon: { fontSize: 48 },
+    title: { fontSize: 20, fontFamily: Fonts.bold, color: colors.textPrimary },
+    desc: {
+      fontSize: 15,
+      fontFamily: Fonts.regular,
+      color: colors.textMuted,
+      textAlign: "center",
+      lineHeight: 22,
+    },
+    errorDesc: {
+      fontSize: 14,
+      fontFamily: Fonts.regular,
+      color: colors.dangerFg,
+      textAlign: "center",
+    },
+    button: {
+      backgroundColor: colors.textMuted,
+      borderRadius: 12,
+      paddingVertical: 16,
+      paddingHorizontal: 40,
+      marginTop: 8,
+    },
+    buttonActive: {
+      backgroundColor: colors.brand,
+      borderRadius: 12,
+      paddingVertical: 16,
+      paddingHorizontal: 40,
+      marginTop: 8,
+    },
+    buttonText: { fontSize: 16, fontFamily: Fonts.semiBold, color: colors.brandForeground },
+  });
+}

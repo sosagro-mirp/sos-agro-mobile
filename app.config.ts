@@ -6,7 +6,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
 
   return {
     ...config,
-    name: 'SOS Agro 4C',
+    name: 'Sos Agro 4.C',
     slug: 'sosagro-characterization',
     version: '1.0.0',
     orientation: 'portrait',
@@ -15,7 +15,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     scheme: 'sosagro',
     runtimeVersion: { policy: 'appVersion' },
     updates: {
-      url: 'https://u.expo.dev/YOUR_PROJECT_ID',
+      url: 'https://u.expo.dev/a9915da7-c235-4537-a1a0-de31ac73d63b',
       enabled: true,
       fallbackToCacheTimeout: 0,
     },
@@ -34,7 +34,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         'INTERNET',
         'ACCESS_NETWORK_STATE',
         'CAMERA',
-        'MICROPHONE',
+        // RECORD_AUDIO lo inyecta el config plugin de expo-audio
+        // (recordAudioAndroid, true por defecto). Antes había aquí un
+        // 'MICROPHONE' que no corresponde a ningún permiso real de Android.
         'READ_MEDIA_IMAGES',
         'READ_MEDIA_VIDEO',
         'READ_MEDIA_AUDIO',
@@ -59,7 +61,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         },
       ],
       [
-        'expo-av',
+        'expo-audio',
         {
           microphonePermission: 'SOSAgro necesita acceso al micrófono para grabar respuestas de voz en campo.',
         },
@@ -72,9 +74,20 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           isIosBackgroundLocationEnabled: false,
         },
       ],
+      [
+        '@sentry/react-native/expo',
+        {
+          organization: 'instituto-tecnologico-metropol',
+          project: 'sosagro-mobile',
+        },
+      ],
     ],
     extra: {
       apiBaseUrl: process.env.EXPO_PUBLIC_API_BASE_URL,
+      eas: {
+        projectId: 'a9915da7-c235-4537-a1a0-de31ac73d63b',
+      },
     },
+    owner: 'santiagosuarez219',
   };
 };

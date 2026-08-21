@@ -1,6 +1,8 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { StyleSheet, TextInput, View } from "react-native";
 import { Fonts } from "../../theme/fonts";
+import { useTheme } from "../../theme/ThemeProvider";
+import type { ThemeColors } from "../../theme/colors";
 import type { InstrumentDraftAnswer } from "../../types/instrument";
 
 interface Props {
@@ -11,6 +13,8 @@ interface Props {
 
 export function OpenTextInput({ questionId, value, onChange }: Props): React.JSX.Element {
   const [focused, setFocused] = useState(false);
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
 
   function handleChange(text: string): void {
     onChange({ questionId, textValue: text });
@@ -27,31 +31,33 @@ export function OpenTextInput({ questionId, value, onChange }: Props): React.JSX
         textAlignVertical="top"
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
-        placeholderTextColor="#9CA3AF"
+        placeholderTextColor={colors.textMuted}
         placeholder="Escribe tu respuesta aquí..."
       />
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    width: "100%",
-  },
-  input: {
-    fontFamily: Fonts.regular,
-    fontSize: 18,
-    lineHeight: 26,
-    color: "#111827",
-    backgroundColor: "#FFFFFF",
-    borderWidth: 2,
-    borderColor: "#D1D5DB",
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    minHeight: 120,
-  },
-  inputFocused: {
-    borderColor: "#1B6B3A",
-  },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    container: {
+      width: "100%",
+    },
+    input: {
+      fontFamily: Fonts.regular,
+      fontSize: 18,
+      lineHeight: 26,
+      color: colors.textPrimary,
+      backgroundColor: colors.surface,
+      borderWidth: 2,
+      borderColor: colors.borderStrong,
+      borderRadius: 12,
+      paddingHorizontal: 16,
+      paddingVertical: 14,
+      minHeight: 120,
+    },
+    inputFocused: {
+      borderColor: colors.brand,
+    },
+  });
+}

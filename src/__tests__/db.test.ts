@@ -12,7 +12,7 @@ import {
   syncQueue,
   instrumentCache,
   campaignCache,
-} from '../../storage/db/schema';
+} from '../storage/db/schema';
 
 // Helper: extract column names from a Drizzle SQLite table
 function columnNames(table: Record<string, unknown>): string[] {

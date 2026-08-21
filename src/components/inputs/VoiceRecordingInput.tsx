@@ -1,8 +1,17 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Mic, Square, Play, X } from 'lucide-react-native';
-import { Audio } from 'expo-av';
+import {
+  AudioModule,
+  RecordingPresets,
+  setAudioModeAsync,
+  useAudioPlayer,
+  useAudioRecorder,
+  useAudioRecorderState,
+} from 'expo-audio';
 import * as FileSystem from 'expo-file-system/legacy';
+import { useTheme } from '../../theme/ThemeProvider';
+import type { ThemeColors } from '../../theme/colors';
 import type { InstrumentDraftAnswer } from '../../types/instrument';
 
 interface Props {
@@ -15,32 +24,107 @@ type RecordingState = 'idle' | 'recording' | 'recorded';
 
 const VOICE_DIR = `${FileSystem.documentDirectory}media/voice/`;
 
+// Field recordings on a spotty connection can otherwise grow unboundedly;
+// cap at 5 minutes so a single answer never blocks the sync queue with a
+// huge upload.
+const MAX_DURATION_SECONDS = 300;
+
 export function VoiceRecordingInput({ questionId, value, onChange }: Props): React.JSX.Element {
   const [state, setState] = useState<RecordingState>(value ? 'recorded' : 'idle');
-  const [recording, setRecording] = useState<Audio.Recording | null>(null);
-  const [duration, setDuration] = useState(0);
-  const [sound, setSound] = useState<Audio.Sound | null>(null);
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const autoStoppedRef = useRef(false);
+  const isRecordingRef = useRef(false);
+
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const recorderState = useAudioRecorderState(recorder, 500);
+  const duration = Math.floor(recorderState.durationMillis / 1000);
+
+  const player = useAudioPlayer(value ? { uri: value } : null);
+
+  // Read by the unmount-only cleanup effect below, which must always act on
+  // the latest recorder instance without re-running (and prematurely
+  // stopping it) whenever this component merely re-renders.
+  const recorderRef = useRef(recorder);
+  recorderRef.current = recorder;
+
+  useEffect(() => {
+    isRecordingRef.current = recorderState.isRecording;
+  }, [recorderState.isRecording]);
+
+  // useAudioPlayer only loads the source it was created with — it doesn't
+  // reload when `value` changes on a later render, so a re-record has to
+  // replace it manually. Skipped when `value` clears (delete): the native
+  // module rejects `replace(null)` at runtime even though `useAudioPlayer`
+  // itself accepts a null source. Leaving the previous source loaded is
+  // harmless here since playback controls aren't rendered outside the
+  // `recorded` state, and the next real recording will replace it correctly.
+  useEffect(() => {
+    if (!value) return;
+    player.replace({ uri: value });
+  }, [value, player]);
+
+  useEffect(() => {
+    return () => {
+      // No manual player.remove() here: useAudioPlayer/useAudioRecorder are
+      // both built on useReleasingSharedObject, which already releases the
+      // native instance on unmount. Calling .remove() again ourselves raced
+      // that internal cleanup and crashed with "shared object already
+      // released". Stopping an in-flight recording is a different action
+      // (not a release) and doesn't conflict with it.
+      if (isRecordingRef.current) {
+        recorderRef.current.stop().catch(() => {});
+      }
+    };
+    // Intentionally empty: this must run its cleanup exactly once, on true
+    // unmount — not on every render where `player`/`recorder` happen to get
+    // a new identity, which would trigger this early.
+  }, []);
+
+  async function finishRecording(): Promise<void> {
+    await recorder.stop();
+    await setAudioModeAsync({ allowsRecording: false });
+
+    const uri = recorder.uri;
+    if (!uri) return;
+
+    await FileSystem.makeDirectoryAsync(VOICE_DIR, { intermediates: true });
+    const filename = `${questionId}-${Date.now()}.m4a`;
+    const dest = `${VOICE_DIR}${filename}`;
+    await FileSystem.copyAsync({ from: uri, to: dest });
+
+    setState('recorded');
+    onChange({ questionId, mediaLocalPath: dest, mimeType: 'audio/m4a' });
+  }
+
+  // recorderState updates on every polling tick (every 500ms) while
+  // recording, so this effect can fire several times before `recorder.stop()`
+  // resolves and isRecording flips to false — the ref guards against
+  // triggering finishRecording() more than once for the same recording.
+  useEffect(() => {
+    if (!recorderState.isRecording) return;
+    if (duration >= MAX_DURATION_SECONDS && !autoStoppedRef.current) {
+      autoStoppedRef.current = true;
+      finishRecording().catch(() => {
+        Alert.alert('Error', 'No se pudo guardar la grabación.');
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [duration, recorderState.isRecording]);
 
   async function startRecording(): Promise<void> {
     try {
-      const { granted } = await Audio.requestPermissionsAsync();
+      const { granted } = await AudioModule.requestRecordingPermissionsAsync();
       if (!granted) {
         Alert.alert('Permiso requerido', 'SOSAgro necesita acceso al micrófono para grabar audio.');
         return;
       }
 
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
 
-      const { recording: rec } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY,
-        (status) => {
-          if (status.isRecording) {
-            setDuration(Math.floor((status.durationMillis ?? 0) / 1000));
-          }
-        },
-      );
-
-      setRecording(rec);
+      autoStoppedRef.current = false;
+      await recorder.prepareToRecordAsync();
+      recorder.record();
       setState('recording');
     } catch {
       Alert.alert('Error', 'No se pudo iniciar la grabación.');
@@ -48,22 +132,8 @@ export function VoiceRecordingInput({ questionId, value, onChange }: Props): Rea
   }
 
   async function stopRecording(): Promise<void> {
-    if (!recording) return;
     try {
-      await recording.stopAndUnloadAsync();
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
-
-      const uri = recording.getURI();
-      if (!uri) return;
-
-      await FileSystem.makeDirectoryAsync(VOICE_DIR, { intermediates: true });
-      const filename = `${questionId}-${Date.now()}.m4a`;
-      const dest = `${VOICE_DIR}${filename}`;
-      await FileSystem.copyAsync({ from: uri, to: dest });
-
-      setRecording(null);
-      setState('recorded');
-      onChange({ questionId, mediaLocalPath: dest, mimeType: 'audio/m4a' });
+      await finishRecording();
     } catch {
       Alert.alert('Error', 'No se pudo guardar la grabación.');
     }
@@ -72,25 +142,16 @@ export function VoiceRecordingInput({ questionId, value, onChange }: Props): Rea
   async function playPreview(): Promise<void> {
     if (!value) return;
     try {
-      if (sound) {
-        await sound.replayAsync();
-        return;
-      }
-      const { sound: s } = await Audio.Sound.createAsync({ uri: value });
-      setSound(s);
-      await s.playAsync();
+      await player.seekTo(0);
+      player.play();
     } catch {
       Alert.alert('Error', 'No se pudo reproducir la grabación.');
     }
   }
 
   function deleteRecording(): void {
-    if (sound) {
-      sound.unloadAsync();
-      setSound(null);
-    }
+    player.pause();
     setState('idle');
-    setDuration(0);
     onChange({ questionId, mediaLocalPath: undefined, mimeType: undefined });
   }
 
@@ -98,7 +159,7 @@ export function VoiceRecordingInput({ questionId, value, onChange }: Props): Rea
     return (
       <View style={styles.container}>
         <TouchableOpacity style={styles.recordButton} onPress={startRecording}>
-          <Mic size={22} color="#FFFFFF" />
+          <Mic size={22} color={colors.brandForeground} />
           <Text style={styles.recordButtonText}>Iniciar grabación</Text>
         </TouchableOpacity>
       </View>
@@ -113,7 +174,7 @@ export function VoiceRecordingInput({ questionId, value, onChange }: Props): Rea
           <Text style={styles.recordingText}>Grabando... {duration}s</Text>
         </View>
         <TouchableOpacity style={[styles.recordButton, styles.stopButton]} onPress={stopRecording}>
-          <Square size={22} color="#FFFFFF" />
+          <Square size={22} color={colors.brandForeground} />
           <Text style={styles.recordButtonText}>Detener</Text>
         </TouchableOpacity>
       </View>
@@ -126,11 +187,11 @@ export function VoiceRecordingInput({ questionId, value, onChange }: Props): Rea
         <Text style={styles.recordedLabel}>Grabación lista</Text>
         <View style={styles.actions}>
           <TouchableOpacity style={styles.secondaryButton} onPress={playPreview}>
-            <Play size={16} color="#374151" />
+            <Play size={16} color={colors.textPrimary} />
             <Text style={styles.secondaryButtonText}>Reproducir</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.secondaryButton} onPress={deleteRecording}>
-            <X size={16} color="#DC2626" />
+            <X size={16} color={colors.dangerFg} />
             <Text style={[styles.secondaryButtonText, styles.deleteText]}>Eliminar</Text>
           </TouchableOpacity>
         </View>
@@ -139,52 +200,54 @@ export function VoiceRecordingInput({ questionId, value, onChange }: Props): Rea
   );
 }
 
-const styles = StyleSheet.create({
-  container: { width: '100%', gap: 12 },
-  recordButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#1B6B3A',
-    borderRadius: 12,
-    paddingVertical: 16,
-    gap: 10,
-  },
-  stopButton: { backgroundColor: '#DC2626' },
-  recordButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
-  recordingBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  dot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#DC2626',
-  },
-  recordingText: { fontSize: 15, color: '#DC2626', fontWeight: '500' },
-  recordedCard: {
-    borderWidth: 2,
-    borderColor: '#1B6B3A',
-    borderRadius: 12,
-    padding: 16,
-    gap: 12,
-  },
-  recordedLabel: { fontSize: 15, color: '#1B6B3A', fontWeight: '600' },
-  actions: { flexDirection: 'row', gap: 10 },
-  secondaryButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1.5,
-    borderColor: '#D1D5DB',
-    borderRadius: 8,
-    paddingVertical: 10,
-    gap: 6,
-  },
-  secondaryButtonText: { fontSize: 14, color: '#374151' },
-  deleteText: { color: '#DC2626' },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    container: { width: '100%', gap: 12 },
+    recordButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.brand,
+      borderRadius: 12,
+      paddingVertical: 16,
+      gap: 10,
+    },
+    stopButton: { backgroundColor: colors.dangerFg },
+    recordButtonText: { color: colors.brandForeground, fontSize: 16, fontWeight: '600' },
+    recordingBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+    },
+    dot: {
+      width: 10,
+      height: 10,
+      borderRadius: 5,
+      backgroundColor: colors.dangerFg,
+    },
+    recordingText: { fontSize: 15, color: colors.dangerFg, fontWeight: '500' },
+    recordedCard: {
+      borderWidth: 2,
+      borderColor: colors.brand,
+      borderRadius: 12,
+      padding: 16,
+      gap: 12,
+    },
+    recordedLabel: { fontSize: 15, color: colors.brand, fontWeight: '600' },
+    actions: { flexDirection: 'row', gap: 10 },
+    secondaryButton: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1.5,
+      borderColor: colors.borderStrong,
+      borderRadius: 8,
+      paddingVertical: 10,
+      gap: 6,
+    },
+    secondaryButtonText: { fontSize: 14, color: colors.textPrimary },
+    deleteText: { color: colors.dangerFg },
+  });
+}
