@@ -428,6 +428,13 @@ export default function OrchestratorScreen() {
         hasStarted.current = false;
         run();
       } else {
+        // Spec 70, Fase 10 — antes esta entrada se encolaba con itemType
+        // 'survey' (el default) y processSurveyEntry la descartaba en
+        // silencio por no tener respuestas: la guarda de la Fase 3 no
+        // distinguía "vacío por abandono" de "vacío a propósito". itemType:
+        // 'skip-step' la enruta a processSkipStepEntry, que llama a
+        // POST /api/surveys/skip-step al sincronizar — el mismo endpoint que
+        // usa esta misma función en la rama online, unas líneas arriba.
         const skipSurveyId = generateId();
         await surveyDraftStore.createDraft({
           surveyId: skipSurveyId,
@@ -440,6 +447,8 @@ export default function OrchestratorScreen() {
           surveyId: skipSurveyId,
           campaignSessionId: storeSessionId ?? undefined,
           stepOrder: duplicatePending.stepOrder,
+          itemType: 'skip-step',
+          instrumentId: duplicatePending.instrument.instrumentId,
         });
 
         setDuplicatePending(null);

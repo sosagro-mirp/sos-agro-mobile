@@ -50,6 +50,7 @@ jest.mock('../api/responses', () => ({
 jest.mock('../api/surveys', () => ({
   markSurveyAsSynced: jest.fn(),
   createSurvey: jest.fn(),
+  skipStepApi: jest.fn(),
 }));
 
 jest.mock('../api/campaignSessions', () => ({
@@ -165,7 +166,7 @@ import { syncQueueStorage } from '../storage/syncQueue';
 import { surveyDraftStore } from '../storage/surveyDraftStore';
 import { instrumentCacheStorage } from '../storage/instrumentCache';
 import { submitResponsesBatch } from '../api/responses';
-import { markSurveyAsSynced } from '../api/surveys';
+import { markSurveyAsSynced, skipStepApi } from '../api/surveys';
 import { markSessionAsSynced, createCampaignSession } from '../api/campaignSessions';
 import { extractFarmer, extractCrops } from '../api/farmers';
 import { sessionCropsStorage } from '../storage/sessionCropsStorage';
@@ -212,6 +213,7 @@ const mockBuildResponsesPayload = buildResponsesPayload as jest.Mock;
 const mockFarmPlotLoadDraft = farmPlotStore.loadDraft as jest.Mock;
 const mockFarmPlotMarkSynced = farmPlotStore.markSynced as jest.Mock;
 const mockCreateFarmPlot = createFarmPlot as jest.Mock;
+const mockSkipStepApi = skipStepApi as jest.Mock;
 
 let mockSetSyncingId: jest.Mock;
 let mockMarkSyncCompleted: jest.Mock;
@@ -311,6 +313,7 @@ beforeEach(() => {
   mockFarmPlotLoadDraft.mockResolvedValue(null);
   mockFarmPlotMarkSynced.mockResolvedValue(undefined);
   mockCreateFarmPlot.mockResolvedValue({ farmPlotId: 'backend-plot-1' });
+  mockSkipStepApi.mockResolvedValue({ surveyId: 'skip-marker-1' });
   (useCampaignSessionStore.getState as jest.Mock).mockReturnValue({
     localSessionId: null,
     localFarmerId: null,
@@ -793,5 +796,119 @@ describe('processEntry — farm-plot', () => {
       expect.stringContaining('polygon must have at least 3 points'),
     );
     expect(mockMarkSynced).not.toHaveBeenCalledWith('plot-entry-5');
+  });
+});
+
+// ─── processEntry — skip-step (spec 70, Fase 10) ─────────────────────────────
+//
+// Antes de esta fase, un salto de paso hecho sin conexión se encolaba con
+// itemType 'survey' (el default) y caía en processSurveyEntry, que la
+// descartaba en silencio por no tener respuestas — la guarda de la Fase 3 no
+// distinguía "vacío por abandono" de "vacío a propósito". Estas pruebas
+// verifican que itemType 'skip-step' la enruta a POST /api/surveys/skip-step
+// en vez de a esa guarda.
+
+describe('processEntry — skip-step', () => {
+  it('llama a POST /api/surveys/skip-step con sessionId, instrumentId y stepOrder, y marca todo sincronizado', async () => {
+    const entry = makeEntry({
+      id: 'skip-entry-1',
+      surveyId: 'skip-draft-1',
+      campaignSessionId: 'session-1',
+      stepOrder: 3,
+      instrumentId: 'inst-1',
+      itemType: 'skip-step',
+    });
+    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
+
+    await SyncQueueService.processAll();
+
+    expect(mockSkipStepApi).toHaveBeenCalledWith({
+      sessionId: 'session-1',
+      instrumentId: 'inst-1',
+      stepOrder: 3,
+    });
+    expect(mockMarkSynced).toHaveBeenCalledWith('skip-entry-1');
+    expect(mockMarkSyncedDraft).toHaveBeenCalledWith('skip-draft-1');
+  });
+
+  it('nunca cae en la guarda de "sin respuestas": llama a skip-step aunque no exista ningún borrador local', async () => {
+    // Es exactamente el hallazgo que motivó esta fase: antes, la ausencia de
+    // borrador con respuestas hacía que la entrada se descartara sin avisar
+    // al backend. loadDraft ni siquiera se consulta en este camino.
+    const entry = makeEntry({
+      id: 'skip-entry-2',
+      surveyId: 'skip-draft-2',
+      campaignSessionId: 'session-1',
+      stepOrder: 4,
+      instrumentId: 'inst-1',
+      itemType: 'skip-step',
+    });
+    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
+    mockLoadDraft.mockResolvedValue(null);
+
+    await SyncQueueService.processAll();
+
+    expect(mockLoadDraft).not.toHaveBeenCalled();
+    expect(mockSkipStepApi).toHaveBeenCalledTimes(1);
+    expect(mockMarkFailedValidation).not.toHaveBeenCalled();
+  });
+
+  it('marca fallo de validación si falta instrumentId o stepOrder, sin llamar al backend', async () => {
+    const entry = makeEntry({
+      id: 'skip-entry-3',
+      surveyId: 'skip-draft-3',
+      campaignSessionId: 'session-1',
+      itemType: 'skip-step',
+      // instrumentId y stepOrder ausentes a propósito
+    });
+    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
+
+    await SyncQueueService.processAll();
+
+    expect(mockSkipStepApi).not.toHaveBeenCalled();
+    expect(mockMarkFailedValidation).toHaveBeenCalledWith(
+      'skip-entry-3',
+      expect.stringContaining('skip-step incompleta'),
+    );
+  });
+
+  it('deja la entrada para reintentar ante un error de red, sin marcar fallo de validación', async () => {
+    const entry = makeEntry({
+      id: 'skip-entry-4',
+      surveyId: 'skip-draft-4',
+      campaignSessionId: 'session-1',
+      stepOrder: 3,
+      instrumentId: 'inst-1',
+      itemType: 'skip-step',
+    });
+    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
+    mockSkipStepApi.mockRejectedValue(new NetworkError());
+
+    await SyncQueueService.processAll();
+
+    expect(mockMarkFailedValidation).not.toHaveBeenCalled();
+    expect(mockMarkSynced).not.toHaveBeenCalledWith('skip-entry-4');
+    expect(mockIncrementAttempts).toHaveBeenCalledWith('skip-entry-4');
+  });
+
+  it('marca fallo de validación ante un error del backend no relacionado con la red', async () => {
+    const entry = makeEntry({
+      id: 'skip-entry-5',
+      surveyId: 'skip-draft-5',
+      campaignSessionId: 'session-1',
+      stepOrder: 3,
+      instrumentId: 'inst-1',
+      itemType: 'skip-step',
+    });
+    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
+    mockSkipStepApi.mockRejectedValue(new Error('Instrument not found'));
+
+    await SyncQueueService.processAll();
+
+    expect(mockMarkFailedValidation).toHaveBeenCalledWith(
+      'skip-entry-5',
+      expect.stringContaining('Instrument not found'),
+    );
+    expect(mockMarkSynced).not.toHaveBeenCalledWith('skip-entry-5');
   });
 });

@@ -12,6 +12,10 @@ export interface CreateSurveyPayload {
   cropId?: string;
   campaignSessionId?: string;
   stepOrder?: number;
+  // Spec 70, Fase 9 — id local del borrador (`local_survey_<uuid>`,
+  // generateLocalId.ts). Reenviarlo en un reintento hace que el backend
+  // devuelva la encuesta ya creada en vez de duplicarla.
+  clientSurveyId?: string;
 }
 
 export const createSurvey = (payload: CreateSurveyPayload) =>
