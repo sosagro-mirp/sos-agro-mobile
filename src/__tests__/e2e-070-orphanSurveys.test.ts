@@ -465,6 +465,35 @@ describe('spec-070 — SyncQueueService: una encuesta sin respuestas no llega al
     expect(mockCreateSurvey.mock.calls[0][0]).not.toHaveProperty('farmerId');
   });
 
+  it('TC-070-X · materializar envía clientSurveyId con el id local del borrador (Fase 9, idempotencia)', async () => {
+    // Es la clave que permite al backend deduplicar si este POST llega y crea
+    // la fila, pero la respuesta se pierde y el cliente reintenta (el
+    // escenario real de TC-070-04, ronda de campo del 2026-08-18: el reintento
+    // creaba una segunda encuesta porque nada distinguía a las dos llamadas).
+    const entry = makeEntry({
+      surveyId: 'local_survey_22222222-2222-4222-8222-222222222222',
+    });
+    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
+    mockLoadDraft.mockResolvedValue(
+      makeDraft({
+        surveyId: 'local_survey_22222222-2222-4222-8222-222222222222',
+        answers: { q1: { questionId: 'q1', textValue: 'sí' } },
+      }),
+    );
+    mockFlattenSections.mockReturnValue([{ question: { questionId: 'q1' } }]);
+    mockBuildResponsesPayload.mockReturnValue([
+      { surveyId: 'real-survey-070', questionId: 'q1', textValue: 'sí' },
+    ]);
+
+    await SyncQueueService.processAll();
+
+    expect(mockCreateSurvey).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientSurveyId: 'local_survey_22222222-2222-4222-8222-222222222222',
+      }),
+    );
+  });
+
   it('TC-070-H · una encuesta ya materializada en un intento previo no se materializa dos veces', async () => {
     mockDequeueNextPending.mockResolvedValueOnce(makeEntry({ attempts: 1 })).mockResolvedValue(null);
     mockLoadDraft.mockResolvedValue(

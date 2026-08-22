@@ -72,9 +72,16 @@ export const syncQueue = sqliteTable('sync_queue', {
   payloadPath: text('payload_path'),
   errorDetail: text('error_detail'),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
-  itemType: text('item_type', { enum: ['survey', 'farm-plot'] })
+  // Spec 70, Fase 10 — 'skip-step' se agrega a 'survey' | 'farm-plot' para
+  // que un salto de paso hecho sin conexión viaje por la misma cola (con sus
+  // reintentos y backoff) en vez de una cola paralela.
+  itemType: text('item_type', { enum: ['survey', 'farm-plot', 'skip-step'] })
     .notNull()
     .default('survey'),
+  // Spec 70, Fase 10 — solo lo usan las entradas 'skip-step': el instrumento
+  // del paso que se saltó, que POST /api/surveys/skip-step exige y que
+  // ninguna otra columna de esta tabla guardaba hasta ahora.
+  instrumentId: text('instrument_id'),
 });
 
 export const farmPlots = sqliteTable('farm_plots', {

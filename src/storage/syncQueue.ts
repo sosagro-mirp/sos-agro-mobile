@@ -4,7 +4,10 @@ import { syncQueue } from './db/schema';
 
 export type SyncStatus = 'pending' | 'in_flight' | 'failed_validation';
 
-export type ItemType = 'survey' | 'farm-plot';
+// Spec 70, Fase 10 — 'skip-step' reutiliza esta cola (reintentos, backoff,
+// estado en vuelo) para el salto de paso hecho sin conexión, en vez de una
+// cola paralela.
+export type ItemType = 'survey' | 'farm-plot' | 'skip-step';
 
 export interface SyncQueueEntry {
   id: string;
@@ -18,6 +21,9 @@ export interface SyncQueueEntry {
   errorDetail?: string;
   createdAt: Date;
   itemType: ItemType;
+  // Solo lo usan las entradas 'skip-step' (spec 70, Fase 10): el instrumento
+  // del paso que se saltó, que POST /api/surveys/skip-step exige.
+  instrumentId?: string;
 }
 
 export interface EnqueueParams {
@@ -27,6 +33,7 @@ export interface EnqueueParams {
   stepOrder?: number;
   payloadPath?: string;
   itemType?: ItemType;
+  instrumentId?: string;
 }
 
 export const syncQueueStorage = {
@@ -43,6 +50,7 @@ export const syncQueueStorage = {
       errorDetail: null,
       createdAt: new Date(),
       itemType: params.itemType ?? 'survey',
+      instrumentId: params.instrumentId ?? null,
     });
   },
 
@@ -193,5 +201,6 @@ function mapRow(row: typeof syncQueue.$inferSelect): SyncQueueEntry {
     errorDetail: row.errorDetail ?? undefined,
     createdAt: row.createdAt,
     itemType: (row.itemType ?? 'survey') as ItemType,
+    instrumentId: row.instrumentId ?? undefined,
   };
 }

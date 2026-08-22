@@ -14,9 +14,17 @@ const migrations = {
       { idx: 8, when: 8, tag: 'm0008', breakpoints: true },
       { idx: 9, when: 9, tag: 'm0009', breakpoints: true },
       { idx: 10, when: 10, tag: 'm0010', breakpoints: true },
+      { idx: 11, when: 11, tag: 'm0011', breakpoints: true },
     ],
   },
   migrations: {
+    m0011: [
+      // El enum de itemType ('survey' | 'farm-plot' | 'skip-step') es una
+      // restricción de TypeScript, no de SQLite — la columna ya era `text`
+      // sin CHECK, así que 'skip-step' no necesita ALTER propio.
+      'ALTER TABLE `sync_queue` ADD COLUMN `instrument_id` text',
+    ].join('\n'),
+
     m0010: [
       'ALTER TABLE `surveys` ADD COLUMN `step_order` integer',
     ].join('\n'),

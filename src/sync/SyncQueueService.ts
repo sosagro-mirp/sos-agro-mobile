@@ -7,7 +7,7 @@ import { pendingSessionStorage } from '../storage/pendingSessions';
 import { farmerCacheStorage } from '../storage/farmerCache';
 import { instrumentCacheStorage } from '../storage/instrumentCache';
 import { submitResponsesBatch } from '../api/responses';
-import { createSurvey, markSurveyAsSynced } from '../api/surveys';
+import { createSurvey, markSurveyAsSynced, skipStepApi } from '../api/surveys';
 import { markSessionAsSynced, createCampaignSession } from '../api/campaignSessions';
 import { extractFarmer, extractCrops } from '../api/farmers';
 import { cacheFarmerIdentity } from '../lib/cacheFarmerIdentity';
@@ -255,49 +255,115 @@ class SyncQueueServiceClass {
   private async processEntry(entry: SyncQueueEntry): Promise<void> {
     if (entry.itemType === 'farm-plot') {
       await this.processFarmPlotEntry(entry);
+    } else if (entry.itemType === 'skip-step') {
+      await this.processSkipStepEntry(entry);
     } else {
       await this.processSurveyEntry(entry);
     }
+  }
+
+  // Spec 70, Fase 10 — el salto de paso hecho sin conexión llega aquí en vez
+  // de caer en processSurveyEntry, que descartaría la entrada en silencio por
+  // no tener respuestas (es un vacío deliberado, no un abandono). Envía el
+  // marcador vía el mismo endpoint que usa el camino online
+  // (POST /api/surveys/skip-step), para que el estado final de la campaña sea
+  // idéntico sin importar si hubo conexión en el momento de saltar.
+  private async processSkipStepEntry(entry: SyncQueueEntry): Promise<void> {
+    await syncQueueStorage.markInFlight(entry.id);
+
+    try {
+      const resolved = await this.resolveCampaignSession(entry);
+      if (!resolved) return;
+      entry = resolved;
+
+      if (!entry.campaignSessionId || !entry.instrumentId || entry.stepOrder == null) {
+        const detail = `Entrada skip-step incompleta — sessionId: ${entry.campaignSessionId}, instrumentId: ${entry.instrumentId}, stepOrder: ${entry.stepOrder}`;
+        logger.error(`[Sync] ${detail} — entry ${entry.id}`);
+        captureError(new Error(detail), { entryId: entry.id });
+        await syncQueueStorage.markFailedValidation(entry.id, detail);
+        return;
+      }
+
+      await skipStepApi({
+        sessionId: entry.campaignSessionId,
+        instrumentId: entry.instrumentId,
+        stepOrder: entry.stepOrder,
+      });
+
+      await syncQueueStorage.markSynced(entry.id);
+      // El borrador local (creado por handleSkip() antes de encolar) ya
+      // quedó en status 'completed'; marcarlo synced evita que quede
+      // colgando en la vista de la app aunque no aparezca en Borradores.
+      await surveyDraftStore.markSynced(entry.surveyId);
+
+      logger.info(`[Sync] processed skip-step entry ${entry.id} for session ${entry.campaignSessionId}`);
+      this.consecutiveNetworkFailures = 0;
+    } catch (error) {
+      if (error instanceof NetworkError) {
+        logger.error('[Sync] network error (skip-step)', error);
+        await this.handleNetworkError(entry);
+      } else {
+        logger.error('[Sync] validation error (skip-step)', error);
+        captureError(error, { entryId: entry.id, surveyId: entry.surveyId });
+        const detail = error instanceof Error ? error.message : String(error);
+        await syncQueueStorage.markFailedValidation(entry.id, detail);
+        this.consecutiveNetworkFailures = 0;
+      }
+    }
+  }
+
+  // Repara el campaignSessionId de `entry` si sigue apuntando a un id local
+  // (spec 71), o marca la entrada aplazada/fallida y devuelve `null` cuando
+  // el llamador debe cortar el procesamiento ahí mismo. Compartido por
+  // processSurveyEntry y processSkipStepEntry (spec 70, Fase 10) — antes solo
+  // vivía dentro de processSurveyEntry, y skip-step necesita exactamente la
+  // misma resolución para llamar a POST /api/surveys/skip-step con un
+  // sessionId real.
+  private async resolveCampaignSession(entry: SyncQueueEntry): Promise<SyncQueueEntry | null> {
+    if (!entry.campaignSessionId || !isLocalId(entry.campaignSessionId)) {
+      return entry;
+    }
+
+    // If the campaign session is still provisional, try to repair it before
+    // giving up. Spec 71 — antes esto solo aplazaba la entrada de forma
+    // indefinida: si la fila de `pendingSessions` que le correspondía ya no
+    // está `pending` (porque se resolvió *después* de que esta entrada se
+    // encoló — condición de carrera entre el remapeo de
+    // resolveLocalSessions() y la copia de campaignSessionId en memoria de
+    // useInstrumentSurveyStore), `resolveLocalSessions()` nunca vuelve a
+    // ofrecerla y la entrada quedaba congelada para siempre, en silencio.
+    const repaired = await this.repairLocalCampaignSession(entry);
+    if (repaired) {
+      return { ...entry, campaignSessionId: repaired };
+    }
+
+    const pendingSession = await pendingSessionStorage.getByLocal(entry.campaignSessionId);
+    if (pendingSession?.status === 'pending') {
+      // Espera legítima: la sesión sigue en cola de resolución.
+      logger.warn(`[Sync] campaign session not yet resolved for entry ${entry.id}, deferring`);
+      return null;
+    }
+
+    // No hay ninguna fuente local que resuelva este id (la fila no existe, o
+    // quedó `failed`) — no aplazar más. Reportar en vez de callar.
+    const detail = `Sesión de campaña local sin resolución posible: ${entry.campaignSessionId}`;
+    logger.error(`[Sync] ${detail} — entry ${entry.id}`);
+    captureError(new Error(detail), {
+      surveyId: entry.surveyId,
+      entryId: entry.id,
+      localSessionId: entry.campaignSessionId,
+    });
+    await syncQueueStorage.markFailedValidation(entry.id, detail);
+    return null;
   }
 
   private async processSurveyEntry(entry: SyncQueueEntry): Promise<void> {
     await syncQueueStorage.markInFlight(entry.id);
 
     try {
-      // If the campaign session is still provisional, try to repair it before
-      // giving up. Spec 71 — antes esto solo aplazaba la entrada de forma
-      // indefinida: si la fila de `pendingSessions` que le correspondía ya no
-      // está `pending` (porque se resolvió *después* de que esta entrada se
-      // encoló — condición de carrera entre el remapeo de
-      // resolveLocalSessions() y la copia de campaignSessionId en memoria de
-      // useInstrumentSurveyStore), `resolveLocalSessions()` nunca vuelve a
-      // ofrecerla y la entrada quedaba congelada para siempre, en silencio.
-      if (entry.campaignSessionId && isLocalId(entry.campaignSessionId)) {
-        const repaired = await this.repairLocalCampaignSession(entry);
-        if (repaired) {
-          entry = { ...entry, campaignSessionId: repaired };
-        } else {
-          const pendingSession = await pendingSessionStorage.getByLocal(entry.campaignSessionId);
-          if (pendingSession?.status === 'pending') {
-            // Espera legítima: la sesión sigue en cola de resolución.
-            logger.warn(`[Sync] campaign session not yet resolved for entry ${entry.id}, deferring`);
-            return;
-          }
-
-          // No hay ninguna fuente local que resuelva este id (la fila no
-          // existe, o quedó `failed`) — no aplazar más. Reportar en vez de
-          // callar.
-          const detail = `Sesión de campaña local sin resolución posible: ${entry.campaignSessionId}`;
-          logger.error(`[Sync] ${detail} — entry ${entry.id}`);
-          captureError(new Error(detail), {
-            surveyId: entry.surveyId,
-            entryId: entry.id,
-            localSessionId: entry.campaignSessionId,
-          });
-          await syncQueueStorage.markFailedValidation(entry.id, detail);
-          return;
-        }
-      }
+      const resolved = await this.resolveCampaignSession(entry);
+      if (!resolved) return;
+      entry = resolved;
 
       // Spec 70, Fase 3 — decidir si hay contenido real ANTES de materializar,
       // usando el borrador (`draft.answers`), no el payload de envío. Antes,
@@ -463,9 +529,17 @@ class SyncQueueServiceClass {
     // `start.tsx` sí enviaba, y toda encuesta nueva quedaba con
     // `survey.farmer = NULL`. Las consultas caían a `campaignSession.farmer`,
     // así que no se notaba, pero el dato se perdía igual.
+    //
+    // Spec 70, Fase 9 — `clientSurveyId: entry.surveyId` es el id local
+    // (`local_survey_<uuid>`) que sobrevive al reintento. Si este POST llega
+    // al backend y crea la fila, pero la respuesta se pierde (reconexión
+    // inestable — el escenario real de `TC-070-04`), el siguiente intento
+    // reenvía el mismo id local y el backend devuelve la encuesta ya creada
+    // en vez de duplicarla. Sin esto, cada reintento generaba una fila nueva.
     const { surveyId: realSurveyId } = await createSurvey({
       instrumentIds: [draft.instrumentId],
       campaignSessionId: entry.campaignSessionId,
+      clientSurveyId: entry.surveyId,
       ...(draft.farmerId != null ? { farmerId: draft.farmerId } : {}),
       ...(entry.stepOrder != null ? { stepOrder: entry.stepOrder } : {}),
     });
