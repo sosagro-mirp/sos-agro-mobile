@@ -8,7 +8,7 @@ import { useInstrumentSurveyStore } from "../../../../../src/store/useInstrument
 import { useSyncStatusStore } from "../../../../../src/store/useSyncStatusStore";
 import { getNextStep } from "../../../../../src/api/campaignSessions";
 import { fetchInstrumentByCode } from "../../../../../src/api/instruments";
-import { extractFarmer, extractCrops } from "../../../../../src/api/farmers";
+import { extractFarmer, extractCrops, DocumentIdCollisionError } from "../../../../../src/api/farmers";
 import { overwriteSurvey, skipStepApi } from "../../../../../src/api/surveys";
 import { surveyDraftStore } from "../../../../../src/storage/surveyDraftStore";
 import { syncQueueStorage } from "../../../../../src/storage/syncQueue";
@@ -19,16 +19,19 @@ import { getNextStepOffline } from "../../../../../src/lib/getNextStepOffline";
 import { extractCropsOffline } from "../../../../../src/lib/extractCropsOffline";
 import { generateLocalId } from "../../../../../src/lib/generateLocalId";
 import { extractFarmerLocally } from "../../../../../src/lib/extractFarmerLocally";
+import type { LocalFarmerDraft } from "../../../../../src/lib/extractFarmerLocally";
+import { flattenSections } from "../../../../../src/lib/flattenSections";
 import { cacheFarmerIdentity } from "../../../../../src/lib/cacheFarmerIdentity";
 import { sessionCropsStorage } from "../../../../../src/storage/sessionCropsStorage";
 import { DuplicateAlertModal } from "../../../../../src/components/campaign/DuplicateAlertModal";
+import { DocumentCollisionModal } from "../../../../../src/components/campaign/DocumentCollisionModal";
 import { NetworkError } from "../../../../../src/api/httpClient";
 import { advanceWithinCampaign, returnToPreSurvey } from "../../../../../src/lib/campaignNavigation";
 import { Fonts } from "../../../../../src/theme/fonts";
 import { useTheme } from "../../../../../src/theme/ThemeProvider";
 import type { ThemeColors } from "../../../../../src/theme/colors";
 
-type ScreenState = 'loading' | 'offline' | 'injection_error' | 'error' | 'duplicate_pending' | 'offline_extraction_pending';
+type ScreenState = 'loading' | 'offline' | 'injection_error' | 'error' | 'duplicate_pending' | 'offline_extraction_pending' | 'document_collision_pending';
 
 function generateId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
@@ -54,6 +57,18 @@ export default function OrchestratorScreen() {
     remoteSurveyId?: string;
   } | null>(null);
   const [modalLoading, setModalLoading] = useState(false);
+  // Spec 68 — colisión de documentId detectada al identificar (S1a): el
+  // documento coincide con un agricultor existente cuyo nombre no
+  // corresponde. `localDraft` solo se llena en el camino offline (Fase 4) —
+  // es la identidad provisional que ya generó `extractFarmerLocally()` y
+  // que "Registrar aparte" simplemente confirma, sin red.
+  const [documentCollisionPending, setDocumentCollisionPending] = useState<{
+    documentId: string;
+    submittedName: string;
+    existingFarmerName: string;
+    offline: boolean;
+    localDraft?: LocalFarmerDraft;
+  } | null>(null);
   const hasStarted = useRef(false);
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -256,21 +271,54 @@ export default function OrchestratorScreen() {
               `No se pudo sincronizar la encuesta S1 (${s1SurveyId}) antes de extraer el agricultor`,
             );
           }
-          const { farmer } = await extractFarmer(realS1SurveyId);
-          await cacheFarmerIdentity({
-            farmerId: farmer.farmerId,
-            name: farmer.name,
-            documentId: farmer.documentId,
-            phone: farmer.phone,
-            farmName: farmer.farm?.name,
-            crops: farmer.farm?.crops ?? undefined,
-          });
-          store.completeS1Injection(farmer.farmerId, farmer.name);
-          await injectInstrument('S2');
+          try {
+            const { farmer } = await extractFarmer(realS1SurveyId);
+            await cacheFarmerIdentity({
+              farmerId: farmer.farmerId,
+              name: farmer.name,
+              documentId: farmer.documentId,
+              phone: farmer.phone,
+              farmName: farmer.farm?.name,
+              crops: farmer.farm?.crops ?? undefined,
+            });
+            store.completeS1Injection(farmer.farmerId, farmer.name);
+            await injectInstrument('S2');
+          } catch (err) {
+            // Spec 68 — el documentId ya pertenece a otra persona. Nunca
+            // fusionar en silencio: detener el avance con el aviso en vez
+            // de dejar que caiga al catch genérico de más abajo.
+            if (err instanceof DocumentIdCollisionError) {
+              setDocumentCollisionPending({
+                documentId: err.documentId,
+                submittedName: err.submittedName,
+                existingFarmerName: err.existingFarmerName,
+                offline: false,
+              });
+              setScreenState('document_collision_pending');
+              return;
+            }
+            throw err;
+          }
         } else {
           // Offline: extract farmer locally from S1 responses
           const draft = await extractFarmerLocally(s1SurveyId);
           if (draft) {
+            if (draft.collision) {
+              // Spec 68, Fase 4 — colisión detectada contra la caché local
+              // (criterios 10-11): nunca aplicar la identidad cacheada en
+              // silencio. `draft` ya trae la identidad provisional que
+              // "Registrar aparte" confirma sin red.
+              setDocumentCollisionPending({
+                documentId: draft.collision.documentId,
+                submittedName: draft.collision.submittedName,
+                existingFarmerName: draft.collision.existingName,
+                offline: true,
+                localDraft: draft,
+              });
+              setScreenState('document_collision_pending');
+              return;
+            }
+
             // Re-caching an already-resolved identity (isProvisional: false)
             // just refreshes cachedAt — harmless, and keeps this branch
             // symmetric with the online one instead of only caching new
@@ -487,6 +535,117 @@ export default function OrchestratorScreen() {
     returnToPreSurvey(router, id);
   }, [id, router]);
 
+  // ── document collision handlers (spec 68) ─────────────────────────────────
+
+  // "Corregir el documento": vuelve a la pregunta farmer.documentId de S1a
+  // con las respuestas ya digitadas intactas (el store de la encuesta S1
+  // sigue inicializado — no hace falta re-crear nada). Funciona igual
+  // online y offline: no requiere red. Criterio 9.
+  const handleCorrectDocument = useCallback(async () => {
+    setModalLoading(true);
+    try {
+      const { instrumentId } = await fetchInstrumentByCode('S1');
+      const instrument = await getOrDownloadInstrument(instrumentId);
+      const flatQuestions = flattenSections(instrument.sections);
+      const docIndex = flatQuestions.findIndex(
+        ({ question }) => question.systemField === 'farmer.documentId',
+      );
+
+      setDocumentCollisionPending(null);
+      setModalLoading(false);
+
+      if (docIndex >= 0) {
+        router.push(`/instrument/${instrumentId}/question/${docIndex}`);
+      } else {
+        // No debería pasar (S1a siempre tiene la pregunta de documento) —
+        // degradar a reintentar en vez de dejar la pantalla muerta.
+        hasStarted.current = false;
+        run();
+      }
+    } catch (err) {
+      setModalLoading(false);
+      setScreenState('error');
+      setErrorMessage(err instanceof Error ? err.message : 'Error al volver al documento');
+    }
+  }, [getOrDownloadInstrument, router, run]);
+
+  // "Es la misma persona" / "Registrar aparte". Offline solo la segunda
+  // tiene sentido (el modal oculta la primera, ver `allowSamePerson`):
+  // confirma sin red la identidad provisional que `extractFarmerLocally()`
+  // ya generó. Online, ambas se declaran contra el backend — la decisión
+  // queda registrada (criterios 4 y 5).
+  const resolveDocumentCollision = useCallback(async (resolution: 'same_person' | 'separate_person') => {
+    if (!documentCollisionPending) return;
+    setModalLoading(true);
+
+    try {
+      if (documentCollisionPending.offline) {
+        const draft = documentCollisionPending.localDraft;
+        if (!draft) {
+          // No debería pasar (el offline siempre llena localDraft) — evitar
+          // dejar el spinner del modal encendido para siempre si ocurre.
+          setModalLoading(false);
+          return;
+        }
+        await cacheFarmerIdentity({
+          farmerId: draft.farmerId,
+          name: draft.name,
+          documentId: draft.documentId,
+          phone: draft.phone,
+          farmName: draft.farmName,
+        });
+        store.applyLocalFarmer(draft);
+        store.completeS1Injection(draft.farmerId, draft.name);
+      } else {
+        const { s1SurveyId } = useCampaignSessionStore.getState();
+        if (!s1SurveyId) {
+          setModalLoading(false);
+          return;
+        }
+        const { farmer } = await extractFarmer(s1SurveyId, { resolution });
+        await cacheFarmerIdentity({
+          farmerId: farmer.farmerId,
+          name: farmer.name,
+          documentId: farmer.documentId,
+          phone: farmer.phone,
+          farmName: farmer.farm?.name,
+          crops: farmer.farm?.crops ?? undefined,
+        });
+        store.completeS1Injection(farmer.farmerId, farmer.name);
+      }
+
+      setDocumentCollisionPending(null);
+      setModalLoading(false);
+      setScreenState('loading');
+      await injectInstrument('S2');
+    } catch (err) {
+      setModalLoading(false);
+      setScreenState('error');
+      setErrorMessage(
+        err instanceof Error ? err.message : 'Error al resolver la colisión de documento',
+      );
+    }
+  }, [documentCollisionPending, store, injectInstrument]);
+
+  const handleSamePerson = useCallback(
+    () => resolveDocumentCollision('same_person'),
+    [resolveDocumentCollision],
+  );
+  const handleSeparatePerson = useCallback(
+    () => resolveDocumentCollision('separate_person'),
+    [resolveDocumentCollision],
+  );
+
+  // TC-068-09 — el botón físico "atrás" de Android no debe dejar la pantalla
+  // muerta mientras el aviso está visible. Nada se resolvió en el backend
+  // (la colisión sigue pendiente), así que no hace falta limpieza: al salir
+  // y reingresar, `run()` vuelve a llamar a `extractFarmer()`/
+  // `extractFarmerLocally()` y el aviso reaparece igual.
+  const handleDocumentCollisionRequestClose = useCallback(() => {
+    setDocumentCollisionPending(null);
+    router.back();
+  }, [router]);
+
   // ── effects ────────────────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -613,6 +772,18 @@ export default function OrchestratorScreen() {
         onOverwrite={handleOverwrite}
         onSkip={handleSkip}
         onCancel={handleCancel}
+      />
+      <DocumentCollisionModal
+        visible={screenState === 'document_collision_pending'}
+        documentId={documentCollisionPending?.documentId ?? ''}
+        existingFarmerName={documentCollisionPending?.existingFarmerName ?? ''}
+        submittedName={documentCollisionPending?.submittedName ?? ''}
+        isLoading={modalLoading}
+        allowSamePerson={!documentCollisionPending?.offline}
+        onCorrectDocument={handleCorrectDocument}
+        onSamePerson={handleSamePerson}
+        onSeparatePerson={handleSeparatePerson}
+        onRequestClose={handleDocumentCollisionRequestClose}
       />
       <View style={styles.center}>
         <ActivityIndicator size="large" color={colors.brand} />

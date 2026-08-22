@@ -15,6 +15,10 @@ export class ServerError extends Error {
   constructor(
     public readonly status: number,
     message: string,
+    // Cuerpo parseado de la respuesta 4xx, cuando lo hay — spec 68: el 409 de
+    // colisión de documentId necesita llegar con su payload estructurado
+    // ({ documentId, submittedName, existingFarmer }), no solo el mensaje.
+    public readonly body?: unknown,
   ) {
     super(message);
     this.name = "ServerError";
@@ -86,7 +90,7 @@ async function request<T>(
     if (res.status >= 400 && res.status < 500) {
       const body = await res.json().catch(() => ({})) as Record<string, unknown>;
       const message = (body?.message as string) ?? `Error ${res.status}`;
-      throw new ServerError(res.status, message);
+      throw new ServerError(res.status, message, body);
     }
 
     // 5xx → reintentar
