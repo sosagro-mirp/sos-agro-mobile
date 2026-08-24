@@ -1,15 +1,13 @@
 /**
  * Spec 74 — Migración incremental de la UI móvil al diseño nuevo.
  *
- * Estos tests nacen EN ROJO junto con el spec: los módulos que importan todavía
- * no existen. Cubren la única lógica pura que el rediseño introduce; el resto
- * del spec es visual y se valida en `docs/testing/test-074-migracion-ui-mobile.md`.
+ * Cada bloque nace EN ROJO junto con el spec y se pone en verde al
+ * implementar su fase; el resto del spec es visual y se valida en
+ * `docs/testing/test-074-migracion-ui-mobile.md`.
  *
- * Al implementar cada fase, se descomenta y se pone en verde el bloque
- * correspondiente:
- *   Fase 0 → tokens de header y skeleton
- *   Fase 1 → léxico de estado de cola
- *   Fase 8 → geometría del polígono
+ *   Fase 0 → tokens de header y skeleton — ✅ en verde
+ *   Fase 1 → léxico de estado de cola — en rojo
+ *   Fase 8 → geometría del polígono — en rojo
  */
 
 import { lightColors, darkColors } from '../theme/colors';
@@ -32,19 +30,14 @@ describe('spec 74 · Fase 0 — tokens de tema', () => {
   });
 
   it('en claro el header usa el verde institucional', () => {
-    // @ts-expect-error el token no existe hasta la Fase 0
     expect(lightColors.headerBg).toBe('#1B6B3A');
-    // @ts-expect-error el token no existe hasta la Fase 0
     expect(lightColors.headerFg).toBe('#FFFFFF');
   });
 
   it('en oscuro el header deja de ser amarillo de marca y usa surfaceMuted', () => {
     // Decisión 10 del rediseño: elimina el amarillo sobre amarillo del spec 63.
-    // @ts-expect-error el token no existe hasta la Fase 0
     expect(darkColors.headerBg).toBe(darkColors.surfaceMuted);
-    // @ts-expect-error el token no existe hasta la Fase 0
     expect(darkColors.headerBg).not.toBe(darkColors.brand);
-    // @ts-expect-error el token no existe hasta la Fase 0
     expect(darkColors.headerFg).toBe('#F1F5F9');
   });
 });
