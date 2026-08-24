@@ -9,12 +9,12 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { farmPlotStore, type FarmPlotDraft } from "../../../../src/storage/farmPlotStore";
-import { getFarmPlotsByFarm, type FarmPlotResponse } from "../../../../src/api/farmPlots";
-import { useSyncStatusStore } from "../../../../src/store/useSyncStatusStore";
-import { Fonts } from "../../../../src/theme/fonts";
-import { useTheme } from "../../../../src/theme/ThemeProvider";
-import type { ThemeColors } from "../../../../src/theme/colors";
+import { farmPlotStore, type FarmPlotDraft } from "../../../src/storage/farmPlotStore";
+import { getFarmPlotsByFarm, type FarmPlotResponse } from "../../../src/api/farmPlots";
+import { useSyncStatusStore } from "../../../src/store/useSyncStatusStore";
+import { Fonts } from "../../../src/theme/fonts";
+import { useTheme } from "../../../src/theme/ThemeProvider";
+import type { ThemeColors } from "../../../src/theme/colors";
 
 export default function FarmPlotsScreen() {
   const { farmId, farmName } = useLocalSearchParams<{ farmId: string; farmName?: string }>();
@@ -120,7 +120,7 @@ export default function FarmPlotsScreen() {
           style={styles.captureBtn}
           onPress={() =>
             router.push({
-              pathname: "/(tabs)/plots/capture/[farmId]",
+              pathname: "/plots/capture/[farmId]",
               params: { farmId, farmName: farmName ?? "" },
             })
           }

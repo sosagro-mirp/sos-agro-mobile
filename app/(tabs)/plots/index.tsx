@@ -54,7 +54,7 @@ export default function PlotsIndexScreen() {
     if (!farmer.farm?.farmId) return;
     const farmName = farmer.farm.name;
     router.push({
-      pathname: "/(tabs)/plots/farm/[farmId]",
+      pathname: "/plots/farm/[farmId]",
       params: { farmId: farmer.farm.farmId, farmName },
     });
   }
