@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { StyleSheet, Text, View, Pressable } from "react-native";
+import { ActivityIndicator, StyleSheet, Text, View, Pressable } from "react-native";
+import { ChevronLeft } from "lucide-react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useCachedCampaignsStore } from "../../../src/store/useCachedCampaignsStore";
@@ -200,8 +201,9 @@ export default function PreSurveyScreen() {
     <SafeAreaView style={styles.root}>
       <OfflineBanner />
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()}>
-          <Text style={styles.back}>← Campañas</Text>
+        <Pressable onPress={() => router.back()} style={styles.backBtn} accessibilityRole="button">
+          <ChevronLeft size={18} color={colors.brand} />
+          <Text style={styles.back}>Campañas</Text>
         </Pressable>
         <Text style={styles.title} numberOfLines={1}>
           {campaign.name}
@@ -217,6 +219,7 @@ export default function PreSurveyScreen() {
 
       {isLoading ? (
         <View style={styles.loadingOverlay}>
+          <ActivityIndicator size="large" color={colors.brand} />
           <Text style={styles.loadingText}>Iniciando sesión…</Text>
         </View>
       ) : (
@@ -243,6 +246,7 @@ function createStyles(colors: ThemeColors) {
       borderBottomWidth: 1,
       borderBottomColor: colors.border,
     },
+    backBtn: { flexDirection: "row", alignItems: "center", gap: 2 },
     back: { fontSize: 15, fontFamily: Fonts.regular, color: colors.brand },
     title: {
       flex: 1,
@@ -270,6 +274,7 @@ function createStyles(colors: ThemeColors) {
       flex: 1,
       alignItems: "center",
       justifyContent: "center",
+      gap: 14,
     },
     loadingText: {
       fontSize: 15,
