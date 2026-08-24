@@ -247,7 +247,7 @@ function CacheStatusBadge({ fullyCached }: { fullyCached: boolean }) {
 
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
-    root: { flex: 1, backgroundColor: colors.surfaceMuted },
+    root: { flex: 1, backgroundColor: colors.surface },
 
     header: {
       flexDirection: "row",
@@ -256,10 +256,8 @@ function createStyles(colors: ThemeColors) {
       paddingHorizontal: 20,
       paddingVertical: 14,
       backgroundColor: colors.surface,
-      borderBottomWidth: 1,
-      borderBottomColor: colors.border,
     },
-    title: { flexShrink: 1, fontSize: 17, fontFamily: Fonts.bold, color: colors.textPrimary },
+    title: { flexShrink: 1, fontSize: 21, fontFamily: Fonts.extraBold, color: colors.textPrimary },
     // Fixed size: the "Actualizar" button must stay fully visible even when
     // the campaign title is long or the system font scale is high (spec 24).
     refreshBtn: {
@@ -274,7 +272,7 @@ function createStyles(colors: ThemeColors) {
       borderColor: colors.borderStrong,
     },
     refreshBtnDisabled: { borderColor: colors.border },
-    refreshBtnText: { fontSize: 14, fontFamily: Fonts.semiBold, color: colors.textPrimary },
+    refreshBtnText: { fontSize: 14, fontFamily: Fonts.extraBold, color: colors.textPrimary },
     refreshBtnTextDisabled: { color: colors.textMuted },
 
     progressContainer: {
@@ -306,7 +304,7 @@ function createStyles(colors: ThemeColors) {
     },
     errorText: { fontSize: 14, fontFamily: Fonts.regular, color: colors.dangerFg },
 
-    list: { padding: 20, gap: 12 },
+    list: { paddingHorizontal: 20, paddingTop: 10, paddingBottom: 20, gap: 12 },
 
     card: {
       backgroundColor: colors.surface,
@@ -325,7 +323,7 @@ function createStyles(colors: ThemeColors) {
       paddingBottom: 8,
     },
     cardChevron: { marginTop: 2, flexShrink: 0 },
-    campaignName: { flex: 1, fontSize: 17, fontFamily: Fonts.semiBold, color: colors.textPrimary },
+    campaignName: { flex: 1, fontSize: 17, fontFamily: Fonts.extraBold, color: colors.textPrimary },
     campaignDesc: {
       fontSize: 14,
       fontFamily: Fonts.regular,
@@ -347,8 +345,8 @@ function createStyles(colors: ThemeColors) {
 
     badge: { flexDirection: "row", alignItems: "center", gap: 5, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
     badgeCached: { backgroundColor: colors.successBg },
-    badgeCachedText: { fontSize: 11, fontFamily: Fonts.semiBold, color: colors.successFg },
+    badgeCachedText: { fontSize: 11, fontFamily: Fonts.extraBold, color: colors.successFg },
     badgePending: { backgroundColor: colors.warningBg },
-    badgePendingText: { fontSize: 11, fontFamily: Fonts.semiBold, color: colors.warningFg },
+    badgePendingText: { fontSize: 11, fontFamily: Fonts.extraBold, color: colors.warningFg },
   });
 }
