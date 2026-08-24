@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import {
   ActivityIndicator,
   Modal,
@@ -15,12 +15,9 @@ import { surveyDraftStore, type SurveyDraft } from "../../../src/storage/surveyD
 import { instrumentCacheStorage } from "../../../src/storage/instrumentCache";
 import { farmerCacheStorage } from "../../../src/storage/farmerCache";
 import { useInstrumentSurveyStore } from "../../../src/store/useInstrumentSurveyStore";
-import { flattenSections } from "../../../src/lib/flattenSections";
-import { isQuestionVisible } from "../../../src/lib/isQuestionVisible";
-import { isAnswerComplete } from "../../../src/lib/isAnswerComplete";
 import { Fonts } from "../../../src/theme/fonts";
-
-const GREEN = "#1B6B3A";
+import { useTheme } from "../../../src/theme/ThemeProvider";
+import type { ThemeColors } from "../../../src/theme/colors";
 
 interface EnrichedDraft extends SurveyDraft {
   instrumentName: string | null;
@@ -56,6 +53,8 @@ export default function DraftsScreen() {
   } | null>(null);
   const [modalLoading, setModalLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
 
   useFocusEffect(
     useCallback(() => {
@@ -134,28 +133,30 @@ export default function DraftsScreen() {
         return;
       }
 
-      const flattenedQuestions = flattenSections(instrument.sections);
-      const visibleQuestions = flattenedQuestions.filter(({ question }) =>
-        isQuestionVisible(question, draft.answers)
-      );
-      const firstIncomplete = visibleQuestions.findIndex(
-        ({ question }) =>
-          !isAnswerComplete(question, draft.answers[question.questionId])
-      );
-
+      // Spec 69 — el índice de reanudación se lee del store *después* de
+      // inicializarlo, en vez de calcularse acá por su cuenta: es la misma
+      // fuente (`resolveResumeIndex` sobre `visibleQuestions()` + `answers`)
+      // que usa la pantalla de pregunta, así que no puede divergir.
       useInstrumentSurveyStore.getState().initializeSurvey({
         surveyId: draft.surveyId,
         instrumentId: instrument.instrumentId,
         instrumentName: instrument.name,
         sections: instrument.sections,
         campaignSessionId: draft.campaignSessionId,
+        // Sin esto la encuesta se materializa con `stepOrder: null` y
+        // `getNextStep()` no cuenta el paso como completado, así que la
+        // campaña vuelve a ofrecer un instrumento ya respondido (hallazgo de
+        // la ronda de campo del 2026-08-18).
+        stepOrder: draft.stepOrder,
         restoredAnswers: draft.answers,
       });
 
-      if (firstIncomplete === -1) {
+      const resumeIndex = useInstrumentSurveyStore.getState().resumeIndex();
+
+      if (resumeIndex === -1) {
         router.push(`/instrument/${instrument.instrumentId}/review`);
       } else {
-        router.push(`/instrument/${instrument.instrumentId}/question/${firstIncomplete}`);
+        router.push(`/instrument/${instrument.instrumentId}/question/${resumeIndex}`);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al reanudar borrador");
@@ -165,7 +166,7 @@ export default function DraftsScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.root} edges={["bottom"]}>
+    <SafeAreaView style={styles.root} edges={[]}>
       <View style={styles.header}>
         <Text style={styles.title}>Borradores</Text>
         {drafts.length > 0 && !isLoading ? (
@@ -183,7 +184,7 @@ export default function DraftsScreen() {
 
       <ScrollView contentContainerStyle={styles.list}>
         {isLoading ? (
-          <ActivityIndicator size="large" color={GREEN} style={styles.loader} />
+          <ActivityIndicator size="large" color={colors.brand} style={styles.loader} />
         ) : drafts.length === 0 ? (
           <View style={styles.empty}>
             <Text style={styles.emptyTitle}>Sin borradores</Text>
@@ -218,7 +219,7 @@ export default function DraftsScreen() {
             <Text style={styles.modalBody}>{confirmModal?.body}</Text>
 
             {modalLoading ? (
-              <ActivityIndicator size="large" color="#DC2626" style={styles.modalSpinner} />
+              <ActivityIndicator size="large" color={colors.dangerFg} style={styles.modalSpinner} />
             ) : (
               <>
                 <Pressable style={[styles.modalBtn, styles.modalBtnDestructive]} onPress={runModal}>
@@ -249,6 +250,8 @@ function DraftCard({
   onResume: () => void;
   onDelete: () => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const answerCount = Object.keys(draft.answers).length;
   const disabled = isResuming || isDeleting;
 
@@ -274,9 +277,9 @@ function DraftCard({
         </View>
         <View style={styles.cardActions}>
           {isResuming ? (
-            <ActivityIndicator size="small" color={GREEN} />
+            <ActivityIndicator size="small" color={colors.brand} />
           ) : isDeleting ? (
-            <ActivityIndicator size="small" color="#EF4444" />
+            <ActivityIndicator size="small" color={colors.dangerFg} />
           ) : (
             <>
               <Text style={styles.resumeHint}>Continuar →</Text>
@@ -286,7 +289,7 @@ function DraftCard({
                 hitSlop={8}
                 accessibilityLabel="Eliminar borrador"
               >
-                <Trash2 size={18} color="#EF4444" />
+                <Trash2 size={18} color={colors.dangerFg} />
               </Pressable>
             </>
           )}
@@ -315,99 +318,101 @@ function DraftCard({
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#F9FAFB" },
-  header: {
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    backgroundColor: "#fff",
-    borderBottomWidth: 1,
-    borderBottomColor: "#E5E7EB",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  title: { fontSize: 17, fontFamily: Fonts.bold, color: "#111827" },
-  clearBtn: { paddingVertical: 4, paddingHorizontal: 8 },
-  clearBtnText: { fontSize: 14, fontFamily: Fonts.semiBold, color: "#EF4444" },
-  errorBox: {
-    margin: 16,
-    padding: 12,
-    backgroundColor: "#FEF2F2",
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#FECACA",
-  },
-  errorText: { fontSize: 14, fontFamily: Fonts.regular, color: "#DC2626" },
-  list: { padding: 20, gap: 12 },
-  loader: { marginTop: 48 },
-  card: {
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    gap: 6,
-  },
-  cardPressed: { opacity: 0.8 },
-  cardTop: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: 8,
-  },
-  cardMain: { flex: 1, gap: 4 },
-  cardActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-  },
-  deleteBtn: { padding: 2 },
-  deleteBtnPressed: { opacity: 0.5 },
-  instrumentName: { fontSize: 15, fontFamily: Fonts.semiBold, color: "#111827", lineHeight: 20 },
-  badges: { flexDirection: "row", gap: 6 },
-  campaignBadge: {
-    alignSelf: "flex-start",
-    backgroundColor: "#DCFCE7",
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  campaignBadgeText: { fontSize: 11, fontFamily: Fonts.semiBold, color: GREEN },
-  farmerName: { fontSize: 13, fontFamily: Fonts.semiBold, color: "#374151" },
-  resumeHint: { fontSize: 13, fontFamily: Fonts.semiBold, color: GREEN },
-  metaRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  answers: { fontSize: 12, fontFamily: Fonts.regular, color: "#6B7280" },
-  dot: { fontSize: 12, color: "#D1D5DB" },
-  date: { fontSize: 12, fontFamily: Fonts.regular, color: "#9CA3AF" },
-  empty: { alignItems: "center", paddingVertical: 48, gap: 8 },
-  emptyTitle: { fontSize: 17, fontFamily: Fonts.semiBold, color: "#374151" },
-  emptyDesc: {
-    fontSize: 14,
-    fontFamily: Fonts.regular,
-    color: "#9CA3AF",
-    textAlign: "center",
-  },
-  overlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 24,
-  },
-  modalCard: {
-    width: "100%",
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    padding: 24,
-    gap: 12,
-  },
-  modalTitle: { fontSize: 18, fontFamily: Fonts.bold, color: "#111827" },
-  modalBody: { fontSize: 15, fontFamily: Fonts.regular, color: "#374151", lineHeight: 22 },
-  modalSpinner: { marginVertical: 16 },
-  modalBtn: { borderRadius: 12, paddingVertical: 16, alignItems: "center" },
-  modalBtnDestructive: { backgroundColor: "#DC2626" },
-  modalBtnSecondary: { backgroundColor: "#F3F4F6", borderWidth: 1, borderColor: "#E5E7EB" },
-  modalBtnText: { fontSize: 15, fontFamily: Fonts.semiBold, color: "#fff" },
-  modalBtnSecondaryText: { color: "#374151" },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    root: { flex: 1, backgroundColor: colors.surfaceMuted },
+    header: {
+      paddingHorizontal: 20,
+      paddingVertical: 14,
+      backgroundColor: colors.surface,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+    },
+    title: { fontSize: 17, fontFamily: Fonts.bold, color: colors.textPrimary },
+    clearBtn: { paddingVertical: 4, paddingHorizontal: 8 },
+    clearBtnText: { fontSize: 14, fontFamily: Fonts.semiBold, color: colors.dangerFg },
+    errorBox: {
+      margin: 16,
+      padding: 12,
+      backgroundColor: colors.dangerBg,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: colors.dangerFg,
+    },
+    errorText: { fontSize: 14, fontFamily: Fonts.regular, color: colors.dangerFg },
+    list: { padding: 20, gap: 12 },
+    loader: { marginTop: 48 },
+    card: {
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      padding: 18,
+      borderWidth: 1,
+      borderColor: colors.border,
+      gap: 6,
+    },
+    cardPressed: { opacity: 0.8 },
+    cardTop: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "flex-start",
+      gap: 8,
+    },
+    cardMain: { flex: 1, gap: 4 },
+    cardActions: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+    },
+    deleteBtn: { padding: 2 },
+    deleteBtnPressed: { opacity: 0.5 },
+    instrumentName: { fontSize: 15, fontFamily: Fonts.semiBold, color: colors.textPrimary, lineHeight: 20 },
+    badges: { flexDirection: "row", gap: 6 },
+    campaignBadge: {
+      alignSelf: "flex-start",
+      backgroundColor: colors.successBg,
+      borderRadius: 6,
+      paddingHorizontal: 8,
+      paddingVertical: 2,
+    },
+    campaignBadgeText: { fontSize: 11, fontFamily: Fonts.semiBold, color: colors.successFg },
+    farmerName: { fontSize: 13, fontFamily: Fonts.semiBold, color: colors.textPrimary },
+    resumeHint: { fontSize: 13, fontFamily: Fonts.semiBold, color: colors.brand },
+    metaRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+    answers: { fontSize: 12, fontFamily: Fonts.regular, color: colors.textMuted },
+    dot: { fontSize: 12, color: colors.borderStrong },
+    date: { fontSize: 12, fontFamily: Fonts.regular, color: colors.textMuted },
+    empty: { alignItems: "center", paddingVertical: 48, gap: 8 },
+    emptyTitle: { fontSize: 17, fontFamily: Fonts.semiBold, color: colors.textPrimary },
+    emptyDesc: {
+      fontSize: 14,
+      fontFamily: Fonts.regular,
+      color: colors.textMuted,
+      textAlign: "center",
+    },
+    overlay: {
+      flex: 1,
+      backgroundColor: "rgba(0,0,0,0.5)",
+      justifyContent: "center",
+      alignItems: "center",
+      padding: 24,
+    },
+    modalCard: {
+      width: "100%",
+      backgroundColor: colors.surface,
+      borderRadius: 16,
+      padding: 24,
+      gap: 12,
+    },
+    modalTitle: { fontSize: 18, fontFamily: Fonts.bold, color: colors.textPrimary },
+    modalBody: { fontSize: 15, fontFamily: Fonts.regular, color: colors.textPrimary, lineHeight: 22 },
+    modalSpinner: { marginVertical: 16 },
+    modalBtn: { borderRadius: 12, paddingVertical: 16, alignItems: "center" },
+    modalBtnDestructive: { backgroundColor: colors.dangerFg },
+    modalBtnSecondary: { backgroundColor: colors.surfaceMuted, borderWidth: 1, borderColor: colors.border },
+    modalBtnText: { fontSize: 15, fontFamily: Fonts.semiBold, color: colors.brandForeground },
+    modalBtnSecondaryText: { color: colors.textPrimary },
+  });
+}

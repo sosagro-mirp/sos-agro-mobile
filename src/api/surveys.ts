@@ -12,6 +12,10 @@ export interface CreateSurveyPayload {
   cropId?: string;
   campaignSessionId?: string;
   stepOrder?: number;
+  // Spec 70, Fase 9 — id local del borrador (`local_survey_<uuid>`,
+  // generateLocalId.ts). Reenviarlo en un reintento hace que el backend
+  // devuelva la encuesta ya creada en vez de duplicarla.
+  clientSurveyId?: string;
 }
 
 export const createSurvey = (payload: CreateSurveyPayload) =>
@@ -20,15 +24,17 @@ export const createSurvey = (payload: CreateSurveyPayload) =>
 export const markSurveyAsSynced = (surveyId: string) =>
   httpClient.patch<void>(endpoints.surveySync(surveyId));
 
+// Spec 70, Fase 4 — el endpoint solo descarta el duplicado; el reemplazo se
+// inicia por separado con `beginSurvey()`, igual que cualquier otro inicio
+// de instrumento (evita dejar una fila de reemplazo vacía si el encuestador
+// abandona después de sobrescribir).
 export interface OverwriteSurveyPayload {
   surveyId: string;
   sessionId: string;
-  instrumentId: string;
-  stepOrder: number;
 }
 
 export interface OverwriteSurveyResponse {
-  surveyId: string;
+  discardedSurveyId: string;
 }
 
 export const overwriteSurvey = (payload: OverwriteSurveyPayload) =>

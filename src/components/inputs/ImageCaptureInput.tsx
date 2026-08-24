@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Alert, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Camera, Images, X } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
+import { useTheme } from '../../theme/ThemeProvider';
+import type { ThemeColors } from '../../theme/colors';
 import type { InstrumentDraftAnswer } from '../../types/instrument';
 
 interface Props {
@@ -30,6 +32,8 @@ function mimeTypeFromExtension(ext: string): string {
 
 export function ImageCaptureInput({ questionId, value, onChange }: Props): React.JSX.Element {
   const [localUri, setLocalUri] = useState<string | undefined>(value);
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
 
   async function pickFromCamera(): Promise<void> {
     const { granted } = await ImagePicker.requestCameraPermissionsAsync();
@@ -96,11 +100,11 @@ export function ImageCaptureInput({ questionId, value, onChange }: Props): React
         <Image source={{ uri: localUri }} style={styles.preview} resizeMode="cover" />
         <View style={styles.actions}>
           <TouchableOpacity style={styles.secondaryButton} onPress={pickFromCamera}>
-            <Camera size={16} color="#374151" />
+            <Camera size={16} color={colors.textPrimary} />
             <Text style={styles.secondaryButtonText}>Reemplazar</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.secondaryButton} onPress={removeImage}>
-            <X size={16} color="#DC2626" />
+            <X size={16} color={colors.dangerFg} />
             <Text style={[styles.secondaryButtonText, styles.deleteText]}>Eliminar</Text>
           </TouchableOpacity>
         </View>
@@ -111,47 +115,49 @@ export function ImageCaptureInput({ questionId, value, onChange }: Props): React
   return (
     <View style={styles.container}>
       <TouchableOpacity style={styles.primaryButton} onPress={pickFromCamera}>
-        <Camera size={22} color="#FFFFFF" />
+        <Camera size={22} color={colors.brandForeground} />
         <Text style={styles.primaryButtonText}>Tomar foto</Text>
       </TouchableOpacity>
       <TouchableOpacity style={styles.secondaryButton} onPress={pickFromGallery}>
-        <Images size={16} color="#374151" />
+        <Images size={16} color={colors.textPrimary} />
         <Text style={styles.secondaryButtonText}>Elegir de galería</Text>
       </TouchableOpacity>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { width: '100%', gap: 12 },
-  preview: {
-    width: '100%',
-    height: 220,
-    borderRadius: 12,
-    backgroundColor: '#F3F4F6',
-  },
-  primaryButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#1B6B3A',
-    borderRadius: 12,
-    paddingVertical: 16,
-    gap: 10,
-  },
-  primaryButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
-  actions: { flexDirection: 'row', gap: 10 },
-  secondaryButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1.5,
-    borderColor: '#D1D5DB',
-    borderRadius: 10,
-    paddingVertical: 12,
-    gap: 6,
-  },
-  secondaryButtonText: { fontSize: 14, color: '#374151' },
-  deleteText: { color: '#DC2626' },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    container: { width: '100%', gap: 12 },
+    preview: {
+      width: '100%',
+      height: 220,
+      borderRadius: 12,
+      backgroundColor: colors.surfaceMuted,
+    },
+    primaryButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.brand,
+      borderRadius: 12,
+      paddingVertical: 16,
+      gap: 10,
+    },
+    primaryButtonText: { color: colors.brandForeground, fontSize: 16, fontWeight: '600' },
+    actions: { flexDirection: 'row', gap: 10 },
+    secondaryButton: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1.5,
+      borderColor: colors.borderStrong,
+      borderRadius: 10,
+      paddingVertical: 12,
+      gap: 6,
+    },
+    secondaryButtonText: { fontSize: 14, color: colors.textPrimary },
+    deleteText: { color: colors.dangerFg },
+  });
+}

@@ -20,11 +20,20 @@ class NetworkMonitorClass {
 
   private handleStateChange = (state: NetInfoState): void => {
     const isReachable = NetworkMonitorClass.isReachable(state);
+    const willTrigger = isReachable && this.previouslyReachable === false;
+
+    // Observabilidad permanente (spec 52, criterio 8): registrar cada
+    // transición de conectividad con el estado crudo de NetInfo, el
+    // isReachable calculado y si disparó sincronización. Es lo que permite
+    // diagnosticar el próximo caso de este tipo sin instrumentar de nuevo.
+    logger.info(
+      `[NetworkMonitor] connectivity transition isConnected=${state.isConnected} isInternetReachable=${state.isInternetReachable} type=${state.type} previouslyReachable=${this.previouslyReachable} isReachable=${isReachable} willTrigger=${willTrigger}`,
+    );
 
     useSyncStatusStore.getState().setOnline(isReachable);
 
     // Trigger sync only when transitioning from offline → online
-    if (isReachable && this.previouslyReachable === false) {
+    if (willTrigger) {
       SyncQueueService.resetNetworkFailures();
       SyncQueueService.processAll().catch((err) =>
         logger.error('[NetworkMonitor] processAll failed', err),

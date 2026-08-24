@@ -26,6 +26,17 @@ jest.mock('../storage/surveyDraftStore', () => ({
   },
 }));
 
+jest.mock('../storage/farmPlotStore', () => ({
+  farmPlotStore: {
+    loadDraft: jest.fn(),
+    markSynced: jest.fn(),
+  },
+}));
+
+jest.mock('../api/farmPlots', () => ({
+  createFarmPlot: jest.fn(),
+}));
+
 jest.mock('../storage/instrumentCache', () => ({
   instrumentCacheStorage: {
     get: jest.fn(),
@@ -39,6 +50,7 @@ jest.mock('../api/responses', () => ({
 jest.mock('../api/surveys', () => ({
   markSurveyAsSynced: jest.fn(),
   createSurvey: jest.fn(),
+  skipStepApi: jest.fn(),
 }));
 
 jest.mock('../api/campaignSessions', () => ({
@@ -46,10 +58,17 @@ jest.mock('../api/campaignSessions', () => ({
   createCampaignSession: jest.fn(),
 }));
 
-jest.mock('../api/farmers', () => ({
-  extractFarmer: jest.fn(),
-  extractCrops: jest.fn(),
-}));
+jest.mock('../api/farmers', () => {
+  // DocumentIdCollisionError se toma de la implementación real (spec 68):
+  // SyncQueueService la usa con `instanceof`, así que un mock plano de la
+  // clase rompería ese chequeo en runtime.
+  const actual = jest.requireActual('../api/farmers');
+  return {
+    extractFarmer: jest.fn(),
+    extractCrops: jest.fn(),
+    DocumentIdCollisionError: actual.DocumentIdCollisionError,
+  };
+});
 
 jest.mock('../storage/sessionCropsStorage', () => ({
   sessionCropsStorage: {
@@ -92,7 +111,12 @@ jest.mock('../storage/farmerCache', () => ({
   farmerCacheStorage: {
     listRecent: jest.fn().mockResolvedValue([]),
     upsert: jest.fn().mockResolvedValue(undefined),
+    remove: jest.fn().mockResolvedValue(undefined),
   },
+}));
+
+jest.mock('../lib/cacheFarmerIdentity', () => ({
+  cacheFarmerIdentity: jest.fn().mockResolvedValue(undefined),
 }));
 
 jest.mock('../storage/changeRequestStorage', () => ({
@@ -149,14 +173,19 @@ import { syncQueueStorage } from '../storage/syncQueue';
 import { surveyDraftStore } from '../storage/surveyDraftStore';
 import { instrumentCacheStorage } from '../storage/instrumentCache';
 import { submitResponsesBatch } from '../api/responses';
-import { markSurveyAsSynced } from '../api/surveys';
+import { markSurveyAsSynced, skipStepApi } from '../api/surveys';
 import { markSessionAsSynced, createCampaignSession } from '../api/campaignSessions';
-import { extractCrops } from '../api/farmers';
+import { extractFarmer, extractCrops, DocumentIdCollisionError } from '../api/farmers';
 import { sessionCropsStorage } from '../storage/sessionCropsStorage';
 import { pendingSessionStorage } from '../storage/pendingSessions';
 import { useSyncStatusStore } from '../store/useSyncStatusStore';
+import { useCampaignSessionStore } from '../store/useCampaignSessionStore';
 import { flattenSections } from '../lib/flattenSections';
 import { buildResponsesPayload } from '../lib/buildResponsesPayload';
+import { farmerCacheStorage } from '../storage/farmerCache';
+import { cacheFarmerIdentity } from '../lib/cacheFarmerIdentity';
+import { farmPlotStore } from '../storage/farmPlotStore';
+import { createFarmPlot } from '../api/farmPlots';
 
 // ─── Typed mock aliases ───────────────────────────────────────────────────────
 
@@ -174,7 +203,11 @@ const mockInstrumentCacheGet = instrumentCacheStorage.get as jest.Mock;
 const mockSubmitResponsesBatch = submitResponsesBatch as jest.Mock;
 const mockMarkSurveyAsSynced = markSurveyAsSynced as jest.Mock;
 const mockMarkSessionAsSynced = markSessionAsSynced as jest.Mock;
+const mockExtractFarmer = extractFarmer as jest.Mock;
 const mockExtractCrops = extractCrops as jest.Mock;
+const mockFarmerCacheListRecent = farmerCacheStorage.listRecent as jest.Mock;
+const mockFarmerCacheRemove = farmerCacheStorage.remove as jest.Mock;
+const mockCacheFarmerIdentity = cacheFarmerIdentity as jest.Mock;
 const mockSessionCropsSave = sessionCropsStorage.save as jest.Mock;
 const mockSessionCropsGet = sessionCropsStorage.get as jest.Mock;
 const mockCreateCampaignSession = createCampaignSession as jest.Mock;
@@ -183,6 +216,11 @@ const mockResolveSession = pendingSessionStorage.resolve as jest.Mock;
 
 const mockFlattenSections = flattenSections as jest.Mock;
 const mockBuildResponsesPayload = buildResponsesPayload as jest.Mock;
+
+const mockFarmPlotLoadDraft = farmPlotStore.loadDraft as jest.Mock;
+const mockFarmPlotMarkSynced = farmPlotStore.markSynced as jest.Mock;
+const mockCreateFarmPlot = createFarmPlot as jest.Mock;
+const mockSkipStepApi = skipStepApi as jest.Mock;
 
 let mockSetSyncingId: jest.Mock;
 let mockMarkSyncCompleted: jest.Mock;
@@ -208,6 +246,22 @@ function makeDraft(instrumentId = 'inst-1') {
     instrumentId,
     answers: { q1: { questionId: 'q1', textValue: 'answer' } },
     updatedAt: new Date(),
+  };
+}
+
+function makeFarmPlotDraft(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'plot-1',
+    farmId: 'farm-1',
+    name: 'Lote norte',
+    description: undefined,
+    area: undefined,
+    polygon: { points: [{ lat: 1, lng: 1 }, { lat: 2, lng: 2 }, { lat: 3, lng: 3 }] },
+    status: 'draft' as const,
+    capturedOffline: true,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    ...overrides,
   };
 }
 
@@ -256,6 +310,23 @@ beforeEach(() => {
   mockListPendingSessions.mockResolvedValue([]);
   mockResolveSession.mockResolvedValue(undefined);
   mockCreateCampaignSession.mockResolvedValue({ sessionId: 'real-session-1' });
+  mockExtractFarmer.mockResolvedValue({
+    farmer: { farmerId: 'real-farmer-1', name: 'Mateo Quintero', documentId: '9105558899' },
+    existed: false,
+  });
+  mockFarmerCacheListRecent.mockResolvedValue([]);
+  mockFarmerCacheRemove.mockResolvedValue(undefined);
+  mockCacheFarmerIdentity.mockResolvedValue(undefined);
+  mockFarmPlotLoadDraft.mockResolvedValue(null);
+  mockFarmPlotMarkSynced.mockResolvedValue(undefined);
+  mockCreateFarmPlot.mockResolvedValue({ farmPlotId: 'backend-plot-1' });
+  mockSkipStepApi.mockResolvedValue({ surveyId: 'skip-marker-1' });
+  (useCampaignSessionStore.getState as jest.Mock).mockReturnValue({
+    localSessionId: null,
+    localFarmerId: null,
+    resolveSession: jest.fn(),
+    resolveFarmer: jest.fn(),
+  });
 });
 
 // ─── processAll: guard conditions ────────────────────────────────────────────
@@ -515,6 +586,166 @@ describe('processEntry — S2 crop extraction', () => {
   });
 });
 
+// ─── processEntry: S1 farmer extraction — provisional cache cleanup (spec 51) ─
+
+describe('processEntry — S1 farmer extraction, provisional cache cleanup', () => {
+  it('removes the provisional farmerCache entry after remapping surveys to the real farmerId', async () => {
+    const entry = makeEntry();
+    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
+    mockLoadDraft.mockResolvedValue(makeDraft('inst-s1'));
+    mockInstrumentCacheGet.mockResolvedValue(makeInstrument({ code: 'S1' }));
+    mockBuildResponsesPayload.mockReturnValue([{ surveyId: 'survey-1', questionId: 'q1', textValue: 'x' }]);
+    mockFarmerCacheListRecent.mockResolvedValue([
+      { farmerId: 'local_farmer_123', name: 'Mateo Provisional', documentId: '9105558899', cachedAt: new Date() },
+    ]);
+
+    await SyncQueueService.processAll();
+
+    expect(mockFarmerCacheRemove).toHaveBeenCalledWith('local_farmer_123');
+  });
+
+  it('does not remove anything when no provisional entry matches the resolved documentId', async () => {
+    const entry = makeEntry();
+    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
+    mockLoadDraft.mockResolvedValue(makeDraft('inst-s1'));
+    mockInstrumentCacheGet.mockResolvedValue(makeInstrument({ code: 'S1' }));
+    mockBuildResponsesPayload.mockReturnValue([{ surveyId: 'survey-1', questionId: 'q1', textValue: 'x' }]);
+    mockFarmerCacheListRecent.mockResolvedValue([
+      { farmerId: 'local_farmer_999', name: 'Otro Provisional', documentId: '0000000000', cachedAt: new Date() },
+    ]);
+
+    await SyncQueueService.processAll();
+
+    expect(mockFarmerCacheRemove).not.toHaveBeenCalled();
+  });
+
+  it('completes the sync even if removing the provisional entry fails', async () => {
+    const entry = makeEntry();
+    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
+    mockLoadDraft.mockResolvedValue(makeDraft('inst-s1'));
+    mockInstrumentCacheGet.mockResolvedValue(makeInstrument({ code: 'S1' }));
+    mockBuildResponsesPayload.mockReturnValue([{ surveyId: 'survey-1', questionId: 'q1', textValue: 'x' }]);
+    mockFarmerCacheListRecent.mockResolvedValue([
+      { farmerId: 'local_farmer_123', name: 'Mateo Provisional', documentId: '9105558899', cachedAt: new Date() },
+    ]);
+    mockFarmerCacheRemove.mockRejectedValue(new Error('SQLITE_BUSY'));
+
+    await SyncQueueService.processAll();
+
+    expect(mockMarkSynced).toHaveBeenCalledWith(entry.id);
+    expect(mockMarkSyncedDraft).toHaveBeenCalledWith('survey-1');
+  });
+
+  it('caches the real identity via cacheFarmerIdentity with phone, farmName and crops', async () => {
+    const entry = makeEntry();
+    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
+    mockLoadDraft.mockResolvedValue(makeDraft('inst-s1'));
+    mockInstrumentCacheGet.mockResolvedValue(makeInstrument({ code: 'S1' }));
+    mockBuildResponsesPayload.mockReturnValue([{ surveyId: 'survey-1', questionId: 'q1', textValue: 'x' }]);
+    mockExtractFarmer.mockResolvedValue({
+      farmer: {
+        farmerId: 'real-farmer-1',
+        name: 'Mateo Quintero',
+        documentId: '9105558899',
+        phone: '3001112233',
+        farm: { name: 'Finca La Esperanza', crops: [{ cropId: 'crop-1', name: 'Café' }] },
+      },
+      existed: false,
+    });
+
+    await SyncQueueService.processAll();
+
+    expect(mockCacheFarmerIdentity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        farmerId: 'real-farmer-1',
+        phone: '3001112233',
+        farmName: 'Finca La Esperanza',
+        crops: [{ cropId: 'crop-1', name: 'Café' }],
+      }),
+    );
+  });
+});
+
+// ─── S1 documentId collision discovered only while syncing (spec 68, Fase 5) ──
+// Criterio 12: nunca fusionar en silencio; resolver como "registrar aparte"
+// automáticamente (única opción reversible sin encuestador presente); la
+// entrada de la cola no queda marcada como fallida.
+
+describe('processEntry — S1 documentId collision on sync (spec 68)', () => {
+  it('resolves as separate_person and does not mark the entry as failed', async () => {
+    const entry = makeEntry();
+    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
+    mockLoadDraft.mockResolvedValue(makeDraft('inst-s1'));
+    mockInstrumentCacheGet.mockResolvedValue(makeInstrument({ code: 'S1' }));
+    mockBuildResponsesPayload.mockReturnValue([{ surveyId: 'survey-1', questionId: 'q1', textValue: 'x' }]);
+
+    mockExtractFarmer
+      .mockRejectedValueOnce(
+        new DocumentIdCollisionError({
+          documentId: '9105558899',
+          submittedName: 'Karol Vanessa Quintero Marin',
+          existingFarmer: { farmerId: 'real-farmer-santiago', name: 'Santiago Suarez Cortes' },
+        }),
+      )
+      .mockResolvedValueOnce({
+        farmer: { farmerId: 'real-farmer-karol', name: 'Karol Vanessa Quintero Marin', documentId: '9105558899' },
+        existed: false,
+      });
+
+    await SyncQueueService.processAll();
+
+    expect(mockExtractFarmer).toHaveBeenNthCalledWith(1, 'survey-1');
+    expect(mockExtractFarmer).toHaveBeenNthCalledWith(2, 'survey-1', { resolution: 'separate_person' });
+    expect(mockMarkFailedValidation).not.toHaveBeenCalled();
+    expect(mockMarkSynced).toHaveBeenCalledWith(entry.id);
+    expect(mockMarkSyncedDraft).toHaveBeenCalledWith('survey-1');
+  });
+
+  it('still remaps the provisional farmerCache entry after resolving the collision', async () => {
+    const entry = makeEntry();
+    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
+    mockLoadDraft.mockResolvedValue(makeDraft('inst-s1'));
+    mockInstrumentCacheGet.mockResolvedValue(makeInstrument({ code: 'S1' }));
+    mockBuildResponsesPayload.mockReturnValue([{ surveyId: 'survey-1', questionId: 'q1', textValue: 'x' }]);
+    mockFarmerCacheListRecent.mockResolvedValue([
+      { farmerId: 'local_farmer_karol', name: 'Karol Vanessa Quintero Marin', documentId: '9105558899', cachedAt: new Date() },
+    ]);
+
+    mockExtractFarmer
+      .mockRejectedValueOnce(
+        new DocumentIdCollisionError({
+          documentId: '9105558899',
+          submittedName: 'Karol Vanessa Quintero Marin',
+          existingFarmer: { farmerId: 'real-farmer-santiago', name: 'Santiago Suarez Cortes' },
+        }),
+      )
+      .mockResolvedValueOnce({
+        farmer: { farmerId: 'real-farmer-karol', name: 'Karol Vanessa Quintero Marin', documentId: '9105558899' },
+        existed: false,
+      });
+
+    await SyncQueueService.processAll();
+
+    // El remapeo del spec 51 sigue funcionando: la identidad provisional se
+    // resuelve contra el farmer REAL creado por "separate_person" (Karol),
+    // nunca contra el que ya tenía el documento (Santiago).
+    expect(mockFarmerCacheRemove).toHaveBeenCalledWith('local_farmer_karol');
+  });
+
+  it('propagates any other error from extractFarmer unchanged', async () => {
+    const entry = makeEntry();
+    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
+    mockLoadDraft.mockResolvedValue(makeDraft('inst-s1'));
+    mockInstrumentCacheGet.mockResolvedValue(makeInstrument({ code: 'S1' }));
+    mockBuildResponsesPayload.mockReturnValue([{ surveyId: 'survey-1', questionId: 'q1', textValue: 'x' }]);
+    mockExtractFarmer.mockRejectedValue(new Error('boom'));
+
+    await SyncQueueService.processAll();
+
+    expect(mockMarkFailedValidation).toHaveBeenCalledWith(entry.id, 'boom');
+  });
+});
+
 // ─── resolveLocalSessions (spec 47) ───────────────────────────────────────────
 
 describe('resolveLocalSessions', () => {
@@ -572,5 +803,199 @@ describe('resetNetworkFailures', () => {
 
     await SyncQueueService.processAll();
     expect(mockMarkSynced).toHaveBeenCalledWith('after-reset');
+  });
+});
+
+// ─── processEntry — farm-plot (spec 29) ──────────────────────────────────────
+//
+// Escrito retroactivamente (2026-08-21): processFarmPlotEntry() no tenía
+// ninguna prueba, hallazgo M-2 de `@reviewer`
+// (docs/reports/auditorias/29-auditoria-mobile-development-lote-merges.md).
+// Cubre también la guarda de idempotencia agregada el mismo día (evita
+// duplicar el lote en el backend si la entrada se reprocesa).
+
+describe('processEntry — farm-plot', () => {
+  it('crea el lote en el backend y marca todo synced cuando el borrador está en draft', async () => {
+    const entry = makeEntry({ id: 'plot-entry-1', surveyId: 'plot-1', itemType: 'farm-plot' });
+    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
+    const draft = makeFarmPlotDraft();
+    mockFarmPlotLoadDraft.mockResolvedValue(draft);
+
+    await SyncQueueService.processAll();
+
+    expect(mockCreateFarmPlot).toHaveBeenCalledWith({
+      farmId: draft.farmId,
+      name: draft.name,
+      description: draft.description,
+      area: draft.area,
+      capturedOffline: draft.capturedOffline,
+      polygon: draft.polygon,
+    });
+    expect(mockFarmPlotMarkSynced).toHaveBeenCalledWith('plot-1');
+    expect(mockMarkSynced).toHaveBeenCalledWith('plot-entry-1');
+  });
+
+  it('marca la entrada synced sin crear nada si el borrador ya no existe localmente', async () => {
+    const entry = makeEntry({ id: 'plot-entry-2', surveyId: 'plot-missing', itemType: 'farm-plot' });
+    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
+    mockFarmPlotLoadDraft.mockResolvedValue(null);
+
+    await SyncQueueService.processAll();
+
+    expect(mockCreateFarmPlot).not.toHaveBeenCalled();
+    expect(mockMarkSynced).toHaveBeenCalledWith('plot-entry-2');
+  });
+
+  it('no vuelve a crear el lote si ya está synced localmente (guarda de idempotencia)', async () => {
+    const entry = makeEntry({ id: 'plot-entry-3', surveyId: 'plot-1', itemType: 'farm-plot' });
+    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
+    mockFarmPlotLoadDraft.mockResolvedValue(makeFarmPlotDraft({ status: 'synced' }));
+
+    await SyncQueueService.processAll();
+
+    expect(mockCreateFarmPlot).not.toHaveBeenCalled();
+    expect(mockMarkSynced).toHaveBeenCalledWith('plot-entry-3');
+  });
+
+  it('deja la entrada para reintentar ante un error de red, sin marcar fallo de validación', async () => {
+    const entry = makeEntry({ id: 'plot-entry-4', surveyId: 'plot-1', itemType: 'farm-plot' });
+    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
+    mockFarmPlotLoadDraft.mockResolvedValue(makeFarmPlotDraft());
+    mockCreateFarmPlot.mockRejectedValue(new NetworkError());
+
+    await SyncQueueService.processAll();
+
+    expect(mockFarmPlotMarkSynced).not.toHaveBeenCalled();
+    expect(mockMarkFailedValidation).not.toHaveBeenCalled();
+    expect(mockMarkSynced).not.toHaveBeenCalledWith('plot-entry-4');
+  });
+
+  it('marca fallo de validación ante un error no relacionado con la red', async () => {
+    const entry = makeEntry({ id: 'plot-entry-5', surveyId: 'plot-1', itemType: 'farm-plot' });
+    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
+    mockFarmPlotLoadDraft.mockResolvedValue(makeFarmPlotDraft());
+    mockCreateFarmPlot.mockRejectedValue(new Error('polygon must have at least 3 points'));
+
+    await SyncQueueService.processAll();
+
+    expect(mockMarkFailedValidation).toHaveBeenCalledWith(
+      'plot-entry-5',
+      expect.stringContaining('polygon must have at least 3 points'),
+    );
+    expect(mockMarkSynced).not.toHaveBeenCalledWith('plot-entry-5');
+  });
+});
+
+// ─── processEntry — skip-step (spec 70, Fase 10) ─────────────────────────────
+//
+// Antes de esta fase, un salto de paso hecho sin conexión se encolaba con
+// itemType 'survey' (el default) y caía en processSurveyEntry, que la
+// descartaba en silencio por no tener respuestas — la guarda de la Fase 3 no
+// distinguía "vacío por abandono" de "vacío a propósito". Estas pruebas
+// verifican que itemType 'skip-step' la enruta a POST /api/surveys/skip-step
+// en vez de a esa guarda.
+
+describe('processEntry — skip-step', () => {
+  it('llama a POST /api/surveys/skip-step con sessionId, instrumentId y stepOrder, y marca todo sincronizado', async () => {
+    const entry = makeEntry({
+      id: 'skip-entry-1',
+      surveyId: 'skip-draft-1',
+      campaignSessionId: 'session-1',
+      stepOrder: 3,
+      instrumentId: 'inst-1',
+      itemType: 'skip-step',
+    });
+    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
+
+    await SyncQueueService.processAll();
+
+    expect(mockSkipStepApi).toHaveBeenCalledWith({
+      sessionId: 'session-1',
+      instrumentId: 'inst-1',
+      stepOrder: 3,
+    });
+    expect(mockMarkSynced).toHaveBeenCalledWith('skip-entry-1');
+    expect(mockMarkSyncedDraft).toHaveBeenCalledWith('skip-draft-1');
+  });
+
+  it('nunca cae en la guarda de "sin respuestas": llama a skip-step aunque no exista ningún borrador local', async () => {
+    // Es exactamente el hallazgo que motivó esta fase: antes, la ausencia de
+    // borrador con respuestas hacía que la entrada se descartara sin avisar
+    // al backend. loadDraft ni siquiera se consulta en este camino.
+    const entry = makeEntry({
+      id: 'skip-entry-2',
+      surveyId: 'skip-draft-2',
+      campaignSessionId: 'session-1',
+      stepOrder: 4,
+      instrumentId: 'inst-1',
+      itemType: 'skip-step',
+    });
+    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
+    mockLoadDraft.mockResolvedValue(null);
+
+    await SyncQueueService.processAll();
+
+    expect(mockLoadDraft).not.toHaveBeenCalled();
+    expect(mockSkipStepApi).toHaveBeenCalledTimes(1);
+    expect(mockMarkFailedValidation).not.toHaveBeenCalled();
+  });
+
+  it('marca fallo de validación si falta instrumentId o stepOrder, sin llamar al backend', async () => {
+    const entry = makeEntry({
+      id: 'skip-entry-3',
+      surveyId: 'skip-draft-3',
+      campaignSessionId: 'session-1',
+      itemType: 'skip-step',
+      // instrumentId y stepOrder ausentes a propósito
+    });
+    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
+
+    await SyncQueueService.processAll();
+
+    expect(mockSkipStepApi).not.toHaveBeenCalled();
+    expect(mockMarkFailedValidation).toHaveBeenCalledWith(
+      'skip-entry-3',
+      expect.stringContaining('skip-step incompleta'),
+    );
+  });
+
+  it('deja la entrada para reintentar ante un error de red, sin marcar fallo de validación', async () => {
+    const entry = makeEntry({
+      id: 'skip-entry-4',
+      surveyId: 'skip-draft-4',
+      campaignSessionId: 'session-1',
+      stepOrder: 3,
+      instrumentId: 'inst-1',
+      itemType: 'skip-step',
+    });
+    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
+    mockSkipStepApi.mockRejectedValue(new NetworkError());
+
+    await SyncQueueService.processAll();
+
+    expect(mockMarkFailedValidation).not.toHaveBeenCalled();
+    expect(mockMarkSynced).not.toHaveBeenCalledWith('skip-entry-4');
+    expect(mockIncrementAttempts).toHaveBeenCalledWith('skip-entry-4');
+  });
+
+  it('marca fallo de validación ante un error del backend no relacionado con la red', async () => {
+    const entry = makeEntry({
+      id: 'skip-entry-5',
+      surveyId: 'skip-draft-5',
+      campaignSessionId: 'session-1',
+      stepOrder: 3,
+      instrumentId: 'inst-1',
+      itemType: 'skip-step',
+    });
+    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
+    mockSkipStepApi.mockRejectedValue(new Error('Instrument not found'));
+
+    await SyncQueueService.processAll();
+
+    expect(mockMarkFailedValidation).toHaveBeenCalledWith(
+      'skip-entry-5',
+      expect.stringContaining('Instrument not found'),
+    );
+    expect(mockMarkSynced).not.toHaveBeenCalledWith('skip-entry-5');
   });
 });

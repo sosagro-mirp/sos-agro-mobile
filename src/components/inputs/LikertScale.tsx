@@ -1,6 +1,8 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Fonts } from "../../theme/fonts";
+import { useTheme } from "../../theme/ThemeProvider";
+import type { ThemeColors } from "../../theme/colors";
 import type { InstrumentDraftAnswer, InstrumentOption } from "../../types/instrument";
 import { SingleChoiceList } from "./SingleChoiceList";
 
@@ -17,6 +19,9 @@ export function LikertScale({
   value,
   onChange,
 }: Props): React.JSX.Element {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+
   if (options.length > 7) {
     return (
       <SingleChoiceList
@@ -67,57 +72,59 @@ export function LikertScale({
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    width: "100%",
-    gap: 12,
-  },
-  track: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    backgroundColor: "#F9FAFB",
-    borderWidth: 2,
-    borderColor: "#D1D5DB",
-    borderRadius: 40,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 4,
-  },
-  circle: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    borderWidth: 2,
-    borderColor: "#9CA3AF",
-    backgroundColor: "#FFFFFF",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  circleSelected: {
-    borderColor: "#1B6B3A",
-    backgroundColor: "#1B6B3A",
-  },
-  circleDot: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: "#FFFFFF",
-  },
-  labelsRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    paddingHorizontal: 4,
-  },
-  edgeLabel: {
-    fontFamily: Fonts.regular,
-    fontSize: 14,
-    lineHeight: 18,
-    color: "#6B7280",
-    maxWidth: "40%",
-    textAlign: "left",
-  },
-  edgeLabelRight: {
-    textAlign: "right",
-  },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    container: {
+      width: "100%",
+      gap: 12,
+    },
+    track: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      backgroundColor: colors.surfaceMuted,
+      borderWidth: 2,
+      borderColor: colors.borderStrong,
+      borderRadius: 40,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      gap: 4,
+    },
+    circle: {
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      borderWidth: 2,
+      borderColor: colors.textMuted,
+      backgroundColor: colors.surface,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    circleSelected: {
+      borderColor: colors.brand,
+      backgroundColor: colors.brand,
+    },
+    circleDot: {
+      width: 16,
+      height: 16,
+      borderRadius: 8,
+      backgroundColor: colors.brandForeground,
+    },
+    labelsRow: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      paddingHorizontal: 4,
+    },
+    edgeLabel: {
+      fontFamily: Fonts.regular,
+      fontSize: 14,
+      lineHeight: 18,
+      color: colors.textMuted,
+      maxWidth: "40%",
+      textAlign: "left",
+    },
+    edgeLabelRight: {
+      textAlign: "right",
+    },
+  });
+}

@@ -12,9 +12,29 @@ const migrations = {
       { idx: 6, when: 6, tag: 'm0006', breakpoints: true },
       { idx: 7, when: 7, tag: 'm0007', breakpoints: true },
       { idx: 8, when: 8, tag: 'm0008', breakpoints: true },
+      { idx: 9, when: 9, tag: 'm0009', breakpoints: true },
+      { idx: 10, when: 10, tag: 'm0010', breakpoints: true },
+      { idx: 11, when: 11, tag: 'm0011', breakpoints: true },
     ],
   },
   migrations: {
+    m0011: [
+      // El enum de itemType ('survey' | 'farm-plot' | 'skip-step') es una
+      // restricción de TypeScript, no de SQLite — la columna ya era `text`
+      // sin CHECK, así que 'skip-step' no necesita ALTER propio.
+      'ALTER TABLE `sync_queue` ADD COLUMN `instrument_id` text',
+    ].join('\n'),
+
+    m0010: [
+      'ALTER TABLE `surveys` ADD COLUMN `step_order` integer',
+    ].join('\n'),
+
+    m0009: [
+      "ALTER TABLE `sync_queue` ADD COLUMN `item_type` text NOT NULL DEFAULT 'survey'",
+      '--> statement-breakpoint',
+      "CREATE TABLE IF NOT EXISTS `farm_plots` (`id` text PRIMARY KEY NOT NULL, `farm_id` text NOT NULL, `name` text NOT NULL, `description` text, `area` real, `polygon` text NOT NULL, `status` text NOT NULL DEFAULT 'draft', `captured_offline` integer NOT NULL DEFAULT 1, `created_at` integer NOT NULL, `updated_at` integer NOT NULL)",
+    ].join('\n'),
+
     m0008: [
       'ALTER TABLE `farmer_cache` ADD COLUMN `crops` text',
     ].join('\n'),

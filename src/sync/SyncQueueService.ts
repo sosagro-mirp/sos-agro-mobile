@@ -7,9 +7,10 @@ import { pendingSessionStorage } from '../storage/pendingSessions';
 import { farmerCacheStorage } from '../storage/farmerCache';
 import { instrumentCacheStorage } from '../storage/instrumentCache';
 import { submitResponsesBatch } from '../api/responses';
-import { createSurvey, markSurveyAsSynced } from '../api/surveys';
+import { createSurvey, markSurveyAsSynced, skipStepApi } from '../api/surveys';
 import { markSessionAsSynced, createCampaignSession } from '../api/campaignSessions';
-import { extractFarmer, extractCrops } from '../api/farmers';
+import { extractFarmer, extractCrops, DocumentIdCollisionError } from '../api/farmers';
+import { cacheFarmerIdentity } from '../lib/cacheFarmerIdentity';
 import { buildResponsesPayload } from '../lib/buildResponsesPayload';
 import { flattenSections } from '../lib/flattenSections';
 import { resolveOtherOptions } from '../lib/resolveOtherOptions';
@@ -25,6 +26,8 @@ import { MediaUploadService } from './MediaUploadService';
 import { changeRequestStorage } from '../storage/changeRequestStorage';
 import { postChangeRequest, fetchMyResolved } from '../api/changeRequests';
 import { useChangeRequestStore } from '../store/useChangeRequestStore';
+import { farmPlotStore } from '../storage/farmPlotStore';
+import { createFarmPlot } from '../api/farmPlots';
 import type { CampaignSessionResponse } from '../types/campaign';
 
 const MAX_CONSECUTIVE_NETWORK_FAILURES = 5;
@@ -214,23 +217,186 @@ class SyncQueueServiceClass {
     }
   }
 
+  // Spec 71 — intenta reparar una entrada de la cola cuyo `campaignSessionId`
+  // apunta a un id local que `resolveLocalSessions()` ya no va a resolver
+  // (porque la fila de `pendingSessions` correspondiente dejó de estar
+  // `pending`). Dos fuentes locales pueden conservar el id real:
+  //   1. El borrador (`surveys.campaignSessionId`): existía cuando
+  //      `resolveLocalSessions()` hizo el remapeo, así que si el id ya no es
+  //      local, es el id real.
+  //   2. `pendingSessions.realSessionId`: se persiste en `resolve()` aunque
+  //      la fila ya no aparezca en `listPending()`.
+  // Devuelve el id real si logró repararla, o `null` si ninguna fuente local
+  // lo tiene (llamador decide si sigue esperando o reporta el bloqueo).
+  private async repairLocalCampaignSession(entry: SyncQueueEntry): Promise<string | null> {
+    const localSessionId = entry.campaignSessionId!;
+
+    const draft = await surveyDraftStore.loadDraft(entry.surveyId);
+    if (draft?.campaignSessionId && !isLocalId(draft.campaignSessionId)) {
+      await syncQueueStorage.updateCampaignSessionId(entry.id, draft.campaignSessionId);
+      logger.info(
+        `[Sync] repaired entry ${entry.id}: campaignSessionId ${localSessionId} → ${draft.campaignSessionId} (from draft)`,
+      );
+      return draft.campaignSessionId;
+    }
+
+    const pendingSession = await pendingSessionStorage.getByLocal(localSessionId);
+    if (pendingSession?.status === 'resolved' && pendingSession.realSessionId) {
+      await syncQueueStorage.updateCampaignSessionId(entry.id, pendingSession.realSessionId);
+      logger.info(
+        `[Sync] repaired entry ${entry.id}: campaignSessionId ${localSessionId} → ${pendingSession.realSessionId} (from pendingSessions)`,
+      );
+      return pendingSession.realSessionId;
+    }
+
+    return null;
+  }
+
   private async processEntry(entry: SyncQueueEntry): Promise<void> {
+    if (entry.itemType === 'farm-plot') {
+      await this.processFarmPlotEntry(entry);
+    } else if (entry.itemType === 'skip-step') {
+      await this.processSkipStepEntry(entry);
+    } else {
+      await this.processSurveyEntry(entry);
+    }
+  }
+
+  // Spec 70, Fase 10 — el salto de paso hecho sin conexión llega aquí en vez
+  // de caer en processSurveyEntry, que descartaría la entrada en silencio por
+  // no tener respuestas (es un vacío deliberado, no un abandono). Envía el
+  // marcador vía el mismo endpoint que usa el camino online
+  // (POST /api/surveys/skip-step), para que el estado final de la campaña sea
+  // idéntico sin importar si hubo conexión en el momento de saltar.
+  private async processSkipStepEntry(entry: SyncQueueEntry): Promise<void> {
     await syncQueueStorage.markInFlight(entry.id);
 
     try {
-      // If the campaign session is still provisional (resolveLocalSessions failed earlier),
-      // leave the entry in_flight so this run's dequeue loop skips it.
-      // resetInFlightToRetry() in the finally block resets it to pending for the next sync run.
-      if (entry.campaignSessionId && isLocalId(entry.campaignSessionId)) {
-        logger.warn(`[Sync] campaign session not yet resolved for entry ${entry.id}, deferring`);
+      const resolved = await this.resolveCampaignSession(entry);
+      if (!resolved) return;
+      entry = resolved;
+
+      if (!entry.campaignSessionId || !entry.instrumentId || entry.stepOrder == null) {
+        const detail = `Entrada skip-step incompleta — sessionId: ${entry.campaignSessionId}, instrumentId: ${entry.instrumentId}, stepOrder: ${entry.stepOrder}`;
+        logger.error(`[Sync] ${detail} — entry ${entry.id}`);
+        captureError(new Error(detail), { entryId: entry.id });
+        await syncQueueStorage.markFailedValidation(entry.id, detail);
         return;
       }
 
-      // If the survey was created offline, it doesn't exist on the backend yet.
-      // Create it now to obtain a real surveyId before sending responses.
+      await skipStepApi({
+        sessionId: entry.campaignSessionId,
+        instrumentId: entry.instrumentId,
+        stepOrder: entry.stepOrder,
+      });
+
+      await syncQueueStorage.markSynced(entry.id);
+      // El borrador local (creado por handleSkip() antes de encolar) ya
+      // quedó en status 'completed'; marcarlo synced evita que quede
+      // colgando en la vista de la app aunque no aparezca en Borradores.
+      await surveyDraftStore.markSynced(entry.surveyId);
+
+      logger.info(`[Sync] processed skip-step entry ${entry.id} for session ${entry.campaignSessionId}`);
+      this.consecutiveNetworkFailures = 0;
+    } catch (error) {
+      if (error instanceof NetworkError) {
+        logger.error('[Sync] network error (skip-step)', error);
+        await this.handleNetworkError(entry);
+      } else {
+        logger.error('[Sync] validation error (skip-step)', error);
+        captureError(error, { entryId: entry.id, surveyId: entry.surveyId });
+        const detail = error instanceof Error ? error.message : String(error);
+        await syncQueueStorage.markFailedValidation(entry.id, detail);
+        this.consecutiveNetworkFailures = 0;
+      }
+    }
+  }
+
+  // Repara el campaignSessionId de `entry` si sigue apuntando a un id local
+  // (spec 71), o marca la entrada aplazada/fallida y devuelve `null` cuando
+  // el llamador debe cortar el procesamiento ahí mismo. Compartido por
+  // processSurveyEntry y processSkipStepEntry (spec 70, Fase 10) — antes solo
+  // vivía dentro de processSurveyEntry, y skip-step necesita exactamente la
+  // misma resolución para llamar a POST /api/surveys/skip-step con un
+  // sessionId real.
+  private async resolveCampaignSession(entry: SyncQueueEntry): Promise<SyncQueueEntry | null> {
+    if (!entry.campaignSessionId || !isLocalId(entry.campaignSessionId)) {
+      return entry;
+    }
+
+    // If the campaign session is still provisional, try to repair it before
+    // giving up. Spec 71 — antes esto solo aplazaba la entrada de forma
+    // indefinida: si la fila de `pendingSessions` que le correspondía ya no
+    // está `pending` (porque se resolvió *después* de que esta entrada se
+    // encoló — condición de carrera entre el remapeo de
+    // resolveLocalSessions() y la copia de campaignSessionId en memoria de
+    // useInstrumentSurveyStore), `resolveLocalSessions()` nunca vuelve a
+    // ofrecerla y la entrada quedaba congelada para siempre, en silencio.
+    const repaired = await this.repairLocalCampaignSession(entry);
+    if (repaired) {
+      return { ...entry, campaignSessionId: repaired };
+    }
+
+    const pendingSession = await pendingSessionStorage.getByLocal(entry.campaignSessionId);
+    if (pendingSession?.status === 'pending') {
+      // Espera legítima: la sesión sigue en cola de resolución.
+      logger.warn(`[Sync] campaign session not yet resolved for entry ${entry.id}, deferring`);
+      return null;
+    }
+
+    // No hay ninguna fuente local que resuelva este id (la fila no existe, o
+    // quedó `failed`) — no aplazar más. Reportar en vez de callar.
+    const detail = `Sesión de campaña local sin resolución posible: ${entry.campaignSessionId}`;
+    logger.error(`[Sync] ${detail} — entry ${entry.id}`);
+    captureError(new Error(detail), {
+      surveyId: entry.surveyId,
+      entryId: entry.id,
+      localSessionId: entry.campaignSessionId,
+    });
+    await syncQueueStorage.markFailedValidation(entry.id, detail);
+    return null;
+  }
+
+  private async processSurveyEntry(entry: SyncQueueEntry): Promise<void> {
+    await syncQueueStorage.markInFlight(entry.id);
+
+    try {
+      const resolved = await this.resolveCampaignSession(entry);
+      if (!resolved) return;
+      entry = resolved;
+
+      // Spec 70, Fase 3 — decidir si hay contenido real ANTES de materializar,
+      // usando el borrador (`draft.answers`), no el payload de envío. Antes,
+      // materializar pasaba siempre que `isLocalId(entry.surveyId)`, sin mirar
+      // si había respuestas — eso es exactamente el vector 2: una fila vacía
+      // quedaba creada en el backend para siempre. El payload de envío NO
+      // sirve como señal aquí: una encuesta con solo una respuesta multimedia
+      // aún sin subir construye un payload vacío a propósito
+      // (`buildResponsesPayload` la omite hasta que resuelva `attachmentId`),
+      // pero sí tiene contenido real y debe materializarse igual — de lo
+      // contrario `MediaUploadService` nunca consigue un `surveyId` real para
+      // pedir la URL prefirmada.
+      const draft = await surveyDraftStore.loadDraft(entry.surveyId);
+      const hasAnswers = !!draft && Object.keys(draft.answers).length > 0;
+
+      if (!hasAnswers) {
+        logger.warn(
+          `[Sync] entry ${entry.id} has no answers — not materializing survey ${entry.surveyId}`,
+        );
+        await syncQueueStorage.markSynced(entry.id);
+        await surveyDraftStore.markSynced(entry.surveyId);
+        return;
+      }
+
+      // If the survey was created offline (or deferred — see beginSurvey.ts),
+      // it doesn't exist on the backend yet. Create it now that we know
+      // there's real content, to obtain a real surveyId — needed unconditionally
+      // from here on, including by MediaUploadService for any pending attachment.
       let realSurveyId = entry.surveyId;
       if (isLocalId(entry.surveyId)) {
-        realSurveyId = await this.materializeSurvey(entry);
+        realSurveyId =
+          (await surveyDraftStore.getBackendSurveyId(entry.surveyId)) ??
+          (await this.materializeSurvey(entry));
         // Persisted so a failed media attachment can still be retried after
         // this survey syncs and its local `id` (still the local one) is all
         // that's left to look it up by — see surveyDraftStore.getBackendSurveyId.
@@ -240,6 +406,17 @@ class SyncQueueServiceClass {
       const payload = await this.buildPayload(entry, realSurveyId);
 
       if (!payload || payload.length === 0) {
+        // Every answer is media still pending upload/confirmation (or
+        // otherwise unresolved) — the survey is already materialized (it has
+        // real content) but there's nothing to submit yet. The manual retry
+        // flow (MediaUploadService.retryEntry) links the response once the
+        // upload confirms; see its docs for why that's safe here. Logged
+        // explicitly so this doesn't read as a silent "synced with nothing
+        // sent" (see the `!hasAnswers` branch above for the case this isn't).
+        logger.warn(
+          `[Sync] entry ${entry.id} materialized survey ${realSurveyId} but has nothing to submit yet ` +
+            '(pending media attachment, most likely) — closing the queue entry locally',
+        );
         await syncQueueStorage.markSynced(entry.id);
         await surveyDraftStore.markSynced(entry.surveyId);
         return;
@@ -290,15 +467,80 @@ class SyncQueueServiceClass {
     }
   }
 
+  // Handles entries with itemType 'farm-plot'; entry.surveyId holds the local farmPlotId (per D5).
+  private async processFarmPlotEntry(entry: SyncQueueEntry): Promise<void> {
+    await syncQueueStorage.markInFlight(entry.id);
+
+    try {
+      const draft = await farmPlotStore.loadDraft(entry.surveyId);
+
+      if (!draft) {
+        await syncQueueStorage.markSynced(entry.id);
+        return;
+      }
+
+      // Guarda de idempotencia: si el lote ya se marcó `synced` (ej. un
+      // intento anterior creó el lote en el backend pero la entrada de la
+      // cola no llegó a marcarse sincronizada antes de un cierre de la app,
+      // y quedó para reintentar), no volver a crearlo — createFarmPlot() no
+      // es idempotente y duplicaría el lote en el backend.
+      if (draft.status === 'synced') {
+        await syncQueueStorage.markSynced(entry.id);
+        logger.info(`[Sync] farm-plot entry ${entry.id} already synced locally, skipping re-create`);
+        return;
+      }
+
+      const { farmPlotId } = await createFarmPlot({
+        farmId: draft.farmId,
+        name: draft.name,
+        description: draft.description,
+        area: draft.area,
+        capturedOffline: draft.capturedOffline,
+        polygon: draft.polygon,
+      });
+
+      await farmPlotStore.markSynced(draft.id);
+      await syncQueueStorage.markSynced(entry.id);
+
+      logger.info(`[Sync] processed farm-plot entry ${entry.id} for plot ${farmPlotId}`);
+      this.consecutiveNetworkFailures = 0;
+    } catch (error) {
+      if (error instanceof NetworkError) {
+        logger.error('[Sync] network error (farm-plot)', error);
+        await this.handleNetworkError(entry);
+      } else {
+        logger.error('[Sync] validation error (farm-plot)', error);
+        captureError(error, { farmPlotId: entry.surveyId, entryId: entry.id });
+        const detail = error instanceof Error ? error.message : String(error);
+        await syncQueueStorage.markFailedValidation(entry.id, detail);
+        this.consecutiveNetworkFailures = 0;
+      }
+    }
+  }
+
   // Creates the survey on the backend for surveys that were started offline.
   // Returns the real surveyId assigned by the backend.
   private async materializeSurvey(entry: SyncQueueEntry): Promise<string> {
     const draft = await surveyDraftStore.loadDraft(entry.surveyId);
     if (!draft) throw new Error(`Draft not found for local survey ${entry.surveyId}`);
 
+    // `farmerId` viaja desde el borrador: al unificar la creación en este
+    // único camino (Fase 2) se perdió el vínculo que el camino online de
+    // `start.tsx` sí enviaba, y toda encuesta nueva quedaba con
+    // `survey.farmer = NULL`. Las consultas caían a `campaignSession.farmer`,
+    // así que no se notaba, pero el dato se perdía igual.
+    //
+    // Spec 70, Fase 9 — `clientSurveyId: entry.surveyId` es el id local
+    // (`local_survey_<uuid>`) que sobrevive al reintento. Si este POST llega
+    // al backend y crea la fila, pero la respuesta se pierde (reconexión
+    // inestable — el escenario real de `TC-070-04`), el siguiente intento
+    // reenvía el mismo id local y el backend devuelve la encuesta ya creada
+    // en vez de duplicarla. Sin esto, cada reintento generaba una fila nueva.
     const { surveyId: realSurveyId } = await createSurvey({
       instrumentIds: [draft.instrumentId],
       campaignSessionId: entry.campaignSessionId,
+      clientSurveyId: entry.surveyId,
+      ...(draft.farmerId != null ? { farmerId: draft.farmerId } : {}),
       ...(entry.stepOrder != null ? { stepOrder: entry.stepOrder } : {}),
     });
 
@@ -320,7 +562,27 @@ class SyncQueueServiceClass {
     if (code !== 'S1' && code !== 'S2') return;
 
     if (code === 'S1') {
-      const { farmer } = await extractFarmer(realSurveyId);
+      let farmer: Awaited<ReturnType<typeof extractFarmer>>['farmer'];
+      try {
+        ({ farmer } = await extractFarmer(realSurveyId));
+      } catch (err) {
+        if (!(err instanceof DocumentIdCollisionError)) throw err;
+
+        // Spec 68, Fase 5 — colisión de documentId descubierta solo al
+        // sincronizar: el encuestador ya no está frente al agricultor, no
+        // hay a quién preguntarle (ver § "Resolución diferida" del spec).
+        // El default es siempre "registrar aparte" — nunca fusionar en
+        // silencio — porque es la única opción reversible sin backend: un
+        // administrador puede revisar y corregir después vía
+        // GET /api/farmers/document-collisions. No bloquear ni marcar la
+        // entrada de la cola como fallida por esto.
+        logger.warn(
+          `[Sync] documentId collision for survey ${realSurveyId} (document ${err.documentId}: ` +
+            `submitted "${err.submittedName}" vs existing "${err.existingFarmerName}") — ` +
+            'resolving as separate_person, pending admin review',
+        );
+        ({ farmer } = await extractFarmer(realSurveyId, { resolution: 'separate_person' }));
+      }
 
       // Remap provisional farmerId if one exists in farmerCache.
       const allRecent = await farmerCacheStorage.listRecent(100);
@@ -340,13 +602,25 @@ class SyncQueueServiceClass {
         if (storeState.localFarmerId === localFarmerId) {
           storeState.resolveFarmer(farmer.farmerId);
         }
+
+        try {
+          await farmerCacheStorage.remove(localFarmerId);
+        } catch (err) {
+          logger.warn(
+            `[Sync] failed to remove provisional farmer cache entry ${localFarmerId}: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
       }
 
-      await farmerCacheStorage.upsert({
+      await cacheFarmerIdentity({
         farmerId: farmer.farmerId,
         name: farmer.name,
         documentId: farmer.documentId ?? undefined,
-        cachedAt: new Date(),
+        phone: farmer.phone ?? undefined,
+        farmName: farmer.farm?.name ?? undefined,
+        crops: farmer.farm?.crops ?? undefined,
       });
 
       logger.info(`[Sync] extractFarmer completed for survey ${realSurveyId}`);

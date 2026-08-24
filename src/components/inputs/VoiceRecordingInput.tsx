@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Mic, Square, Play, X } from 'lucide-react-native';
 import {
@@ -10,6 +10,8 @@ import {
   useAudioRecorderState,
 } from 'expo-audio';
 import * as FileSystem from 'expo-file-system/legacy';
+import { useTheme } from '../../theme/ThemeProvider';
+import type { ThemeColors } from '../../theme/colors';
 import type { InstrumentDraftAnswer } from '../../types/instrument';
 
 interface Props {
@@ -29,6 +31,8 @@ const MAX_DURATION_SECONDS = 300;
 
 export function VoiceRecordingInput({ questionId, value, onChange }: Props): React.JSX.Element {
   const [state, setState] = useState<RecordingState>(value ? 'recorded' : 'idle');
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const autoStoppedRef = useRef(false);
   const isRecordingRef = useRef(false);
 
@@ -155,7 +159,7 @@ export function VoiceRecordingInput({ questionId, value, onChange }: Props): Rea
     return (
       <View style={styles.container}>
         <TouchableOpacity style={styles.recordButton} onPress={startRecording}>
-          <Mic size={22} color="#FFFFFF" />
+          <Mic size={22} color={colors.brandForeground} />
           <Text style={styles.recordButtonText}>Iniciar grabación</Text>
         </TouchableOpacity>
       </View>
@@ -170,7 +174,7 @@ export function VoiceRecordingInput({ questionId, value, onChange }: Props): Rea
           <Text style={styles.recordingText}>Grabando... {duration}s</Text>
         </View>
         <TouchableOpacity style={[styles.recordButton, styles.stopButton]} onPress={stopRecording}>
-          <Square size={22} color="#FFFFFF" />
+          <Square size={22} color={colors.brandForeground} />
           <Text style={styles.recordButtonText}>Detener</Text>
         </TouchableOpacity>
       </View>
@@ -183,11 +187,11 @@ export function VoiceRecordingInput({ questionId, value, onChange }: Props): Rea
         <Text style={styles.recordedLabel}>Grabación lista</Text>
         <View style={styles.actions}>
           <TouchableOpacity style={styles.secondaryButton} onPress={playPreview}>
-            <Play size={16} color="#374151" />
+            <Play size={16} color={colors.textPrimary} />
             <Text style={styles.secondaryButtonText}>Reproducir</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.secondaryButton} onPress={deleteRecording}>
-            <X size={16} color="#DC2626" />
+            <X size={16} color={colors.dangerFg} />
             <Text style={[styles.secondaryButtonText, styles.deleteText]}>Eliminar</Text>
           </TouchableOpacity>
         </View>
@@ -196,52 +200,54 @@ export function VoiceRecordingInput({ questionId, value, onChange }: Props): Rea
   );
 }
 
-const styles = StyleSheet.create({
-  container: { width: '100%', gap: 12 },
-  recordButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#1B6B3A',
-    borderRadius: 12,
-    paddingVertical: 16,
-    gap: 10,
-  },
-  stopButton: { backgroundColor: '#DC2626' },
-  recordButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
-  recordingBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  dot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#DC2626',
-  },
-  recordingText: { fontSize: 15, color: '#DC2626', fontWeight: '500' },
-  recordedCard: {
-    borderWidth: 2,
-    borderColor: '#1B6B3A',
-    borderRadius: 12,
-    padding: 16,
-    gap: 12,
-  },
-  recordedLabel: { fontSize: 15, color: '#1B6B3A', fontWeight: '600' },
-  actions: { flexDirection: 'row', gap: 10 },
-  secondaryButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1.5,
-    borderColor: '#D1D5DB',
-    borderRadius: 8,
-    paddingVertical: 10,
-    gap: 6,
-  },
-  secondaryButtonText: { fontSize: 14, color: '#374151' },
-  deleteText: { color: '#DC2626' },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    container: { width: '100%', gap: 12 },
+    recordButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.brand,
+      borderRadius: 12,
+      paddingVertical: 16,
+      gap: 10,
+    },
+    stopButton: { backgroundColor: colors.dangerFg },
+    recordButtonText: { color: colors.brandForeground, fontSize: 16, fontWeight: '600' },
+    recordingBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+    },
+    dot: {
+      width: 10,
+      height: 10,
+      borderRadius: 5,
+      backgroundColor: colors.dangerFg,
+    },
+    recordingText: { fontSize: 15, color: colors.dangerFg, fontWeight: '500' },
+    recordedCard: {
+      borderWidth: 2,
+      borderColor: colors.brand,
+      borderRadius: 12,
+      padding: 16,
+      gap: 12,
+    },
+    recordedLabel: { fontSize: 15, color: colors.brand, fontWeight: '600' },
+    actions: { flexDirection: 'row', gap: 10 },
+    secondaryButton: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1.5,
+      borderColor: colors.borderStrong,
+      borderRadius: 8,
+      paddingVertical: 10,
+      gap: 6,
+    },
+    secondaryButtonText: { fontSize: 14, color: colors.textPrimary },
+    deleteText: { color: colors.dangerFg },
+  });
+}

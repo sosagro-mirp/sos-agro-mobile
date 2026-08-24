@@ -37,6 +37,10 @@ export const endpoints = {
   mediaAttachmentsPresignedUrl: '/api/media-attachments/presigned-url',
   mediaAttachmentsConfirm: (id: string) => `/api/media-attachments/${id}/confirm`,
 
+  // Farm plots
+  farmPlotsCreate: '/api/farm-plots',
+  farmPlotsByFarm: (farmId: string) => `/api/farm-plots/by-farm/${farmId}`,
+
   // Telemetry
   telemetrySync: '/api/telemetry/sync',
 

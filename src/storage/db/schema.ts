@@ -5,6 +5,14 @@ export const surveys = sqliteTable('surveys', {
   campaignSessionId: text('campaign_session_id'),
   instrumentId: text('instrument_id').notNull(),
   farmerId: text('farmer_id'),
+  // El paso de la campaña al que pertenece la encuesta. Tiene que vivir en el
+  // borrador, no solo en la cola de sincronización: con la creación diferida
+  // (spec 70, fase 2) un borrador retomado desde la pestaña Borradores ya no
+  // conserva el contexto de campaña en memoria, y la encuesta se materializaba
+  // con `stepOrder: null`. `getNextStep()` arma los pasos completados solo a
+  // partir de `stepOrder`, así que la campaña volvía a ofrecer un paso ya
+  // respondido. Hallado en la ronda de campo del 2026-08-18.
+  stepOrder: integer('step_order'),
   status: text('status', { enum: ['draft', 'completed', 'synced'] })
     .notNull()
     .default('draft'),
@@ -64,6 +72,29 @@ export const syncQueue = sqliteTable('sync_queue', {
   payloadPath: text('payload_path'),
   errorDetail: text('error_detail'),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  // Spec 70, Fase 10 — 'skip-step' se agrega a 'survey' | 'farm-plot' para
+  // que un salto de paso hecho sin conexión viaje por la misma cola (con sus
+  // reintentos y backoff) en vez de una cola paralela.
+  itemType: text('item_type', { enum: ['survey', 'farm-plot', 'skip-step'] })
+    .notNull()
+    .default('survey'),
+  // Spec 70, Fase 10 — solo lo usan las entradas 'skip-step': el instrumento
+  // del paso que se saltó, que POST /api/surveys/skip-step exige y que
+  // ninguna otra columna de esta tabla guardaba hasta ahora.
+  instrumentId: text('instrument_id'),
+});
+
+export const farmPlots = sqliteTable('farm_plots', {
+  id: text('id').primaryKey(),
+  farmId: text('farm_id').notNull(),
+  name: text('name').notNull(),
+  description: text('description'),
+  area: real('area'),
+  polygon: text('polygon').notNull(), // JSON serializado: PolygonDto
+  status: text('status', { enum: ['draft', 'synced'] }).notNull().default('draft'),
+  capturedOffline: integer('captured_offline', { mode: 'boolean' }).notNull().default(true),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
 });
 
 export const instrumentCache = sqliteTable('instrument_cache', {

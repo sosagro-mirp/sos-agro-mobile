@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo } from "react";
 import {
   TouchableOpacity,
   Text,
@@ -6,6 +6,8 @@ import {
   StyleSheet,
 } from "react-native";
 import { Fonts } from "../../theme/fonts";
+import { useTheme } from "../../theme/ThemeProvider";
+import type { ThemeColors } from "../../theme/colors";
 
 interface SecondaryButtonProps {
   label: string;
@@ -20,6 +22,8 @@ export const SecondaryButton: React.FC<SecondaryButtonProps> = ({
   disabled = false,
   loading = false,
 }) => {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const isDisabled = disabled || loading;
 
   return (
@@ -31,7 +35,7 @@ export const SecondaryButton: React.FC<SecondaryButtonProps> = ({
     >
       {loading ? (
         <ActivityIndicator
-          color={isDisabled ? "#D1D5DB" : "#1B6B3A"}
+          color={isDisabled ? colors.borderStrong : colors.brand}
           size="small"
         />
       ) : (
@@ -43,28 +47,30 @@ export const SecondaryButton: React.FC<SecondaryButtonProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
-  button: {
-    width: "100%",
-    minHeight: 56,
-    backgroundColor: "transparent",
-    borderRadius: 8,
-    borderWidth: 1.5,
-    borderColor: "#1B6B3A",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 16,
-  },
-  buttonDisabled: {
-    borderColor: "#D1D5DB",
-  },
-  label: {
-    fontFamily: Fonts.semiBold,
-    fontSize: 18,
-    color: "#1B6B3A",
-    textAlign: "center",
-  },
-  labelDisabled: {
-    color: "#D1D5DB",
-  },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    button: {
+      width: "100%",
+      minHeight: 56,
+      backgroundColor: "transparent",
+      borderRadius: 8,
+      borderWidth: 1.5,
+      borderColor: colors.brand,
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: 16,
+    },
+    buttonDisabled: {
+      borderColor: colors.borderStrong,
+    },
+    label: {
+      fontFamily: Fonts.semiBold,
+      fontSize: 18,
+      color: colors.brand,
+      textAlign: "center",
+    },
+    labelDisabled: {
+      color: colors.borderStrong,
+    },
+  });
+}

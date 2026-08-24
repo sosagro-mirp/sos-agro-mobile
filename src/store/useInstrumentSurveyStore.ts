@@ -3,6 +3,7 @@ import { buildResponsesPayload } from '../lib/buildResponsesPayload';
 import { flattenSections } from '../lib/flattenSections';
 import { isQuestionVisible } from '../lib/isQuestionVisible';
 import { isAnswerComplete } from '../lib/isAnswerComplete';
+import { resolveResumeIndex } from '../lib/resolveResumeIndex';
 import { surveyDraftStore } from '../storage/surveyDraftStore';
 import { syncQueueStorage } from '../storage/syncQueue';
 import { SyncQueueService } from '../sync/SyncQueueService';
@@ -41,6 +42,13 @@ interface InstrumentSurveyState {
   goToIndex: (index: number) => void;
   canAdvance: () => boolean;
   visibleQuestions: () => FlattenedQuestionItem[];
+  // Spec 69 — fuente única del índice de reanudación de un borrador (ver
+  // `resolveResumeIndex.ts`), derivada de `visibleQuestions()` y `answers` ya
+  // presentes en el store tras `initializeSurvey({ restoredAnswers })`.
+  // `drafts/index.tsx` la llama *después* de inicializar, en vez de calcular
+  // su propio índice — así nunca puede divergir del que usa la pantalla de
+  // pregunta (criterio 6 del spec).
+  resumeIndex: () => number;
   enqueueSubmission: () => Promise<SubmitResult>;
   reset: () => void;
 }
@@ -130,8 +138,13 @@ export const useInstrumentSurveyStore = create<InstrumentSurveyState>((set, get)
     return flattenedQuestions.filter(({ question }) => isQuestionVisible(question, answers));
   },
 
+  resumeIndex() {
+    const { visibleQuestions, answers } = get();
+    return resolveResumeIndex(visibleQuestions(), answers);
+  },
+
   async enqueueSubmission(): Promise<SubmitResult> {
-    const { surveyId, flattenedQuestions, answers, campaignSessionId, stepOrder } = get();
+    const { surveyId, flattenedQuestions, answers } = get();
 
     if (!surveyId) {
       return { outcome: 'error', message: 'No hay encuesta activa' };
@@ -149,11 +162,20 @@ export const useInstrumentSurveyStore = create<InstrumentSurveyState>((set, get)
       await surveyDraftStore.saveMultipleAnswers(surveyId, answers);
       await surveyDraftStore.markCompleted(surveyId);
 
+      // Spec 71 — leer campaignSessionId/stepOrder del borrador persistido,
+      // no del estado en memoria de este store. Si la sesión de campaña se
+      // resolvió (offline → online) mientras el usuario llenaba la encuesta,
+      // el remapeo de SyncQueueService.resolveLocalSessions() actualiza la
+      // fila de `surveys` pero no esta copia en memoria — encolar con el id
+      // en memoria produce una entrada con un `campaignSessionId` local que
+      // ya no tiene resolución posible y queda congelada para siempre.
+      const draft = await surveyDraftStore.loadDraft(surveyId);
+
       await syncQueueStorage.enqueue({
         id: generateId(),
         surveyId,
-        campaignSessionId: campaignSessionId ?? undefined,
-        stepOrder: stepOrder ?? undefined,
+        campaignSessionId: draft?.campaignSessionId,
+        stepOrder: draft?.stepOrder,
       });
 
       const { isOnline } = useSyncStatusStore.getState();

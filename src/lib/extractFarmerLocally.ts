@@ -3,6 +3,7 @@ import { instrumentCacheStorage } from '../storage/instrumentCache';
 import { farmerCacheStorage } from '../storage/farmerCache';
 import { flattenSections } from './flattenSections';
 import { generateLocalId } from './generateLocalId';
+import { isSameFarmerName } from './nameMatching';
 
 export interface LocalFarmerDraft {
   farmerId: string;
@@ -11,6 +12,16 @@ export interface LocalFarmerDraft {
   phone: string | null;
   farmName: string | null;
   isProvisional: boolean;
+  // Spec 68 — presente cuando el documentId coincide con una entrada de
+  // `farmerCache` cuyo nombre no corresponde al recién digitado. El
+  // orquestador debe mostrar el modal de colisión y dejar que el
+  // encuestador decida antes de continuar a S1b.
+  collision?: {
+    documentId: string;
+    existingFarmerId: string;
+    existingName: string;
+    submittedName: string;
+  };
 }
 
 export async function extractFarmerLocally(s1SurveyId: string): Promise<LocalFarmerDraft | null> {
@@ -89,13 +100,36 @@ export async function extractFarmerLocally(s1SurveyId: string): Promise<LocalFar
   if (farmerDocumentId) {
     const cached = await farmerCacheStorage.getByDocumentId(farmerDocumentId);
     if (cached) {
+      if (isSameFarmerName(cached.name, farmerName)) {
+        return {
+          farmerId: cached.farmerId,
+          name: cached.name,
+          documentId: cached.documentId ?? null,
+          phone: cached.phone ?? null,
+          farmName,
+          isProvisional: false,
+        };
+      }
+
+      // Spec 68, Fase 4 — colisión detectada contra la caché local: nunca
+      // devolver el nombre cacheado en lugar del recién digitado (el bug
+      // original, un nivel más arriba que el backend). Se genera un id
+      // provisional nuevo, igual que el camino "sin caché", y se adjunta
+      // `collision` para que el orquestador muestre el aviso antes de
+      // continuar a S1b — ver criterios 10 y 11 del spec.
       return {
-        farmerId: cached.farmerId,
-        name: cached.name,
-        documentId: cached.documentId ?? null,
-        phone: cached.phone ?? null,
+        farmerId: generateLocalId('farmer'),
+        name: farmerName,
+        documentId: farmerDocumentId,
+        phone: farmerPhone,
         farmName,
-        isProvisional: false,
+        isProvisional: true,
+        collision: {
+          documentId: farmerDocumentId,
+          existingFarmerId: cached.farmerId,
+          existingName: cached.name,
+          submittedName: farmerName,
+        },
       };
     }
   }

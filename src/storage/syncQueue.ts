@@ -4,6 +4,11 @@ import { syncQueue } from './db/schema';
 
 export type SyncStatus = 'pending' | 'in_flight' | 'failed_validation';
 
+// Spec 70, Fase 10 — 'skip-step' reutiliza esta cola (reintentos, backoff,
+// estado en vuelo) para el salto de paso hecho sin conexión, en vez de una
+// cola paralela.
+export type ItemType = 'survey' | 'farm-plot' | 'skip-step';
+
 export interface SyncQueueEntry {
   id: string;
   surveyId: string;
@@ -15,6 +20,10 @@ export interface SyncQueueEntry {
   payloadPath?: string;
   errorDetail?: string;
   createdAt: Date;
+  itemType: ItemType;
+  // Solo lo usan las entradas 'skip-step' (spec 70, Fase 10): el instrumento
+  // del paso que se saltó, que POST /api/surveys/skip-step exige.
+  instrumentId?: string;
 }
 
 export interface EnqueueParams {
@@ -23,6 +32,8 @@ export interface EnqueueParams {
   campaignSessionId?: string;
   stepOrder?: number;
   payloadPath?: string;
+  itemType?: ItemType;
+  instrumentId?: string;
 }
 
 export const syncQueueStorage = {
@@ -38,6 +49,8 @@ export const syncQueueStorage = {
       payloadPath: params.payloadPath ?? null,
       errorDetail: null,
       createdAt: new Date(),
+      itemType: params.itemType ?? 'survey',
+      instrumentId: params.instrumentId ?? null,
     });
   },
 
@@ -152,6 +165,18 @@ export const syncQueueStorage = {
     return row ? mapRow(row) : null;
   },
 
+  // Spec 71 — repara una entrada cuyo `campaignSessionId` quedó apuntando a
+  // un id local (`local_*`) cuya sesión ya se resolvió en el backend. Se usa
+  // cuando `resolveLocalSessions()` no vuelve a ofrecer esa sesión (porque su
+  // fila en `pendingSessions` ya no está `pending`) pero otra fuente local
+  // (el borrador, o la propia `pendingSessions`) sí conserva el id real.
+  async updateCampaignSessionId(id: string, realSessionId: string): Promise<void> {
+    await db
+      .update(syncQueue)
+      .set({ campaignSessionId: realSessionId })
+      .where(eq(syncQueue.id, id));
+  },
+
   async getActiveBySurveyId(surveyId: string): Promise<SyncQueueEntry | null> {
     const rows = await db
       .select()
@@ -175,5 +200,7 @@ function mapRow(row: typeof syncQueue.$inferSelect): SyncQueueEntry {
     payloadPath: row.payloadPath ?? undefined,
     errorDetail: row.errorDetail ?? undefined,
     createdAt: row.createdAt,
+    itemType: (row.itemType ?? 'survey') as ItemType,
+    instrumentId: row.instrumentId ?? undefined,
   };
 }

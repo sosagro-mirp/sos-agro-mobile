@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -8,8 +8,7 @@ import { useInstrumentSurveyStore } from "../../../../../src/store/useInstrument
 import { useSyncStatusStore } from "../../../../../src/store/useSyncStatusStore";
 import { getNextStep } from "../../../../../src/api/campaignSessions";
 import { fetchInstrumentByCode } from "../../../../../src/api/instruments";
-import { extractFarmer, extractCrops } from "../../../../../src/api/farmers";
-import { createSurvey } from "../../../../../src/api/surveys";
+import { extractFarmer, extractCrops, DocumentIdCollisionError } from "../../../../../src/api/farmers";
 import { overwriteSurvey, skipStepApi } from "../../../../../src/api/surveys";
 import { surveyDraftStore } from "../../../../../src/storage/surveyDraftStore";
 import { syncQueueStorage } from "../../../../../src/storage/syncQueue";
@@ -20,14 +19,19 @@ import { getNextStepOffline } from "../../../../../src/lib/getNextStepOffline";
 import { extractCropsOffline } from "../../../../../src/lib/extractCropsOffline";
 import { generateLocalId } from "../../../../../src/lib/generateLocalId";
 import { extractFarmerLocally } from "../../../../../src/lib/extractFarmerLocally";
+import type { LocalFarmerDraft } from "../../../../../src/lib/extractFarmerLocally";
+import { flattenSections } from "../../../../../src/lib/flattenSections";
 import { cacheFarmerIdentity } from "../../../../../src/lib/cacheFarmerIdentity";
 import { sessionCropsStorage } from "../../../../../src/storage/sessionCropsStorage";
 import { DuplicateAlertModal } from "../../../../../src/components/campaign/DuplicateAlertModal";
+import { DocumentCollisionModal } from "../../../../../src/components/campaign/DocumentCollisionModal";
 import { NetworkError } from "../../../../../src/api/httpClient";
 import { advanceWithinCampaign, returnToPreSurvey } from "../../../../../src/lib/campaignNavigation";
 import { Fonts } from "../../../../../src/theme/fonts";
+import { useTheme } from "../../../../../src/theme/ThemeProvider";
+import type { ThemeColors } from "../../../../../src/theme/colors";
 
-type ScreenState = 'loading' | 'offline' | 'injection_error' | 'error' | 'duplicate_pending' | 'offline_extraction_pending';
+type ScreenState = 'loading' | 'offline' | 'injection_error' | 'error' | 'duplicate_pending' | 'offline_extraction_pending' | 'document_collision_pending';
 
 function generateId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
@@ -53,7 +57,21 @@ export default function OrchestratorScreen() {
     remoteSurveyId?: string;
   } | null>(null);
   const [modalLoading, setModalLoading] = useState(false);
+  // Spec 68 — colisión de documentId detectada al identificar (S1a): el
+  // documento coincide con un agricultor existente cuyo nombre no
+  // corresponde. `localDraft` solo se llena en el camino offline (Fase 4) —
+  // es la identidad provisional que ya generó `extractFarmerLocally()` y
+  // que "Registrar aparte" simplemente confirma, sin red.
+  const [documentCollisionPending, setDocumentCollisionPending] = useState<{
+    documentId: string;
+    submittedName: string;
+    existingFarmerName: string;
+    offline: boolean;
+    localDraft?: LocalFarmerDraft;
+  } | null>(null);
   const hasStarted = useRef(false);
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
 
   // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -69,10 +87,13 @@ export default function OrchestratorScreen() {
     const { instrumentId, name } = await fetchInstrumentByCode(code);
     const instrument = await getOrDownloadInstrument(instrumentId);
 
-    const { surveyId } = await createSurvey({
-      instrumentIds: [instrumentId],
-      campaignSessionId: resolvedSessionId,
-    });
+    // Spec 70, Fase 4 (vector 3) — igual que `injectInstrumentOffline`: el
+    // registro real se difiere hasta que exista contenido. Antes, esto
+    // llamaba a `createSurvey()` de inmediato; si la app se cerraba durante
+    // la fase de inyección, `s1SurveyId`/`s2SurveyId` (solo en memoria) se
+    // perdía y la reentrada creaba una fila nueva, dejando la anterior
+    // huérfana.
+    const surveyId = generateLocalId('survey');
 
     await surveyDraftStore.createDraft({
       surveyId,
@@ -236,23 +257,68 @@ export default function OrchestratorScreen() {
         if (!s1SurveyId) {
           await injectInstrument('S1');
         } else if (isOnline) {
-          // Online: sync S1, extract farmer, inject S2
+          // Online: sync S1, extract farmer, inject S2.
+          // `s1SurveyId` is local (spec 70, Fase 4) — processSurveyNow()
+          // materializes it on the backend; extractFarmer() needs the real id.
           await SyncQueueService.processSurveyNow(s1SurveyId);
-          const { farmer } = await extractFarmer(s1SurveyId);
-          await cacheFarmerIdentity({
-            farmerId: farmer.farmerId,
-            name: farmer.name,
-            documentId: farmer.documentId,
-            phone: farmer.phone,
-            farmName: farmer.farm?.name,
-            crops: farmer.farm?.crops ?? undefined,
-          });
-          store.completeS1Injection(farmer.farmerId, farmer.name);
-          await injectInstrument('S2');
+          const realS1SurveyId = await surveyDraftStore.getBackendSurveyId(s1SurveyId);
+          if (!realS1SurveyId) {
+            // Sync didn't materialize it (e.g. S1 has no answers yet) —
+            // sending the local id to extractFarmer() would 404 against the
+            // backend. Surface it as an injection error instead of a silent
+            // fallback (caught below, sets screenState to 'injection_error').
+            throw new Error(
+              `No se pudo sincronizar la encuesta S1 (${s1SurveyId}) antes de extraer el agricultor`,
+            );
+          }
+          try {
+            const { farmer } = await extractFarmer(realS1SurveyId);
+            await cacheFarmerIdentity({
+              farmerId: farmer.farmerId,
+              name: farmer.name,
+              documentId: farmer.documentId,
+              phone: farmer.phone,
+              farmName: farmer.farm?.name,
+              crops: farmer.farm?.crops ?? undefined,
+            });
+            store.completeS1Injection(farmer.farmerId, farmer.name);
+            await injectInstrument('S2');
+          } catch (err) {
+            // Spec 68 — el documentId ya pertenece a otra persona. Nunca
+            // fusionar en silencio: detener el avance con el aviso en vez
+            // de dejar que caiga al catch genérico de más abajo.
+            if (err instanceof DocumentIdCollisionError) {
+              setDocumentCollisionPending({
+                documentId: err.documentId,
+                submittedName: err.submittedName,
+                existingFarmerName: err.existingFarmerName,
+                offline: false,
+              });
+              setScreenState('document_collision_pending');
+              return;
+            }
+            throw err;
+          }
         } else {
           // Offline: extract farmer locally from S1 responses
           const draft = await extractFarmerLocally(s1SurveyId);
           if (draft) {
+            if (draft.collision) {
+              // Spec 68, Fase 4 — colisión detectada contra la caché local
+              // (criterios 10-11): nunca aplicar la identidad cacheada en
+              // silencio. `draft` ya trae la identidad provisional que
+              // "Registrar aparte" confirma sin red.
+              setDocumentCollisionPending({
+                documentId: draft.collision.documentId,
+                submittedName: draft.collision.submittedName,
+                existingFarmerName: draft.collision.existingName,
+                offline: true,
+                localDraft: draft,
+              });
+              setScreenState('document_collision_pending');
+              return;
+            }
+
             // Re-caching an already-resolved identity (isProvisional: false)
             // just refreshes cachedAt — harmless, and keeps this branch
             // symmetric with the online one instead of only caching new
@@ -275,9 +341,19 @@ export default function OrchestratorScreen() {
         if (!s2SurveyId) {
           await injectInstrument('S2');
         } else if (isOnline) {
-          // Online: sync S2, extract crops, get next step
+          // Online: sync S2, extract crops, get next step.
+          // `s2SurveyId` is local (spec 70, Fase 4) — resolve the real id
+          // materialized by processSurveyNow() before calling extractCrops().
           await SyncQueueService.processSurveyNow(s2SurveyId);
-          const cropsResult = await extractCrops(s2SurveyId);
+          const realS2SurveyId = await surveyDraftStore.getBackendSurveyId(s2SurveyId);
+          if (!realS2SurveyId) {
+            // Same reasoning as the S1 branch above — never fall back to the
+            // local id silently.
+            throw new Error(
+              `No se pudo sincronizar la encuesta S2 (${s2SurveyId}) antes de extraer los cultivos`,
+            );
+          }
+          const cropsResult = await extractCrops(realS2SurveyId);
           if (resolvedSessionId) {
             await sessionCropsStorage.save(resolvedSessionId, cropsResult.crops);
           }
@@ -349,21 +425,21 @@ export default function OrchestratorScreen() {
     try {
       if (isOnline) {
         const { sessionId: storeSessionId } = useCampaignSessionStore.getState();
-        const { surveyId: newSurveyId } = await overwriteSurvey({
+        // Spec 70, Fase 4 — el endpoint solo descarta el duplicado. El
+        // reemplazo se inicia igual que cualquier otro instrumento: navegar
+        // a `start` sin id previo, para que `beginSurvey()` cree el borrador
+        // local y el registro real solo exista al haber respuestas. Antes,
+        // el backend creaba de inmediato la fila de reemplazo vacía, que
+        // quedaba huérfana si el encuestador abandonaba tras sobrescribir.
+        await overwriteSurvey({
           surveyId: duplicatePending.remoteSurveyId!,
           sessionId: storeSessionId!,
-          instrumentId: duplicatePending.instrument.instrumentId,
-          stepOrder: duplicatePending.stepOrder,
         });
 
         await getOrDownloadInstrument(duplicatePending.instrument.instrumentId);
         setDuplicatePending(null);
         setScreenState('loading');
-        advanceWithinCampaign(
-          router,
-          id,
-          `/instrument/${duplicatePending.instrument.instrumentId}/start?existingSurveyId=${newSurveyId}`,
-        );
+        advanceWithinCampaign(router, id, `/instrument/${duplicatePending.instrument.instrumentId}/start`);
       } else {
         if (duplicatePending.localSurveyId) {
           await syncQueueStorage.deleteBySurveyId(duplicatePending.localSurveyId);
@@ -400,6 +476,13 @@ export default function OrchestratorScreen() {
         hasStarted.current = false;
         run();
       } else {
+        // Spec 70, Fase 10 — antes esta entrada se encolaba con itemType
+        // 'survey' (el default) y processSurveyEntry la descartaba en
+        // silencio por no tener respuestas: la guarda de la Fase 3 no
+        // distinguía "vacío por abandono" de "vacío a propósito". itemType:
+        // 'skip-step' la enruta a processSkipStepEntry, que llama a
+        // POST /api/surveys/skip-step al sincronizar — el mismo endpoint que
+        // usa esta misma función en la rama online, unas líneas arriba.
         const skipSurveyId = generateId();
         await surveyDraftStore.createDraft({
           surveyId: skipSurveyId,
@@ -412,6 +495,8 @@ export default function OrchestratorScreen() {
           surveyId: skipSurveyId,
           campaignSessionId: storeSessionId ?? undefined,
           stepOrder: duplicatePending.stepOrder,
+          itemType: 'skip-step',
+          instrumentId: duplicatePending.instrument.instrumentId,
         });
 
         setDuplicatePending(null);
@@ -449,6 +534,135 @@ export default function OrchestratorScreen() {
     setDuplicatePending(null);
     returnToPreSurvey(router, id);
   }, [id, router]);
+
+  // ── document collision handlers (spec 68) ─────────────────────────────────
+
+  // "Corregir el documento": vuelve a la pregunta farmer.documentId de S1a
+  // con las respuestas ya digitadas intactas (el store de la encuesta S1
+  // sigue inicializado — no hace falta re-crear nada). Funciona igual
+  // online y offline: no requiere red. Criterio 9.
+  const handleCorrectDocument = useCallback(async () => {
+    setModalLoading(true);
+    try {
+      const { instrumentId } = await fetchInstrumentByCode('S1');
+      const instrument = await getOrDownloadInstrument(instrumentId);
+      const flatQuestions = flattenSections(instrument.sections);
+      const docIndex = flatQuestions.findIndex(
+        ({ question }) => question.systemField === 'farmer.documentId',
+      );
+
+      setDocumentCollisionPending(null);
+      setModalLoading(false);
+
+      if (docIndex >= 0) {
+        router.push(`/instrument/${instrumentId}/question/${docIndex}`);
+      } else {
+        // No debería pasar (S1a siempre tiene la pregunta de documento) —
+        // degradar a reintentar en vez de dejar la pantalla muerta.
+        hasStarted.current = false;
+        run();
+      }
+    } catch (err) {
+      setModalLoading(false);
+      setScreenState('error');
+      setErrorMessage(err instanceof Error ? err.message : 'Error al volver al documento');
+    }
+  }, [getOrDownloadInstrument, router, run]);
+
+  // "Es la misma persona" / "Registrar aparte". Offline solo la segunda
+  // tiene sentido (el modal oculta la primera, ver `allowSamePerson`):
+  // confirma sin red la identidad provisional que `extractFarmerLocally()`
+  // ya generó. Online, ambas se declaran contra el backend — la decisión
+  // queda registrada (criterios 4 y 5).
+  const resolveDocumentCollision = useCallback(async (resolution: 'same_person' | 'separate_person') => {
+    if (!documentCollisionPending) return;
+    setModalLoading(true);
+
+    try {
+      if (documentCollisionPending.offline) {
+        const draft = documentCollisionPending.localDraft;
+        if (!draft) {
+          // No debería pasar (el offline siempre llena localDraft) — evitar
+          // dejar el spinner del modal encendido para siempre si ocurre.
+          setModalLoading(false);
+          return;
+        }
+        await cacheFarmerIdentity({
+          farmerId: draft.farmerId,
+          name: draft.name,
+          documentId: draft.documentId,
+          phone: draft.phone,
+          farmName: draft.farmName,
+        });
+        store.applyLocalFarmer(draft);
+        store.completeS1Injection(draft.farmerId, draft.name);
+      } else {
+        const { s1SurveyId } = useCampaignSessionStore.getState();
+        if (!s1SurveyId) {
+          setModalLoading(false);
+          return;
+        }
+        // `s1SurveyId` es siempre el id local (spec 70, Fase 4) — nunca lo
+        // remapea nada en el store. Para cuando este modal aparece online, S1
+        // ya se sincronizó (es como `run()` detectó la colisión en primer
+        // lugar, llamando a `extractFarmer()` con el id real), así que
+        // `getBackendSurveyId()` debe resolverlo. Mismo patrón que `run()`
+        // usa en su propio llamador — bug hallado en la auditoría del
+        // 2026-08-24 (informe 31): este segundo llamador quedó con el id
+        // local tras el merge del spec 68, y `extractFarmer(s1SurveyId, …)`
+        // fallaba con 404 siempre, dejando la pantalla en 'error'.
+        const realS1SurveyId = await surveyDraftStore.getBackendSurveyId(s1SurveyId);
+        if (!realS1SurveyId) {
+          setModalLoading(false);
+          setScreenState('error');
+          setErrorMessage(
+            `No se pudo sincronizar la encuesta S1 (${s1SurveyId}) antes de resolver la colisión`,
+          );
+          return;
+        }
+        const { farmer } = await extractFarmer(realS1SurveyId, { resolution });
+        await cacheFarmerIdentity({
+          farmerId: farmer.farmerId,
+          name: farmer.name,
+          documentId: farmer.documentId,
+          phone: farmer.phone,
+          farmName: farmer.farm?.name,
+          crops: farmer.farm?.crops ?? undefined,
+        });
+        store.completeS1Injection(farmer.farmerId, farmer.name);
+      }
+
+      setDocumentCollisionPending(null);
+      setModalLoading(false);
+      setScreenState('loading');
+      await injectInstrument('S2');
+    } catch (err) {
+      setModalLoading(false);
+      setScreenState('error');
+      setErrorMessage(
+        err instanceof Error ? err.message : 'Error al resolver la colisión de documento',
+      );
+    }
+  }, [documentCollisionPending, store, injectInstrument]);
+
+  const handleSamePerson = useCallback(
+    () => resolveDocumentCollision('same_person'),
+    [resolveDocumentCollision],
+  );
+  const handleSeparatePerson = useCallback(
+    () => resolveDocumentCollision('separate_person'),
+    [resolveDocumentCollision],
+  );
+
+  // TC-068-09 — el botón físico "atrás" de Android no debe dejar la pantalla
+  // muerta mientras el aviso está visible. Nada se resolvió en el backend
+  // (la colisión sigue pendiente), así que no hace falta limpieza: al salir
+  // y reingresar, `run()` vuelve a llamar a `extractFarmer()`/
+  // `extractFarmerLocally()` y el aviso reaparece igual.
+  const handleDocumentCollisionRequestClose = useCallback(() => {
+    setDocumentCollisionPending(null);
+    router.back();
+  }, [router]);
 
   // ── effects ────────────────────────────────────────────────────────────────
 
@@ -577,54 +791,66 @@ export default function OrchestratorScreen() {
         onSkip={handleSkip}
         onCancel={handleCancel}
       />
+      <DocumentCollisionModal
+        visible={screenState === 'document_collision_pending'}
+        documentId={documentCollisionPending?.documentId ?? ''}
+        existingFarmerName={documentCollisionPending?.existingFarmerName ?? ''}
+        submittedName={documentCollisionPending?.submittedName ?? ''}
+        isLoading={modalLoading}
+        allowSamePerson={!documentCollisionPending?.offline}
+        onCorrectDocument={handleCorrectDocument}
+        onSamePerson={handleSamePerson}
+        onSeparatePerson={handleSeparatePerson}
+        onRequestClose={handleDocumentCollisionRequestClose}
+      />
       <View style={styles.center}>
-        <ActivityIndicator size="large" color={GREEN} />
+        <ActivityIndicator size="large" color={colors.brand} />
         <Text style={styles.loadingLabel}>Cargando siguiente paso…</Text>
       </View>
     </SafeAreaView>
   );
 }
 
-const GREEN = "#1B6B3A";
-
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#F9FAFB" },
-  center: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    paddingHorizontal: 32,
-    gap: 16,
-  },
-  loadingLabel: { fontSize: 15, fontFamily: Fonts.regular, color: "#6B7280" },
-  bigIcon: { fontSize: 48 },
-  title: { fontSize: 20, fontFamily: Fonts.bold, color: "#111827" },
-  desc: {
-    fontSize: 15,
-    fontFamily: Fonts.regular,
-    color: "#6B7280",
-    textAlign: "center",
-    lineHeight: 22,
-  },
-  errorDesc: {
-    fontSize: 14,
-    fontFamily: Fonts.regular,
-    color: "#DC2626",
-    textAlign: "center",
-  },
-  button: {
-    backgroundColor: "#9CA3AF",
-    borderRadius: 12,
-    paddingVertical: 16,
-    paddingHorizontal: 40,
-    marginTop: 8,
-  },
-  buttonActive: {
-    backgroundColor: GREEN,
-    borderRadius: 12,
-    paddingVertical: 16,
-    paddingHorizontal: 40,
-    marginTop: 8,
-  },
-  buttonText: { fontSize: 16, fontFamily: Fonts.semiBold, color: "#fff" },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    root: { flex: 1, backgroundColor: colors.surfaceMuted },
+    center: {
+      flex: 1,
+      justifyContent: "center",
+      alignItems: "center",
+      paddingHorizontal: 32,
+      gap: 16,
+    },
+    loadingLabel: { fontSize: 15, fontFamily: Fonts.regular, color: colors.textMuted },
+    bigIcon: { fontSize: 48 },
+    title: { fontSize: 20, fontFamily: Fonts.bold, color: colors.textPrimary },
+    desc: {
+      fontSize: 15,
+      fontFamily: Fonts.regular,
+      color: colors.textMuted,
+      textAlign: "center",
+      lineHeight: 22,
+    },
+    errorDesc: {
+      fontSize: 14,
+      fontFamily: Fonts.regular,
+      color: colors.dangerFg,
+      textAlign: "center",
+    },
+    button: {
+      backgroundColor: colors.textMuted,
+      borderRadius: 12,
+      paddingVertical: 16,
+      paddingHorizontal: 40,
+      marginTop: 8,
+    },
+    buttonActive: {
+      backgroundColor: colors.brand,
+      borderRadius: 12,
+      paddingVertical: 16,
+      paddingHorizontal: 40,
+      marginTop: 8,
+    },
+    buttonText: { fontSize: 16, fontFamily: Fonts.semiBold, color: colors.brandForeground },
+  });
+}

@@ -1,5 +1,8 @@
+import { useMemo } from 'react';
 import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Fonts } from '../../theme/fonts';
+import { useTheme } from '../../theme/ThemeProvider';
+import type { ThemeColors } from '../../theme/colors';
 
 interface DuplicateAlertModalProps {
   visible: boolean;
@@ -18,6 +21,9 @@ export function DuplicateAlertModal({
   onSkip,
   onCancel,
 }: DuplicateAlertModalProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+
   return (
     <Modal
       visible={visible}
@@ -35,7 +41,7 @@ export function DuplicateAlertModal({
           </Text>
 
           {isLoading ? (
-            <ActivityIndicator size="large" color={GREEN} style={styles.spinner} />
+            <ActivityIndicator size="large" color={colors.brand} style={styles.spinner} />
           ) : (
             <>
               <Pressable style={[styles.button, styles.destructive]} onPress={onOverwrite}>
@@ -43,7 +49,7 @@ export function DuplicateAlertModal({
               </Pressable>
 
               <Pressable style={[styles.button, styles.primary]} onPress={onSkip}>
-                <Text style={styles.buttonText}>Pasar a la siguiente encuesta</Text>
+                <Text style={[styles.buttonText, styles.primaryText]}>Pasar a la siguiente encuesta</Text>
               </Pressable>
 
               <Pressable style={[styles.button, styles.secondary]} onPress={onCancel}>
@@ -57,35 +63,36 @@ export function DuplicateAlertModal({
   );
 }
 
-const GREEN = '#1B6B3A';
-
-const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  card: {
-    width: '100%',
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 24,
-    gap: 12,
-  },
-  title: { fontSize: 18, fontFamily: Fonts.bold, color: '#111827' },
-  body: { fontSize: 15, fontFamily: Fonts.regular, color: '#374151', lineHeight: 22 },
-  bold: { fontFamily: Fonts.semiBold },
-  spinner: { marginVertical: 16 },
-  button: {
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
-  },
-  destructive: { backgroundColor: '#DC2626' },
-  primary: { backgroundColor: GREEN },
-  secondary: { backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: '#E5E7EB' },
-  buttonText: { fontSize: 15, fontFamily: Fonts.semiBold, color: '#fff' },
-  secondaryText: { color: '#374151' },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    overlay: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.5)',
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: 24,
+    },
+    card: {
+      width: '100%',
+      backgroundColor: colors.surface,
+      borderRadius: 16,
+      padding: 24,
+      gap: 12,
+    },
+    title: { fontSize: 18, fontFamily: Fonts.bold, color: colors.textPrimary },
+    body: { fontSize: 15, fontFamily: Fonts.regular, color: colors.textPrimary, lineHeight: 22 },
+    bold: { fontFamily: Fonts.semiBold },
+    spinner: { marginVertical: 16 },
+    button: {
+      borderRadius: 12,
+      paddingVertical: 16,
+      alignItems: 'center',
+    },
+    destructive: { backgroundColor: colors.dangerFg },
+    primary: { backgroundColor: colors.brand },
+    secondary: { backgroundColor: colors.surfaceMuted, borderWidth: 1, borderColor: colors.border },
+    buttonText: { fontSize: 15, fontFamily: Fonts.semiBold, color: colors.brandForeground },
+    primaryText: { color: colors.brandForeground },
+    secondaryText: { color: colors.textPrimary },
+  });
+}
