@@ -602,7 +602,25 @@ export default function OrchestratorScreen() {
           setModalLoading(false);
           return;
         }
-        const { farmer } = await extractFarmer(s1SurveyId, { resolution });
+        // `s1SurveyId` es siempre el id local (spec 70, Fase 4) — nunca lo
+        // remapea nada en el store. Para cuando este modal aparece online, S1
+        // ya se sincronizó (es como `run()` detectó la colisión en primer
+        // lugar, llamando a `extractFarmer()` con el id real), así que
+        // `getBackendSurveyId()` debe resolverlo. Mismo patrón que `run()`
+        // usa en su propio llamador — bug hallado en la auditoría del
+        // 2026-08-24 (informe 31): este segundo llamador quedó con el id
+        // local tras el merge del spec 68, y `extractFarmer(s1SurveyId, …)`
+        // fallaba con 404 siempre, dejando la pantalla en 'error'.
+        const realS1SurveyId = await surveyDraftStore.getBackendSurveyId(s1SurveyId);
+        if (!realS1SurveyId) {
+          setModalLoading(false);
+          setScreenState('error');
+          setErrorMessage(
+            `No se pudo sincronizar la encuesta S1 (${s1SurveyId}) antes de resolver la colisión`,
+          );
+          return;
+        }
+        const { farmer } = await extractFarmer(realS1SurveyId, { resolution });
         await cacheFarmerIdentity({
           farmerId: farmer.farmerId,
           name: farmer.name,
