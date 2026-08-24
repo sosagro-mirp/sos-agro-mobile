@@ -51,7 +51,7 @@ function TabsHeader() {
               {isOnline ? "En línea" : "Sin conexión"}
             </AppText>
           </View>
-          <ThemeToggle color={colors.brandForeground} />
+          <ThemeToggle color={colors.headerFg} />
           <Pressable onPress={logout} style={styles.logoutBtn} accessibilityRole="button">
             <AppText style={styles.logoutText}>Salir</AppText>
           </Pressable>
@@ -140,20 +140,22 @@ export default function TabsLayout() {
 }
 
 function createStyles(colors: ThemeColors, effectiveTheme: EffectiveTheme) {
-  // El header usa colors.brand como fondo (verde en claro, amarillo en
-  // oscuro). Los overlays y los puntos de estado deben leerse bien sobre
-  // ambos: derivarlos de brandForeground (blanco en claro / azul oscuro en
-  // oscuro) los mantiene en el extremo de contraste correcto en cada caso —
-  // un overlay blanco translúcido es casi invisible sobre el amarillo del
-  // header en oscuro (hallazgo de la auditoría del spec 63).
-  const overlaySoft = effectiveTheme === "dark" ? `${colors.brandForeground}33` : "rgba(255,255,255,0.15)";
-  const overlayBorder = effectiveTheme === "dark" ? `${colors.brandForeground}66` : "rgba(255,255,255,0.4)";
+  // Spec 74, Fase 0 — el header ya no usa colors.brand como fondo (verde en
+  // claro, amarillo en oscuro): usa los tokens dedicados headerBg/headerFg,
+  // que en oscuro son surfaceMuted con borde en vez del amarillo de marca.
+  // Los overlays y puntos de estado se derivan de headerFg, que ya resuelve
+  // el contraste correcto en ambos temas sin el cálculo especial que el
+  // spec 63 tuvo que introducir.
+  const overlaySoft = colors.headerPill;
+  const overlayBorder = colors.headerBorder;
   const dotOnlineColor = effectiveTheme === "dark" ? "#166534" : "#86EFAC";
   const dotOfflineColor = effectiveTheme === "dark" ? "#991B1B" : "#FCA5A5";
 
   return StyleSheet.create({
     headerContainer: {
-      backgroundColor: colors.brand,
+      backgroundColor: colors.headerBg,
+      borderBottomWidth: effectiveTheme === "dark" ? 1 : 0,
+      borderBottomColor: colors.headerBorder,
     },
     header: {
       flexDirection: "row",
@@ -168,12 +170,12 @@ function createStyles(colors: ThemeColors, effectiveTheme: EffectiveTheme) {
     appName: {
       fontSize: 18,
       fontFamily: Fonts.bold,
-      color: colors.brandForeground,
+      color: colors.headerFg,
     },
     userName: {
       fontSize: 12,
       fontFamily: Fonts.regular,
-      color: colors.brandForeground,
+      color: colors.headerFg,
       opacity: 0.75,
       marginTop: 1,
     },
@@ -206,7 +208,7 @@ function createStyles(colors: ThemeColors, effectiveTheme: EffectiveTheme) {
     statusText: {
       fontSize: 12,
       fontFamily: Fonts.regular,
-      color: colors.brandForeground,
+      color: colors.headerFg,
     },
     logoutBtn: {
       paddingHorizontal: 10,
@@ -218,7 +220,7 @@ function createStyles(colors: ThemeColors, effectiveTheme: EffectiveTheme) {
     logoutText: {
       fontSize: 13,
       fontFamily: Fonts.semiBold,
-      color: colors.brandForeground,
+      color: colors.headerFg,
     },
     pendingBanner: {
       backgroundColor: "#B45309",
