@@ -6,11 +6,12 @@
  * `docs/testing/test-074-migracion-ui-mobile.md`.
  *
  *   Fase 0 → tokens de header y skeleton — ✅ en verde
- *   Fase 1 → léxico de estado de cola — en rojo
+ *   Fase 1 → léxico de estado de cola — ✅ en verde
  *   Fase 8 → geometría del polígono — en rojo
  */
 
 import { lightColors, darkColors } from '../theme/colors';
+import { resolveQueueStatus, resolveCounterTone } from '../lib/queueStatus';
 
 // ─── Fase 0 · Tokens de header y skeleton ───────────────────────────────────
 
@@ -46,8 +47,6 @@ describe('spec 74 · Fase 0 — tokens de tema', () => {
 
 describe('spec 74 · Fase 1 — léxico de estado de cola', () => {
   it('asigna un único par color+ícono a cada estado', () => {
-    const { resolveQueueStatus } = require('../lib/queueStatus');
-
     expect(resolveQueueStatus('pending', lightColors)).toMatchObject({
       icon: 'Clock',
       fg: lightColors.warningFg,
@@ -68,8 +67,6 @@ describe('spec 74 · Fase 1 — léxico de estado de cola', () => {
   });
 
   it('apaga a neutro los contadores en cero', () => {
-    const { resolveCounterTone } = require('../lib/queueStatus');
-
     expect(resolveCounterTone(0, 'pending', lightColors).fg).toBe(lightColors.textMuted);
     expect(resolveCounterTone(4, 'pending', lightColors).fg).toBe(lightColors.warningFg);
     expect(resolveCounterTone(2, 'failed', lightColors).fg).toBe(lightColors.dangerFg);
