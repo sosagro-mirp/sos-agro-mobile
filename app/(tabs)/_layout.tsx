@@ -1,5 +1,13 @@
-import { Tabs } from "expo-router";
-import { Map, FileText, RefreshCw, MessageSquare, LandPlot } from "lucide-react-native";
+import { Tabs, useRouter } from "expo-router";
+import {
+  Clock,
+  LandPlot,
+  LogOut,
+  Map,
+  FileText,
+  MessageSquare,
+  RefreshCw,
+} from "lucide-react-native";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuthStore } from "../../src/store/useAuthStore";
@@ -12,7 +20,6 @@ import { AppText } from "../../src/components/common/AppText";
 import { ThemeToggle } from "../../src/components/common/ThemeToggle";
 import { resolveTabBarStyle } from "../../src/lib/resolveTabBarStyle";
 import { useMemo, useRef } from "react";
-import { useRouter } from "expo-router";
 
 function TabsHeader() {
   const { user, logout } = useAuthStore();
@@ -45,28 +52,72 @@ function TabsHeader() {
           ) : null}
         </Pressable>
         <View style={styles.headerRight}>
-          <View style={styles.statusPill}>
+          <View style={[styles.statusPill, !isOnline && styles.statusPillOffline]}>
             <View style={[styles.dot, isOnline ? styles.dotOnline : styles.dotOffline]} />
-            <AppText style={styles.statusText}>
+            <AppText style={[styles.statusText, !isOnline && styles.statusTextOffline]}>
               {isOnline ? "En línea" : "Sin conexión"}
             </AppText>
           </View>
-          <ThemeToggle color={colors.headerFg} />
+          <View style={styles.themeToggleWrapper}>
+            <ThemeToggle size={16} color={colors.headerFg} />
+          </View>
           <Pressable onPress={logout} style={styles.logoutBtn} accessibilityRole="button">
+            <LogOut size={15} color={colors.headerFg} />
             <AppText style={styles.logoutText}>Salir</AppText>
           </Pressable>
         </View>
       </View>
       {pendingCount > 0 ? (
         <View style={styles.pendingBanner}>
+          <Clock size={15} color={colors.warningFg} />
           <Text style={styles.pendingText}>
             {pendingCount} encuesta{pendingCount !== 1 ? "s" : ""} pendiente{pendingCount !== 1 ? "s" : ""} de sincronizar
           </Text>
+          <Pressable onPress={() => router.push("/(tabs)/sync")} hitSlop={8}>
+            <Text style={styles.pendingAction}>Ver</Text>
+          </Pressable>
         </View>
       ) : null}
     </SafeAreaView>
   );
 }
+
+// Indicador de 2.5 px sobre la pestaña activa (spec 74, Fase 2). El tipo del
+// parámetro queda en `any` documentado: `BottomTabBarButtonProps` vive en
+// `@react-navigation/bottom-tabs`, dependencia transitiva de expo-router que
+// este repo no declara en `package.json` — tiparlo exigiría agregarla como
+// dependencia directa solo para el tipo.
+// TODO: type this
+function TabBarButton(props: any) {
+  const { children, style, accessibilityState, onPress, ...rest } = props;
+  const { colors } = useTheme();
+  const selected = !!accessibilityState?.selected;
+
+  return (
+    <Pressable
+      accessibilityState={accessibilityState}
+      onPress={onPress}
+      style={style}
+      {...rest}
+    >
+      {selected ? (
+        <View style={[tabButtonStyles.indicator, { backgroundColor: colors.brand }]} />
+      ) : null}
+      {children}
+    </Pressable>
+  );
+}
+
+const tabButtonStyles = StyleSheet.create({
+  indicator: {
+    position: "absolute",
+    top: 0,
+    left: "22%",
+    right: "22%",
+    height: 2.5,
+    borderRadius: 99,
+  },
+});
 
 export default function TabsLayout() {
   const { colors, effectiveTheme } = useTheme();
@@ -87,6 +138,7 @@ export default function TabsLayout() {
           tabBarInactiveTintColor: colors.textMuted,
           tabBarStyle,
           tabBarLabelStyle: styles.tabLabel,
+          tabBarButton: TabBarButton,
         }}
       >
         <Tabs.Screen
@@ -148,8 +200,6 @@ function createStyles(colors: ThemeColors, effectiveTheme: EffectiveTheme) {
   // spec 63 tuvo que introducir.
   const overlaySoft = colors.headerPill;
   const overlayBorder = colors.headerBorder;
-  const dotOnlineColor = effectiveTheme === "dark" ? "#166534" : "#86EFAC";
-  const dotOfflineColor = effectiveTheme === "dark" ? "#991B1B" : "#FCA5A5";
 
   return StyleSheet.create({
     headerContainer: {
@@ -182,55 +232,93 @@ function createStyles(colors: ThemeColors, effectiveTheme: EffectiveTheme) {
     headerRight: {
       flexDirection: "row",
       alignItems: "center",
-      gap: 12,
+      gap: 10,
       // Fixed size: the connection-status pill and "Salir" are operationally
       // critical in the field and must stay fully visible even when the
       // left-side username is long or the system font scale is high (spec 24).
       // Only headerLeft (and userName inside it) shrinks/truncates.
       flexShrink: 0,
     },
+    // Spec 74, Fase 2 — la píldora se tiñe de ámbar cuando está offline, en
+    // vez de solo cambiar el color del punto: es el nivel 1 de la jerarquía
+    // de conectividad de tres niveles (deuda #4), y debe leerse de un
+    // vistazo sin depender del texto.
     statusPill: {
       flexDirection: "row",
       alignItems: "center",
       gap: 5,
       backgroundColor: overlaySoft,
+      borderWidth: 1,
+      borderColor: overlayBorder,
       paddingHorizontal: 10,
       paddingVertical: 5,
       borderRadius: 20,
+    },
+    statusPillOffline: {
+      backgroundColor: colors.warningBg,
+      borderColor: colors.warningFg,
     },
     dot: {
       width: 7,
       height: 7,
       borderRadius: 4,
     },
-    dotOnline: { backgroundColor: dotOnlineColor },
-    dotOffline: { backgroundColor: dotOfflineColor },
+    dotOnline: { backgroundColor: colors.successFg },
+    dotOffline: { backgroundColor: colors.warningFg },
     statusText: {
-      fontSize: 12,
-      fontFamily: Fonts.regular,
+      fontSize: 11.5,
+      fontFamily: Fonts.semiBold,
       color: colors.headerFg,
     },
+    statusTextOffline: {
+      color: colors.warningFg,
+    },
+    themeToggleWrapper: {
+      width: 36,
+      height: 36,
+      borderRadius: 9,
+      backgroundColor: overlaySoft,
+      borderWidth: 1,
+      borderColor: overlayBorder,
+      alignItems: "center",
+      justifyContent: "center",
+    },
     logoutBtn: {
-      paddingHorizontal: 10,
-      paddingVertical: 5,
-      borderRadius: 8,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      height: 36,
+      paddingHorizontal: 11,
+      borderRadius: 9,
       borderWidth: 1,
       borderColor: overlayBorder,
     },
     logoutText: {
-      fontSize: 13,
+      fontSize: 12,
       fontFamily: Fonts.semiBold,
       color: colors.headerFg,
     },
     pendingBanner: {
-      backgroundColor: "#B45309",
-      paddingHorizontal: 20,
-      paddingVertical: 6,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 9,
+      backgroundColor: colors.warningBg,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.warningFg,
+      paddingHorizontal: 14,
+      paddingVertical: 9,
     },
     pendingText: {
+      flex: 1,
       fontSize: 12,
-      fontFamily: Fonts.regular,
-      color: "#FEF3C7",
+      fontFamily: Fonts.medium,
+      color: colors.warningFg,
+    },
+    pendingAction: {
+      fontSize: 11.5,
+      fontFamily: Fonts.bold,
+      color: colors.warningFg,
+      textDecorationLine: "underline",
     },
     tabLabel: {
       fontFamily: Fonts.semiBold,
