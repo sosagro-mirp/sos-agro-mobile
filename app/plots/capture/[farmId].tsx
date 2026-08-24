@@ -13,14 +13,14 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as Location from "expo-location";
-import { useFarmPlotCaptureStore } from "../../../../src/store/useFarmPlotCaptureStore";
-import { farmPlotStore } from "../../../../src/storage/farmPlotStore";
-import { syncQueueStorage } from "../../../../src/storage/syncQueue";
-import { useSyncStatusStore } from "../../../../src/store/useSyncStatusStore";
-import { Fonts } from "../../../../src/theme/fonts";
-import { useTheme } from "../../../../src/theme/ThemeProvider";
-import type { ThemeColors } from "../../../../src/theme/colors";
-import type { PolygonPoint } from "../../../../src/api/farmPlots";
+import { useFarmPlotCaptureStore } from "../../../src/store/useFarmPlotCaptureStore";
+import { farmPlotStore } from "../../../src/storage/farmPlotStore";
+import { syncQueueStorage } from "../../../src/storage/syncQueue";
+import { useSyncStatusStore } from "../../../src/store/useSyncStatusStore";
+import { Fonts } from "../../../src/theme/fonts";
+import { useTheme } from "../../../src/theme/ThemeProvider";
+import type { ThemeColors } from "../../../src/theme/colors";
+import type { PolygonPoint } from "../../../src/api/farmPlots";
 
 function localId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;

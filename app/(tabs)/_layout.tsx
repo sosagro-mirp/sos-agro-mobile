@@ -8,7 +8,7 @@ import {
   MessageSquare,
   RefreshCw,
 } from "lucide-react-native";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View, type TextStyle } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuthStore } from "../../src/store/useAuthStore";
 import { useSyncStatusStore } from "../../src/store/useSyncStatusStore";
@@ -18,7 +18,7 @@ import type { ThemeColors } from "../../src/theme/colors";
 import type { EffectiveTheme } from "../../src/theme/resolveTheme";
 import { AppText } from "../../src/components/common/AppText";
 import { ThemeToggle } from "../../src/components/common/ThemeToggle";
-import { resolveTabBarStyle } from "../../src/lib/resolveTabBarStyle";
+import { resolveTabBarStyle, TAB_BAR_PADDING_TOP } from "../../src/lib/resolveTabBarStyle";
 import { useMemo, useRef } from "react";
 
 function TabsHeader() {
@@ -82,20 +82,25 @@ function TabsHeader() {
   );
 }
 
-// Indicador de 2.5 px sobre la pestaña activa (spec 74, Fase 2). El tipo del
+// Indicador de 3.5 px sobre la pestaña activa (spec 74, Fase 2 — engrosado
+// desde 2.5 px a pedido del usuario en la ronda TC-074-12). El tipo del
 // parámetro queda en `any` documentado: `BottomTabBarButtonProps` vive en
 // `@react-navigation/bottom-tabs`, dependencia transitiva de expo-router que
 // este repo no declara en `package.json` — tiparlo exigiría agregarla como
 // dependencia directa solo para el tipo.
 // TODO: type this
 function TabBarButton(props: any) {
-  const { children, style, accessibilityState, onPress, ...rest } = props;
+  // BottomTabItem (@react-navigation/bottom-tabs 7.18) no manda
+  // `accessibilityState` a `button()`: manda `aria-selected` directo (hallazgo
+  // TC-074-12, 2026-08-24) — leer `accessibilityState?.selected` daba
+  // siempre `false` y la línea nunca se pintaba.
+  const { children, style, "aria-selected": ariaSelected, onPress, ...rest } = props;
   const { colors } = useTheme();
-  const selected = !!accessibilityState?.selected;
+  const selected = !!ariaSelected;
 
   return (
     <Pressable
-      accessibilityState={accessibilityState}
+      accessibilityState={{ selected }}
       onPress={onPress}
       style={style}
       {...rest}
@@ -111,13 +116,35 @@ function TabBarButton(props: any) {
 const tabButtonStyles = StyleSheet.create({
   indicator: {
     position: "absolute",
-    top: 0,
+    // El botón de la pestaña empieza DESPUÉS del paddingTop que
+    // resolveTabBarStyle aplica a todo el tab bar (6 px, por encima de la
+    // fila de botones) — top:0 quedaba pegado al borde del botón, no al
+    // borde real de la barra (hallazgo TC-074-12, 2026-08-24).
+    top: -TAB_BAR_PADDING_TOP,
     left: "22%",
     right: "22%",
-    height: 2.5,
+    height: 3.5,
     borderRadius: 99,
   },
 });
+
+// Spec 74, Fase 2 — hallazgo TC-074-12: con las cinco etiquetas completas
+// (deuda de la Fase 2, no abreviadas — ver "Qué NO debe cambiar" del spec)
+// y la fuente del sistema al 130%, el `<Label>` por defecto de la librería
+// envuelve a dos líneas y el tab bar se lee como si hubiera más de cinco
+// pestañas. `AppText` ya trae el techo `MAX_FONT_SCALE = 1.3` (spec 24/62)
+// para texto de layout fijo — se reutiliza acá en vez de reinventar un tope
+// nuevo, con `numberOfLines={1}` para garantizar una sola línea.
+function renderTabLabel(title: string, style: TextStyle) {
+  function TabLabel({ color }: { color: string }) {
+    return (
+      <AppText style={[style, { color }]} numberOfLines={1}>
+        {title}
+      </AppText>
+    );
+  }
+  return TabLabel;
+}
 
 export default function TabsLayout() {
   const { colors, effectiveTheme } = useTheme();
@@ -137,7 +164,6 @@ export default function TabsLayout() {
           tabBarActiveTintColor: colors.brand,
           tabBarInactiveTintColor: colors.textMuted,
           tabBarStyle,
-          tabBarLabelStyle: styles.tabLabel,
           tabBarButton: TabBarButton,
         }}
       >
@@ -145,6 +171,7 @@ export default function TabsLayout() {
           name="campaign/index"
           options={{
             title: "Campañas",
+            tabBarLabel: renderTabLabel("Campañas", styles.tabLabel),
             tabBarIcon: ({ color, size }) => (
               <Map size={size} color={color} />
             ),
@@ -154,6 +181,7 @@ export default function TabsLayout() {
           name="drafts/index"
           options={{
             title: "Borradores",
+            tabBarLabel: renderTabLabel("Borradores", styles.tabLabel),
             tabBarIcon: ({ color, size }) => (
               <FileText size={size} color={color} />
             ),
@@ -163,6 +191,7 @@ export default function TabsLayout() {
           name="sync/index"
           options={{
             title: "Sincronización",
+            tabBarLabel: renderTabLabel("Sincronización", styles.tabLabel),
             tabBarIcon: ({ color, size }) => (
               <RefreshCw size={size} color={color} />
             ),
@@ -172,15 +201,17 @@ export default function TabsLayout() {
           name="requests/index"
           options={{
             title: "Solicitudes",
+            tabBarLabel: renderTabLabel("Solicitudes", styles.tabLabel),
             tabBarIcon: ({ color, size }) => (
               <MessageSquare size={size} color={color} />
             ),
           }}
         />
         <Tabs.Screen
-          name="plots"
+          name="plots/index"
           options={{
             title: "Lotes",
+            tabBarLabel: renderTabLabel("Lotes", styles.tabLabel),
             tabBarIcon: ({ color, size }) => (
               <LandPlot size={size} color={color} />
             ),

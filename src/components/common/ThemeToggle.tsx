@@ -42,7 +42,11 @@ interface ThemeToggleProps {
 
 export function ThemeToggle({ size = 20, style, color, variant = "icon" }: ThemeToggleProps) {
   const { preference, colors, cyclePreference, setPreference } = useTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  // El círculo de cada opción escala con `size`: 16 px de margen alrededor
+  // del ícono (8 px por lado), igual proporción que el valor original
+  // (ícono 16 → círculo 32).
+  const itemSize = size + 16;
+  const styles = useMemo(() => createStyles(colors, itemSize), [colors, itemSize]);
 
   if (variant === "segmented") {
     return (
@@ -83,20 +87,20 @@ export function ThemeToggle({ size = 20, style, color, variant = "icon" }: Theme
   );
 }
 
-function createStyles(colors: ThemeColors) {
+function createStyles(colors: ThemeColors, itemSize: number) {
   return StyleSheet.create({
     segmentedPill: {
       flexDirection: "row",
-      gap: 2,
+      gap: 3,
       backgroundColor: colors.headerPill,
       borderWidth: 1,
       borderColor: colors.headerBorder,
       borderRadius: 99,
-      padding: 3,
+      padding: 4,
     },
     segmentedItem: {
-      width: 32,
-      height: 32,
+      width: itemSize,
+      height: itemSize,
       borderRadius: 99,
       alignItems: "center",
       justifyContent: "center",

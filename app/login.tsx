@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
   Easing,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -11,7 +12,8 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { CircleAlert, Eye, EyeOff, LoaderCircle, Shield } from "lucide-react-native";
+import { CircleAlert, Eye, EyeOff, LoaderCircle } from "lucide-react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuthStore } from "../src/store/useAuthStore";
 import { Fonts } from "../src/theme/fonts";
 import { useTheme } from "../src/theme/ThemeProvider";
@@ -67,30 +69,42 @@ export default function LoginScreen() {
   const isDisabled = loading || !email.trim() || !password;
 
   return (
-    // Outer View fills the screen con el fondo del shell (spec 74, Fase 2:
+    // SafeAreaView fills the screen con el fondo del shell (spec 74, Fase 2:
     // ya no es colors.brand a secas — en oscuro pasa a headerBg, igual que
     // el header de la app, en vez de un amarillo institucional a pantalla
-    // completa) — cubre cualquier hueco que deje el teclado.
-    <View style={styles.fill}>
+    // completa) — cubre cualquier hueco que deje el teclado y reserva el
+    // área segura arriba para que el toggle de tema no quede debajo de la
+    // barra de estado / notch (hallazgo de la ronda TC-074-10, 2026-08-24).
+    <SafeAreaView style={styles.fill} edges={["top", "bottom"]}>
+      <View style={styles.themeRow}>
+        <ThemeToggle variant="segmented" size={20} />
+      </View>
+
       <KeyboardAvoidingView
         style={styles.kav}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         keyboardVerticalOffset={Platform.OS === "android" ? -24 : 0}
       >
         <ScrollView
+          style={styles.scrollFlex}
           contentContainerStyle={styles.scroll}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
           bounces={false}
         >
-          <View style={styles.themeRow}>
-            <ThemeToggle variant="segmented" size={16} />
-          </View>
-
           <View style={styles.header}>
+            {/* Marca del ícono de la app (assets/icon.png) en contenedor
+                blanco redondeado — versión vertical (logo arriba, título
+                abajo), pedida explícitamente por el usuario. Se usa el
+                ícono de la app en vez de frontend/public/logo-vertical.png
+                porque ese asset ya trae el wordmark "SosAgro 4.C" incrustado
+                en la imagen, y hubiera duplicado el título de abajo. */}
+            <View style={styles.logoWrapper}>
+              <Image source={require("../assets/icon.png")} style={styles.logoImage} resizeMode="contain" />
+            </View>
             <Text style={styles.title}>Sos Agro 4.C</Text>
             <Text style={styles.subtitle}>
-              Caracterización agrícola en campo.{"\n"}Funciona sin conexión.
+              Ingresa tus credenciales para acceder a la plataforma
             </Text>
           </View>
 
@@ -166,16 +180,13 @@ export default function LoginScreen() {
               )}
             </Pressable>
           </View>
-
-          <View style={styles.spacer} />
-
-          <View style={styles.footer}>
-            <Shield size={14} color={colors.headerSub} />
-            <Text style={styles.footerText}>Tus respuestas se guardan en el dispositivo</Text>
-          </View>
         </ScrollView>
+
+        <View style={styles.footer}>
+          <Text style={styles.footerText}>2026 Sos Agro 4.C</Text>
+        </View>
       </KeyboardAvoidingView>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -188,20 +199,43 @@ function createStyles(colors: ThemeColors) {
     kav: {
       flex: 1,
     },
+    scrollFlex: {
+      flex: 1,
+    },
     scroll: {
       flexGrow: 1,
+      justifyContent: "center",
       paddingHorizontal: 24,
-      paddingTop: 14,
-      paddingBottom: 26,
+      paddingVertical: 24,
     },
     themeRow: {
       flexDirection: "row",
       justifyContent: "flex-end",
+      paddingHorizontal: 24,
+      paddingTop: 10,
     },
     header: {
       alignItems: "center",
-      paddingTop: 40,
       paddingBottom: 30,
+    },
+    logoWrapper: {
+      width: 76,
+      height: 76,
+      borderRadius: 20,
+      backgroundColor: "#FFFFFF",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: 10,
+      marginBottom: 16,
+      shadowColor: "#000",
+      shadowOffset: { width: 0, height: 3 },
+      shadowOpacity: 0.18,
+      shadowRadius: 8,
+      elevation: 5,
+    },
+    logoImage: {
+      width: "100%",
+      height: "100%",
     },
     title: {
       fontSize: 30,
@@ -306,16 +340,10 @@ function createStyles(colors: ThemeColors) {
       fontSize: 15,
       fontFamily: Fonts.semiBold,
     },
-    spacer: {
-      flex: 1,
-      minHeight: 20,
-    },
     footer: {
-      flexDirection: "row",
       alignItems: "center",
       justifyContent: "center",
-      gap: 8,
-      paddingTop: 10,
+      paddingVertical: 14,
     },
     footerText: {
       fontSize: 11.5,
