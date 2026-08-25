@@ -1,24 +1,36 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  ActivityIndicator,
   FlatList,
   Modal,
   Pressable,
   StyleSheet,
   Text,
   TextInput,
+  TouchableOpacity,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as Location from "expo-location";
-import { Trash2 } from "lucide-react-native";
+import {
+  Trash2,
+  Undo2,
+  Plus,
+  Check,
+  ChevronLeft,
+  LayoutGrid,
+  Info,
+  LoaderCircle,
+} from "lucide-react-native";
 import { useFarmPlotCaptureStore } from "../../../src/store/useFarmPlotCaptureStore";
 import { farmPlotStore } from "../../../src/storage/farmPlotStore";
 import { syncQueueStorage } from "../../../src/storage/syncQueue";
 import { useSyncStatusStore } from "../../../src/store/useSyncStatusStore";
 import { useSnackbar } from "../../../src/components/common/Snackbar";
 import { ConfirmSheet } from "../../../src/components/common/ConfirmSheet";
+import { AppText } from "../../../src/components/common/AppText";
+import { PlotSketch } from "../../../src/components/plots/PlotSketch";
+import { polygonAreaHectares } from "../../../src/lib/polygonGeometry";
 import { Fonts } from "../../../src/theme/fonts";
 import { useTheme } from "../../../src/theme/ThemeProvider";
 import type { ThemeColors } from "../../../src/theme/colors";
@@ -29,6 +41,19 @@ function localId() {
 }
 
 const MIN_POINTS = 3;
+
+// Umbrales de precisión GPS para colorear cada vértice (spec 74, Fase 8 —
+// el mockup pide "precisión coloreada por umbral" sin dar el número exacto;
+// son bandas típicas de precisión de GPS de teléfono en campo abierto).
+const ACCURACY_GOOD_M = 10;
+const ACCURACY_OK_M = 25;
+
+function accuracyTone(accuracy: number | null, colors: ThemeColors): string {
+  if (accuracy == null) return colors.textMuted;
+  if (accuracy <= ACCURACY_GOOD_M) return colors.successFg;
+  if (accuracy <= ACCURACY_OK_M) return colors.warningFg;
+  return colors.dangerFg;
+}
 
 export default function CapturePlotScreen() {
   const { farmId, farmName } = useLocalSearchParams<{ farmId: string; farmName?: string }>();
@@ -47,6 +72,9 @@ export default function CapturePlotScreen() {
   const [plotDescription, setPlotDescription] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [discardConfirmVisible, setDiscardConfirmVisible] = useState(false);
+
+  const areaHectares = useMemo(() => polygonAreaHectares(points), [points]);
+  const isReady = points.length >= MIN_POINTS;
 
   useEffect(() => {
     startCapture(farmId, farmName ?? "");
@@ -139,11 +167,11 @@ export default function CapturePlotScreen() {
     return (
       <SafeAreaView style={styles.root}>
         <View style={styles.header}>
-          <Pressable onPress={() => router.back()} style={styles.backBtn}>
-            <Text style={styles.backText}>← Volver</Text>
-          </Pressable>
-          <Text style={styles.title}>Capturar lote</Text>
-          <View style={{ width: 60 }} />
+          <TouchableOpacity onPress={() => router.back()} style={styles.headerSlot} accessibilityRole="button" accessibilityLabel="Volver">
+            <ChevronLeft size={20} color={colors.textPrimary} />
+          </TouchableOpacity>
+          <AppText style={styles.headerTitle} numberOfLines={1}>Capturar lote</AppText>
+          <View style={styles.headerSlot} />
         </View>
         <View style={styles.permissionDenied}>
           <Text style={styles.permissionTitle}>Permiso de ubicación requerido</Text>
@@ -163,7 +191,7 @@ export default function CapturePlotScreen() {
   return (
     <SafeAreaView style={styles.root}>
       <View style={styles.header}>
-        <Pressable
+        <TouchableOpacity
           onPress={() => {
             if (points.length > 0) {
               setDiscardConfirmVisible(true);
@@ -171,54 +199,81 @@ export default function CapturePlotScreen() {
               router.back();
             }
           }}
-          style={styles.backBtn}
+          style={styles.headerSlot}
+          accessibilityRole="button"
+          accessibilityLabel="Volver"
         >
-          <Text style={styles.backText}>← Volver</Text>
-        </Pressable>
-        <Text style={styles.title} numberOfLines={1}>
+          <ChevronLeft size={20} color={colors.textPrimary} />
+        </TouchableOpacity>
+        <AppText style={styles.headerTitle} numberOfLines={1}>
           {farmName ? `Lote en ${farmName}` : "Capturar lote"}
-        </Text>
-        <View style={{ width: 60 }} />
+        </AppText>
+        <View style={styles.headerSlot} />
       </View>
 
-      {/* Point count banner */}
-      <View style={[styles.countBanner, points.length >= MIN_POINTS ? styles.countBannerReady : styles.countBannerWarning]}>
-        <Text style={styles.countText}>
+      {/* Banda de conteo — ámbar bajo el mínimo, verde al llegar (spec 74, Fase 8) */}
+      <View style={[styles.countBanner, isReady && styles.countBannerReady]}>
+        {isReady ? (
+          <Check size={17} color={colors.successFg} strokeWidth={2.6} />
+        ) : null}
+        <Text style={[styles.countText, isReady && styles.countTextReady]}>
           {points.length} punto{points.length !== 1 ? "s" : ""} capturado{points.length !== 1 ? "s" : ""}
-          {points.length < MIN_POINTS
-            ? ` — mínimo ${MIN_POINTS} para cerrar el polígono`
-            : " — listo para cerrar"}
+          {isReady ? " — listo para cerrar" : ` — mínimo ${MIN_POINTS} para cerrar el polígono`}
         </Text>
       </View>
 
-      {/* Points list */}
       <FlatList
         data={points}
         keyExtractor={(_, index) => String(index)}
         contentContainerStyle={styles.list}
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            <Text style={styles.emptyText}>
-              Toca &quot;Agregar punto GPS&quot; para capturar el primer vértice del polígono.
-            </Text>
-          </View>
-        }
-        renderItem={({ item, index }) => (
-          <View style={styles.pointRow}>
-            <Text style={styles.pointIndex}>{index + 1}</Text>
-            <View style={styles.pointCoords}>
-              <Text style={styles.coordText}>
-                {item.lat.toFixed(6)}, {item.lng.toFixed(6)}
+        ListHeaderComponent={
+          <View style={styles.sketchCard}>
+            <View style={styles.sketchHeader}>
+              <LayoutGrid size={15} color={colors.textMuted} strokeWidth={2.2} />
+              <Text style={styles.sketchHeaderLabel}>CROQUIS DEL LOTE</Text>
+              <Text style={styles.sketchHeaderArea}>
+                {points.length >= 3 ? `aprox. ${areaHectares.toFixed(1)} ha` : ""}
               </Text>
-              {item.accuracy != null ? (
-                <Text style={styles.accuracyText}>±{item.accuracy.toFixed(0)} m</Text>
-              ) : null}
+            </View>
+            <View style={styles.sketchBody}>
+              <PlotSketch points={points} size="capture" />
+            </View>
+            <View style={styles.sketchFooter}>
+              <Info size={13} color={colors.textMuted} strokeWidth={2.2} />
+              <Text style={styles.sketchFooterText}>
+                Dibujo a escala de los puntos capturados. No requiere conexión ni mapas.
+              </Text>
             </View>
           </View>
+        }
+        ListEmptyComponent={null}
+        renderItem={({ item, index }) => (
+          <View style={[styles.pointRow, index !== points.length - 1 && styles.pointRowDivider]}>
+            <View style={styles.pointBadge}>
+              <Text style={styles.pointBadgeText}>{index + 1}</Text>
+            </View>
+            <Text style={styles.coordText} numberOfLines={1}>
+              {item.lat.toFixed(6)}, {item.lng.toFixed(6)}
+            </Text>
+            {item.accuracy != null ? (
+              <Text style={[styles.accuracyText, { color: accuracyTone(item.accuracy, colors) }]}>
+                ±{item.accuracy.toFixed(0)} m
+              </Text>
+            ) : null}
+          </View>
         )}
+        ListFooterComponent={points.length > 0 ? <Text style={styles.verticesLabel}>VÉRTICES</Text> : null}
+        ListFooterComponentStyle={styles.verticesLabelWrapper}
+        {...(points.length > 0 ? {} : {})}
       />
+      {points.length === 0 ? (
+        <View style={styles.empty}>
+          <Text style={styles.emptyText}>
+            Toca &quot;Agregar punto&quot; para capturar el primer vértice del polígono.
+          </Text>
+        </View>
+      ) : null}
 
-      {/* Actions */}
       <View style={styles.footer}>
         <View style={styles.footerRow}>
           <Pressable
@@ -228,30 +283,39 @@ export default function CapturePlotScreen() {
             accessibilityRole="button"
           >
             {isAcquiring ? (
-              <ActivityIndicator size="small" color={colors.brandForeground} />
+              <LoaderCircle size={17} color={colors.textPrimary} />
             ) : (
-              <Text style={styles.addBtnText}>Agregar punto GPS</Text>
+              <>
+                <Plus size={17} color={colors.textPrimary} strokeWidth={2.4} />
+                <Text style={styles.addBtnText}>Agregar punto</Text>
+              </>
             )}
           </Pressable>
 
           {points.length > 0 ? (
-            <Pressable style={styles.removeBtn} onPress={removeLastPoint} accessibilityRole="button">
-              <Text style={styles.removeBtnText}>Quitar último</Text>
+            <Pressable
+              style={styles.removeBtn}
+              onPress={removeLastPoint}
+              accessibilityRole="button"
+              accessibilityLabel="Quitar último punto"
+            >
+              <Undo2 size={18} color={colors.dangerFg} strokeWidth={2.4} />
             </Pressable>
           ) : null}
         </View>
 
         <Pressable
-          style={[styles.closeBtn, points.length < MIN_POINTS && styles.closeBtnDisabled]}
+          style={[styles.closeBtn, !isReady && styles.closeBtnDisabled]}
           onPress={() => setSaveModalVisible(true)}
-          disabled={points.length < MIN_POINTS}
+          disabled={!isReady}
           accessibilityRole="button"
         >
+          <Check size={18} color={colors.brandForeground} strokeWidth={2.6} />
           <Text style={styles.closeBtnText}>Cerrar polígono y guardar</Text>
         </Pressable>
       </View>
 
-      {/* Save modal */}
+      {/* Bottom sheet de guardado — spec 74, Fase 8 */}
       <Modal
         visible={saveModalVisible}
         transparent
@@ -260,9 +324,14 @@ export default function CapturePlotScreen() {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Guardar lote</Text>
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>Guardar el lote</Text>
+            <Text style={styles.modalMeta}>
+              {points.length} punto{points.length !== 1 ? "s" : ""} · {areaHectares.toFixed(1)} ha ·{" "}
+              {new Date().toLocaleString("es-CO", { dateStyle: "short", timeStyle: "short" })}
+            </Text>
 
-            <Text style={styles.modalLabel}>Nombre del lote *</Text>
+            <Text style={styles.modalLabel}>NOMBRE DEL LOTE *</Text>
             <TextInput
               style={styles.modalInput}
               placeholder="Ej: Lote norte, Parcela 1..."
@@ -272,7 +341,7 @@ export default function CapturePlotScreen() {
               autoFocus
             />
 
-            <Text style={styles.modalLabel}>Descripción (opcional)</Text>
+            <Text style={styles.modalLabel}>DESCRIPCIÓN</Text>
             <TextInput
               style={[styles.modalInput, styles.modalInputMultiline]}
               placeholder="Cultivo, observaciones..."
@@ -282,10 +351,6 @@ export default function CapturePlotScreen() {
               multiline
               numberOfLines={3}
             />
-
-            <Text style={styles.modalMeta}>
-              {points.length} puntos · {new Date().toLocaleDateString("es-CO")}
-            </Text>
 
             <View style={styles.modalActions}>
               <Pressable
@@ -301,9 +366,9 @@ export default function CapturePlotScreen() {
                 disabled={!plotName.trim() || isSaving}
               >
                 {isSaving ? (
-                  <ActivityIndicator size="small" color={colors.brandForeground} />
+                  <LoaderCircle size={17} color={colors.brandForeground} />
                 ) : (
-                  <Text style={styles.modalSaveText}>Guardar</Text>
+                  <Text style={styles.modalSaveText}>Guardar lote</Text>
                 )}
               </Pressable>
             </View>
@@ -340,63 +405,102 @@ function createStyles(colors: ThemeColors) {
     header: {
       flexDirection: "row",
       alignItems: "center",
-      justifyContent: "space-between",
-      paddingHorizontal: 16,
-      paddingVertical: 12,
+      gap: 12,
+      paddingHorizontal: 12,
+      paddingVertical: 11,
       backgroundColor: colors.surface,
       borderBottomWidth: 1,
       borderBottomColor: colors.border,
     },
-    backBtn: { width: 60 },
-    backText: { fontSize: 14, fontFamily: Fonts.medium, color: colors.brand },
-    title: { flex: 1, fontSize: 16, fontFamily: Fonts.bold, color: colors.textPrimary, textAlign: "center" },
+    headerSlot: { width: 48, height: 48, alignItems: "center", justifyContent: "center", flexShrink: 0 },
+    headerTitle: { flex: 1, fontSize: 13.5, fontFamily: Fonts.bold, color: colors.textPrimary, textAlign: "center" },
 
     countBanner: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 8,
       paddingHorizontal: 20,
-      paddingVertical: 8,
+      paddingVertical: 11,
+      backgroundColor: colors.warningBg,
       borderBottomWidth: 1,
+      borderBottomColor: colors.warningFg,
     },
-    countBannerWarning: { backgroundColor: colors.warningBg, borderBottomColor: colors.warningFg },
     countBannerReady: { backgroundColor: colors.successBg, borderBottomColor: colors.successFg },
-    countText: { fontSize: 13, fontFamily: Fonts.medium, color: colors.textPrimary, textAlign: "center" },
+    countText: { fontSize: 12.5, fontFamily: Fonts.bold, color: colors.warningFg, textAlign: "center" },
+    countTextReady: { color: colors.successFg },
 
-    list: { padding: 16, gap: 8, paddingBottom: 160 },
-    empty: { paddingVertical: 40, alignItems: "center" },
-    emptyText: {
-      fontSize: 14,
-      fontFamily: Fonts.regular,
-      color: colors.textMuted,
-      textAlign: "center",
-      paddingHorizontal: 20,
+    list: { padding: 14, paddingBottom: 170 },
+
+    sketchCard: {
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 12,
+      backgroundColor: colors.surfaceMuted,
+      overflow: "hidden",
+      marginBottom: 14,
     },
+    sketchHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      paddingHorizontal: 13,
+      paddingVertical: 10,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    sketchHeaderLabel: { flex: 1, fontSize: 11, fontFamily: Fonts.extraBold, color: colors.textMuted, letterSpacing: 0.5 },
+    sketchHeaderArea: { fontSize: 10.5, fontFamily: Fonts.bold, color: colors.textMuted },
+    sketchBody: { height: 190, alignItems: "center", justifyContent: "center", padding: 14 },
+    sketchFooter: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 7,
+      paddingHorizontal: 13,
+      paddingVertical: 9,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+    },
+    sketchFooterText: { flex: 1, fontSize: 10, fontFamily: Fonts.regular, color: colors.textMuted, lineHeight: 14 },
+
+    verticesLabelWrapper: { marginTop: 4 },
+    verticesLabel: { fontSize: 10.5, fontFamily: Fonts.extraBold, color: colors.textMuted, letterSpacing: 0.6, marginBottom: 9 },
+
+    empty: { paddingVertical: 40, paddingHorizontal: 20, alignItems: "center" },
+    emptyText: { fontSize: 13, fontFamily: Fonts.regular, color: colors.textMuted, textAlign: "center" },
 
     pointRow: {
       flexDirection: "row",
       alignItems: "center",
+      gap: 11,
       backgroundColor: colors.surface,
-      borderRadius: 8,
-      padding: 12,
       borderWidth: 1,
       borderColor: colors.border,
-      gap: 12,
+      borderTopLeftRadius: 11,
+      borderTopRightRadius: 11,
+      paddingHorizontal: 13,
+      paddingVertical: 11,
     },
-    pointIndex: {
-      width: 28,
-      fontSize: 14,
-      fontFamily: Fonts.bold,
-      color: colors.brand,
-      textAlign: "center",
+    pointRowDivider: { borderBottomWidth: 0 },
+    pointBadge: {
+      width: 24,
+      height: 24,
+      borderRadius: 99,
+      backgroundColor: colors.brand,
+      alignItems: "center",
+      justifyContent: "center",
+      flexShrink: 0,
     },
-    pointCoords: { flex: 1, gap: 2 },
-    coordText: { fontSize: 13, fontFamily: Fonts.regular, color: colors.textPrimary },
-    accuracyText: { fontSize: 11, fontFamily: Fonts.regular, color: colors.textMuted },
+    pointBadgeText: { fontSize: 11, fontFamily: Fonts.extraBold, color: colors.brandForeground },
+    coordText: { flex: 1, fontSize: 12, fontFamily: Fonts.medium, color: colors.textPrimary },
+    accuracyText: { fontSize: 10.5, fontFamily: Fonts.bold },
 
     footer: {
       position: "absolute",
       bottom: 0,
       left: 0,
       right: 0,
-      padding: 16,
+      padding: 14,
       gap: 10,
       backgroundColor: colors.surface,
       borderTopWidth: 1,
@@ -405,33 +509,39 @@ function createStyles(colors: ThemeColors) {
     footerRow: { flexDirection: "row", gap: 10 },
     addBtn: {
       flex: 1,
-      backgroundColor: colors.brand,
-      borderRadius: 10,
-      paddingVertical: 14,
+      flexDirection: "row",
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.borderStrong,
+      borderRadius: 11,
+      paddingVertical: 15,
       alignItems: "center",
       justifyContent: "center",
+      gap: 8,
       minHeight: 48,
     },
-    addBtnDisabled: { backgroundColor: colors.textMuted },
-    addBtnText: { fontSize: 15, fontFamily: Fonts.semiBold, color: colors.brandForeground },
+    addBtnDisabled: { opacity: 0.6 },
+    addBtnText: { fontSize: 13, fontFamily: Fonts.bold, color: colors.textPrimary },
     removeBtn: {
-      borderRadius: 10,
-      paddingVertical: 14,
-      paddingHorizontal: 14,
+      width: 56,
+      borderRadius: 11,
       alignItems: "center",
+      justifyContent: "center",
       backgroundColor: colors.dangerBg,
       borderWidth: 1,
       borderColor: colors.dangerFg,
     },
-    removeBtnText: { fontSize: 14, fontFamily: Fonts.medium, color: colors.dangerFg },
     closeBtn: {
-      backgroundColor: colors.infoFg,
-      borderRadius: 10,
-      paddingVertical: 14,
+      flexDirection: "row",
       alignItems: "center",
+      justifyContent: "center",
+      gap: 9,
+      backgroundColor: colors.brand,
+      borderRadius: 11,
+      paddingVertical: 17,
     },
     closeBtnDisabled: { backgroundColor: colors.textMuted },
-    closeBtnText: { fontSize: 15, fontFamily: Fonts.semiBold, color: colors.brandForeground },
+    closeBtnText: { fontSize: 15, fontFamily: Fonts.extraBold, color: colors.brandForeground },
 
     permissionDenied: { flex: 1, justifyContent: "center", alignItems: "center", padding: 32, gap: 16 },
     permissionTitle: { fontSize: 18, fontFamily: Fonts.bold, color: colors.textPrimary, textAlign: "center" },
@@ -447,53 +557,63 @@ function createStyles(colors: ThemeColors) {
 
     modalOverlay: {
       flex: 1,
-      backgroundColor: "rgba(0,0,0,0.5)",
+      backgroundColor: "rgba(0,0,0,0.55)",
       justifyContent: "flex-end",
     },
     modalCard: {
       backgroundColor: colors.surface,
       borderTopLeftRadius: 20,
       borderTopRightRadius: 20,
-      padding: 24,
-      gap: 12,
+      paddingTop: 12,
+      paddingHorizontal: 18,
+      paddingBottom: 20,
+      gap: 6,
     },
-    modalTitle: { fontSize: 18, fontFamily: Fonts.bold, color: colors.textPrimary },
-    modalLabel: { fontSize: 13, fontFamily: Fonts.medium, color: colors.textPrimary, marginTop: 4 },
+    modalHandle: {
+      alignSelf: "center",
+      width: 38,
+      height: 4,
+      borderRadius: 99,
+      backgroundColor: colors.borderStrong,
+      marginBottom: 12,
+    },
+    modalTitle: { fontSize: 17, fontFamily: Fonts.extraBold, color: colors.textPrimary },
+    modalMeta: { fontSize: 11.5, fontFamily: Fonts.regular, color: colors.textMuted, marginBottom: 6 },
+    modalLabel: { fontSize: 11, fontFamily: Fonts.bold, color: colors.textMuted, marginTop: 6, marginBottom: 6 },
     modalInput: {
-      height: 48,
+      minHeight: 48,
       backgroundColor: colors.surfaceMuted,
       borderWidth: 1,
       borderColor: colors.borderStrong,
-      borderRadius: 8,
-      paddingHorizontal: 12,
+      borderRadius: 10,
+      paddingHorizontal: 14,
+      paddingVertical: 13,
       fontFamily: Fonts.regular,
-      fontSize: 15,
+      fontSize: 14,
       color: colors.textPrimary,
     },
     modalInputMultiline: {
-      height: 80,
-      paddingTop: 12,
+      minHeight: 60,
       textAlignVertical: "top",
     },
-    modalMeta: { fontSize: 12, fontFamily: Fonts.regular, color: colors.textMuted },
-    modalActions: { flexDirection: "row", gap: 10, marginTop: 4 },
+    modalActions: { flexDirection: "row", gap: 10, marginTop: 12 },
     modalCancel: {
       flex: 1,
-      paddingVertical: 14,
-      borderRadius: 10,
+      paddingVertical: 16,
+      borderRadius: 11,
       borderWidth: 1,
-      borderColor: colors.border,
+      borderColor: colors.borderStrong,
       alignItems: "center",
     },
-    modalCancelText: { fontSize: 15, fontFamily: Fonts.medium, color: colors.textMuted },
+    modalCancelText: { fontSize: 14, fontFamily: Fonts.bold, color: colors.textPrimary },
     modalSave: {
-      flex: 1,
-      paddingVertical: 14,
-      borderRadius: 10,
+      flex: 1.4,
+      paddingVertical: 16,
+      borderRadius: 11,
       backgroundColor: colors.brand,
       alignItems: "center",
     },
     modalSaveDisabled: { backgroundColor: colors.textMuted },
-    modalSaveText: { fontSize: 15, fontFamily: Fonts.semiBold, color: colors.brandForeground },
+    modalSaveText: { fontSize: 14.5, fontFamily: Fonts.extraBold, color: colors.brandForeground },
   });
 }
