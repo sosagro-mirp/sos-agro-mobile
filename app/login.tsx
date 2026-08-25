@@ -8,7 +8,6 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
   TextInput,
   View,
 } from "react-native";
@@ -19,6 +18,7 @@ import { Fonts } from "../src/theme/fonts";
 import { useTheme } from "../src/theme/ThemeProvider";
 import type { ThemeColors } from "../src/theme/colors";
 import { ThemeToggle } from "../src/components/common/ThemeToggle";
+import { AppText } from "../src/components/common/AppText";
 
 /**
  * Ícono girando con `Animated` en vez de `ActivityIndicator` — spec 74,
@@ -102,22 +102,22 @@ export default function LoginScreen() {
             <View style={styles.logoWrapper}>
               <Image source={require("../assets/icon.png")} style={styles.logoImage} resizeMode="contain" />
             </View>
-            <Text style={styles.title}>Sos Agro 4.C</Text>
-            <Text style={styles.subtitle}>
+            <AppText style={styles.title} numberOfLines={1}>Sos Agro 4.C</AppText>
+            <AppText style={styles.subtitle}>
               Ingresa tus credenciales para acceder a la plataforma
-            </Text>
+            </AppText>
           </View>
 
           <View style={styles.card}>
             {error ? (
               <View style={styles.errorBox}>
                 <CircleAlert size={17} color={colors.dangerFg} style={styles.errorIcon} />
-                <Text style={styles.errorText}>{error}</Text>
+                <AppText style={styles.errorText}>{error}</AppText>
               </View>
             ) : null}
 
             <View style={styles.field}>
-              <Text style={styles.label}>CORREO</Text>
+              <AppText style={styles.label} numberOfLines={1}>CORREO</AppText>
               <TextInput
                 style={styles.input}
                 value={email}
@@ -133,7 +133,7 @@ export default function LoginScreen() {
 
             <View style={styles.field}>
               <View style={styles.labelRow}>
-                <Text style={styles.label}>CONTRASEÑA</Text>
+                <AppText style={styles.label} numberOfLines={1}>CONTRASEÑA</AppText>
                 <Pressable
                   style={styles.eyeButton}
                   onPress={() => setShowPassword((v) => !v)}
@@ -145,7 +145,9 @@ export default function LoginScreen() {
                   ) : (
                     <Eye size={14} color={colors.brand} />
                   )}
-                  <Text style={styles.eyeText}>{showPassword ? "Ocultar" : "Ver"}</Text>
+                  <AppText style={styles.eyeText} numberOfLines={1}>
+                    {showPassword ? "Ocultar" : "Ver"}
+                  </AppText>
                 </Pressable>
               </View>
               <TextInput
@@ -173,17 +175,17 @@ export default function LoginScreen() {
               {loading ? (
                 <>
                   <SpinningLoader size={17} color={colors.brandForeground} />
-                  <Text style={styles.buttonText}>Ingresando…</Text>
+                  <AppText style={styles.buttonText} numberOfLines={1}>Ingresando…</AppText>
                 </>
               ) : (
-                <Text style={styles.buttonText}>Ingresar</Text>
+                <AppText style={styles.buttonText} numberOfLines={1}>Ingresar</AppText>
               )}
             </Pressable>
           </View>
         </ScrollView>
 
         <View style={styles.footer}>
-          <Text style={styles.footerText}>2026 Sos Agro 4.C</Text>
+          <AppText style={styles.footerText} numberOfLines={1}>2026 Sos Agro 4.C</AppText>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>

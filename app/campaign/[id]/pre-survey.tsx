@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { StyleSheet, Text, View, Pressable } from "react-native";
+import { ActivityIndicator, StyleSheet, Text, View, Pressable } from "react-native";
+import { ChevronLeft } from "lucide-react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useCachedCampaignsStore } from "../../../src/store/useCachedCampaignsStore";
@@ -200,13 +201,24 @@ export default function PreSurveyScreen() {
     <SafeAreaView style={styles.root}>
       <OfflineBanner />
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()}>
-          <Text style={styles.back}>← Campañas</Text>
+        <Pressable
+          onPress={() => router.back()}
+          style={styles.backBtn}
+          accessibilityRole="button"
+          accessibilityLabel="Volver a Campañas"
+          hitSlop={8}
+        >
+          <ChevronLeft size={20} color={colors.textPrimary} />
         </Pressable>
-        <Text style={styles.title} numberOfLines={1}>
-          {campaign.name}
-        </Text>
-        <View style={{ width: 60 }} />
+        <View style={styles.titleWrapper}>
+          <Text style={styles.title} numberOfLines={1}>
+            {campaign.name}
+          </Text>
+          <Text style={styles.titleSub} numberOfLines={1}>
+            Identificar encuestado
+          </Text>
+        </View>
+        <View style={styles.headerSpacer} />
       </View>
 
       {error ? (
@@ -217,6 +229,7 @@ export default function PreSurveyScreen() {
 
       {isLoading ? (
         <View style={styles.loadingOverlay}>
+          <ActivityIndicator size="large" color={colors.brand} />
           <Text style={styles.loadingText}>Iniciando sesión…</Text>
         </View>
       ) : (
@@ -236,19 +249,36 @@ function createStyles(colors: ThemeColors) {
     header: {
       flexDirection: "row",
       alignItems: "center",
-      justifyContent: "space-between",
-      paddingHorizontal: 20,
-      paddingVertical: 16,
+      gap: 12,
+      paddingHorizontal: 12,
+      paddingVertical: 11,
       backgroundColor: colors.surface,
       borderBottomWidth: 1,
       borderBottomColor: colors.border,
     },
+    backBtn: {
+      width: 48,
+      height: 48,
+      alignItems: "center",
+      justifyContent: "center",
+      flexShrink: 0,
+    },
+    // Usado solo en el estado "campaña no encontrada" (texto+ícono, distinto
+    // del botón de volver del header normal, que quedó solo-ícono).
     back: { fontSize: 15, fontFamily: Fonts.regular, color: colors.brand },
+    headerSpacer: { width: 48, flexShrink: 0 },
+    titleWrapper: { flex: 1, minWidth: 0, alignItems: "center" },
     title: {
-      flex: 1,
-      fontSize: 17,
+      fontSize: 13.5,
       fontFamily: Fonts.bold,
       color: colors.textPrimary,
+      textAlign: "center",
+    },
+    titleSub: {
+      fontSize: 10.5,
+      fontFamily: Fonts.regular,
+      color: colors.textMuted,
+      marginTop: 2,
       textAlign: "center",
     },
     errorBox: {
@@ -270,6 +300,7 @@ function createStyles(colors: ThemeColors) {
       flex: 1,
       alignItems: "center",
       justifyContent: "center",
+      gap: 14,
     },
     loadingText: {
       fontSize: 15,

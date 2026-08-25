@@ -1,16 +1,15 @@
 import { useEffect, useMemo } from "react";
 import {
-  ActivityIndicator,
   Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
   View,
-  type DimensionValue,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Check, ChevronRight, Circle, Download, Inbox, RefreshCw } from "lucide-react-native";
 import { useCachedCampaignsStore } from "../../../src/store/useCachedCampaignsStore";
 import { useSyncStatusStore } from "../../../src/store/useSyncStatusStore";
 import { runMigrations } from "../../../src/storage/db/db";
@@ -19,6 +18,10 @@ import { Fonts } from "../../../src/theme/fonts";
 import { useTheme } from "../../../src/theme/ThemeProvider";
 import type { ThemeColors } from "../../../src/theme/colors";
 import { AppText } from "../../../src/components/common/AppText";
+import { OfflineNotice } from "../../../src/components/common/OfflineNotice";
+import { EmptyState } from "../../../src/components/common/EmptyState";
+import { SkeletonCard } from "../../../src/components/common/Skeleton";
+import { resolveDownloadPhases, type DownloadPhaseRow } from "../../../src/lib/resolveDownloadPhases";
 
 export default function CampaignListScreen() {
   const router = useRouter();
@@ -46,10 +49,8 @@ export default function CampaignListScreen() {
       .catch(loadFromCache);
   }, []);
 
-  const progressPercent =
-    downloadProgress && downloadProgress.total > 0
-      ? `${Math.round((downloadProgress.done / downloadProgress.total) * 100)}%`
-      : "0%";
+  const phases = useMemo(() => resolveDownloadPhases(downloadProgress), [downloadProgress]);
+  const refreshDisabled = !isOnline || isLoading;
 
   return (
     <SafeAreaView style={styles.root} edges={[]}>
@@ -59,13 +60,14 @@ export default function CampaignListScreen() {
           Campañas
         </AppText>
         <Pressable
-          style={styles.refreshBtnWrapper}
+          style={[styles.refreshBtn, refreshDisabled && styles.refreshBtnDisabled]}
           onPress={refresh}
-          disabled={!isOnline || isLoading}
+          disabled={refreshDisabled}
           accessibilityLabel="Actualizar campañas"
         >
+          <RefreshCw size={15} color={refreshDisabled ? colors.textMuted : colors.textPrimary} />
           <AppText
-            style={[styles.refreshBtn, (!isOnline || isLoading) && styles.refreshDisabled]}
+            style={[styles.refreshBtnText, refreshDisabled && styles.refreshBtnTextDisabled]}
             numberOfLines={1}
           >
             Actualizar
@@ -73,29 +75,12 @@ export default function CampaignListScreen() {
         </Pressable>
       </View>
 
-      {/* Download progress */}
+      {/* Download progress: tres fases, cada una con su propia barra */}
       {downloadProgress ? (
         <View style={styles.progressContainer}>
-          <View style={styles.progressHeader}>
-            <Text style={styles.progressPhase}>
-              {downloadProgress.phase === "campaigns"
-                ? "Descargando campañas"
-                : downloadProgress.phase === "instruments"
-                ? "Descargando instrumentos"
-                : "Guardando encuestados"}
-            </Text>
-            <Text style={styles.progressCount}>
-              {downloadProgress.done}/{downloadProgress.total}
-            </Text>
-          </View>
-          <Text style={styles.progressName} numberOfLines={1}>
-            {downloadProgress.currentName}
-          </Text>
-          <View style={styles.progressTrack}>
-            <View
-              style={[styles.progressFill, { width: progressPercent as DimensionValue }]}
-            />
-          </View>
+          {phases.map((phase) => (
+            <DownloadPhaseItem key={phase.kind} phase={phase} colors={colors} styles={styles} />
+          ))}
         </View>
       ) : null}
 
@@ -106,10 +91,8 @@ export default function CampaignListScreen() {
       ) : null}
 
       {!isOnline && !downloadProgress ? (
-        <View style={styles.offlineBanner}>
-          <Text style={styles.offlineText}>
-            Sin conexión — mostrando campañas guardadas localmente
-          </Text>
+        <View style={styles.offlineWrapper}>
+          <OfflineNotice message="Sin conexión. Podés trabajar con las campañas ya descargadas; no se pueden traer nuevas." />
         </View>
       ) : null}
 
@@ -123,31 +106,78 @@ export default function CampaignListScreen() {
           />
         }
       >
-        {campaigns.length === 0 && !isLoading ? (
-          <View style={styles.empty}>
-            <Text style={styles.emptyTitle}>Sin campañas descargadas</Text>
-            <Text style={styles.emptyDesc}>
-              {isOnline
-                ? 'Toca "Actualizar" para descargar las campañas activas.'
-                : 'Conéctate y toca "Actualizar" para descargar campañas.'}
-            </Text>
-          </View>
-        ) : null}
-
-        {campaigns.map((campaign) => (
-          <CampaignRow
-            key={campaign.campaignId}
-            campaign={campaign}
-            fullyCached={isCampaignFullyCached(campaign.campaignId)}
-            onPress={() => router.push(`/campaign/${campaign.campaignId}/pre-survey`)}
-          />
-        ))}
-
         {isLoading && campaigns.length === 0 && !downloadProgress ? (
-          <ActivityIndicator size="large" color={colors.brand} style={styles.loader} />
-        ) : null}
+          <>
+            <SkeletonCard />
+            <SkeletonCard />
+            <SkeletonCard />
+          </>
+        ) : campaigns.length === 0 ? (
+          <EmptyState
+            icon={Inbox}
+            title="Sin campañas descargadas"
+            description={
+              isOnline
+                ? 'Toca "Actualizar" para descargar las campañas activas.'
+                : 'Conéctate y toca "Actualizar" para descargar campañas.'
+            }
+            actionLabel={isOnline ? "Actualizar campañas" : undefined}
+            onAction={isOnline ? refresh : undefined}
+          />
+        ) : (
+          campaigns.map((campaign) => (
+            <CampaignRow
+              key={campaign.campaignId}
+              campaign={campaign}
+              fullyCached={isCampaignFullyCached(campaign.campaignId)}
+              onPress={() => router.push(`/campaign/${campaign.campaignId}/pre-survey`)}
+            />
+          ))
+        )}
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+function DownloadPhaseItem({
+  phase,
+  colors,
+  styles,
+}: {
+  phase: DownloadPhaseRow;
+  colors: ThemeColors;
+  styles: ReturnType<typeof createStyles>;
+}) {
+  const iconColor =
+    phase.status === "done" ? colors.successFg : phase.status === "current" ? colors.brand : colors.textMuted;
+  const barColor = phase.status === "done" ? colors.successFg : colors.brand;
+
+  return (
+    <View style={styles.phaseRow}>
+      <View style={styles.phaseHeader}>
+        {phase.status === "done" ? (
+          <Check size={15} color={iconColor} />
+        ) : phase.status === "current" ? (
+          <Download size={15} color={iconColor} />
+        ) : (
+          <Circle size={15} color={iconColor} />
+        )}
+        <Text style={[styles.phaseLabel, phase.status !== "pending" && styles.phaseLabelActive]}>
+          {phase.label}
+        </Text>
+        <Text style={styles.phaseCount}>
+          {phase.status === "done" ? "Listo" : `${phase.done}/${phase.total}`}
+        </Text>
+      </View>
+      <View style={styles.phaseTrack}>
+        <View style={[styles.phaseFill, { width: `${phase.percent}%`, backgroundColor: barColor }]} />
+      </View>
+      {phase.status === "current" && phase.currentName ? (
+        <Text style={styles.phaseItemName} numberOfLines={1}>
+          {phase.currentName}
+        </Text>
+      ) : null}
+    </View>
   );
 }
 
@@ -171,7 +201,7 @@ function CampaignRow({
     >
       <View style={styles.cardTop}>
         <Text style={styles.campaignName}>{campaign.name}</Text>
-        <CacheStatusBadge fullyCached={fullyCached} />
+        <ChevronRight size={17} color={colors.textMuted} style={styles.cardChevron} />
       </View>
 
       {campaign.description ? (
@@ -180,11 +210,10 @@ function CampaignRow({
         </Text>
       ) : null}
 
-      <View style={styles.cardBottom}>
-        <Text style={styles.stepsCount}>
-          {campaign.steps.length} paso{campaign.steps.length !== 1 ? "s" : ""}
-        </Text>
-        <Text style={styles.instrumentsCount}>
+      <View style={styles.cardFooter}>
+        <CacheStatusBadge fullyCached={fullyCached} />
+        <Text style={styles.cardMeta} numberOfLines={1} ellipsizeMode="tail">
+          {campaign.steps.length} paso{campaign.steps.length !== 1 ? "s" : ""} ·{" "}
           {[...new Set(campaign.steps.map((s) => s.instrument.instrumentId))].length}{" "}
           instrumento
           {[...new Set(campaign.steps.map((s) => s.instrument.instrumentId))].length !== 1
@@ -203,12 +232,14 @@ function CacheStatusBadge({ fullyCached }: { fullyCached: boolean }) {
   if (fullyCached) {
     return (
       <View style={[styles.badge, styles.badgeCached]}>
-        <Text style={styles.badgeCachedText}>✓ Sin conexión</Text>
+        <Check size={11} color={colors.successFg} />
+        <Text style={styles.badgeCachedText}>Sin conexión</Text>
       </View>
     );
   }
   return (
     <View style={[styles.badge, styles.badgePending]}>
+      <Download size={11} color={colors.warningFg} />
       <Text style={styles.badgePendingText}>Descarga pendiente</Text>
     </View>
   );
@@ -216,7 +247,7 @@ function CacheStatusBadge({ fullyCached }: { fullyCached: boolean }) {
 
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
-    root: { flex: 1, backgroundColor: colors.surfaceMuted },
+    root: { flex: 1, backgroundColor: colors.surface },
 
     header: {
       flexDirection: "row",
@@ -225,43 +256,43 @@ function createStyles(colors: ThemeColors) {
       paddingHorizontal: 20,
       paddingVertical: 14,
       backgroundColor: colors.surface,
-      borderBottomWidth: 1,
-      borderBottomColor: colors.border,
     },
-    title: { flexShrink: 1, fontSize: 17, fontFamily: Fonts.bold, color: colors.textPrimary },
+    title: { flexShrink: 1, fontSize: 21, fontFamily: Fonts.extraBold, color: colors.textPrimary },
     // Fixed size: the "Actualizar" button must stay fully visible even when
     // the campaign title is long or the system font scale is high (spec 24).
-    refreshBtnWrapper: { flexShrink: 0 },
-    refreshBtn: { fontSize: 15, fontFamily: Fonts.semiBold, color: colors.brand },
-    refreshDisabled: { color: colors.textMuted },
+    refreshBtn: {
+      flexShrink: 0,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 7,
+      minHeight: 48,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.borderStrong,
+    },
+    refreshBtnDisabled: { borderColor: colors.border },
+    refreshBtnText: { fontSize: 14, fontFamily: Fonts.extraBold, color: colors.textPrimary },
+    refreshBtnTextDisabled: { color: colors.textMuted },
 
     progressContainer: {
-      backgroundColor: colors.surface,
+      backgroundColor: colors.surfaceMuted,
       paddingHorizontal: 20,
       paddingVertical: 14,
       borderBottomWidth: 1,
       borderBottomColor: colors.border,
-      gap: 6,
+      gap: 12,
     },
-    progressHeader: {
-      flexDirection: "row",
-      justifyContent: "space-between",
-      alignItems: "center",
-    },
-    progressPhase: { fontSize: 13, fontFamily: Fonts.semiBold, color: colors.textPrimary },
-    progressCount: { fontSize: 13, fontFamily: Fonts.regular, color: colors.textMuted },
-    progressName: { fontSize: 12, fontFamily: Fonts.regular, color: colors.textMuted },
-    progressTrack: { height: 6, backgroundColor: colors.border, borderRadius: 3, overflow: "hidden" },
-    progressFill: { height: 6, backgroundColor: colors.brand, borderRadius: 3 },
+    phaseRow: { gap: 6 },
+    phaseHeader: { flexDirection: "row", alignItems: "center", gap: 9 },
+    phaseLabel: { fontSize: 13, fontFamily: Fonts.medium, color: colors.textMuted, flex: 1 },
+    phaseLabelActive: { fontFamily: Fonts.semiBold, color: colors.textPrimary },
+    phaseCount: { fontSize: 11, fontFamily: Fonts.regular, color: colors.textMuted },
+    phaseTrack: { height: 5, backgroundColor: colors.border, borderRadius: 3, overflow: "hidden" },
+    phaseFill: { height: 5, borderRadius: 3 },
+    phaseItemName: { fontSize: 10.5, fontFamily: Fonts.regular, color: colors.textMuted },
 
-    offlineBanner: {
-      backgroundColor: colors.warningBg,
-      paddingHorizontal: 20,
-      paddingVertical: 10,
-      borderBottomWidth: 1,
-      borderBottomColor: colors.warningFg,
-    },
-    offlineText: { fontSize: 13, fontFamily: Fonts.regular, color: colors.warningFg },
+    offlineWrapper: { padding: 16, paddingBottom: 0 },
 
     errorBox: {
       margin: 20,
@@ -273,16 +304,14 @@ function createStyles(colors: ThemeColors) {
     },
     errorText: { fontSize: 14, fontFamily: Fonts.regular, color: colors.dangerFg },
 
-    list: { padding: 20, gap: 12 },
-    loader: { marginTop: 48 },
+    list: { paddingHorizontal: 20, paddingTop: 10, paddingBottom: 20, gap: 12 },
 
     card: {
       backgroundColor: colors.surface,
       borderRadius: 12,
-      padding: 18,
       borderWidth: 1,
       borderColor: colors.border,
-      gap: 8,
+      overflow: "hidden",
     },
     cardPressed: { opacity: 0.8 },
     cardTop: {
@@ -290,27 +319,47 @@ function createStyles(colors: ThemeColors) {
       justifyContent: "space-between",
       alignItems: "flex-start",
       gap: 8,
+      padding: 16,
+      paddingBottom: 8,
     },
-    campaignName: { flex: 1, fontSize: 17, fontFamily: Fonts.semiBold, color: colors.textPrimary },
-    campaignDesc: { fontSize: 14, fontFamily: Fonts.regular, color: colors.textMuted },
-    cardBottom: { flexDirection: "row", gap: 16 },
-    stepsCount: { fontSize: 12, fontFamily: Fonts.regular, color: colors.brand },
-    instrumentsCount: { fontSize: 12, fontFamily: Fonts.regular, color: colors.textMuted },
-
-    badge: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
-    badgeCached: { backgroundColor: colors.successBg },
-    badgeCachedText: { fontSize: 11, fontFamily: Fonts.semiBold, color: colors.successFg },
-    badgePending: { backgroundColor: colors.warningBg },
-    badgePendingText: { fontSize: 11, fontFamily: Fonts.semiBold, color: colors.warningFg },
-
-    empty: { alignItems: "center", paddingVertical: 48, gap: 8 },
-    emptyTitle: { fontSize: 17, fontFamily: Fonts.semiBold, color: colors.textPrimary },
-    emptyDesc: {
-      fontSize: 14,
+    cardChevron: { marginTop: 2, flexShrink: 0 },
+    campaignName: { flex: 1, fontSize: 17, fontFamily: Fonts.extraBold, color: colors.textPrimary },
+    campaignDesc: {
+      fontSize: 12,
       fontFamily: Fonts.regular,
       color: colors.textMuted,
-      textAlign: "center",
-      paddingHorizontal: 32,
+      paddingHorizontal: 16,
+      paddingBottom: 12,
     },
+    cardFooter: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+      paddingHorizontal: 16,
+      paddingVertical: 11,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+      backgroundColor: colors.surfaceMuted,
+    },
+    // Sin `flex: 1` + `textAlign: "right"`: eso estiraba el texto al borde
+    // derecho de la card y dejaba un hueco enorme entre el badge y el texto
+    // en vez del gap de 10 px real de `cardFooter` (hallazgo de la ronda
+    // manual, spec 74, 2026-08-25). Ahora queda justo después del badge, con
+    // `flexShrink: 1` + `minWidth: 0` para que ceda ancho y respete el
+    // padding derecho de la card en vez de desbordarse (mismo problema que
+    // `headerLeft` en el header global).
+    cardMeta: {
+      flexShrink: 1,
+      minWidth: 0,
+      fontSize: 11.5,
+      fontFamily: Fonts.regular,
+      color: colors.textMuted,
+    },
+
+    badge: { flexDirection: "row", alignItems: "center", gap: 5, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
+    badgeCached: { backgroundColor: colors.successBg },
+    badgeCachedText: { fontSize: 11, fontFamily: Fonts.extraBold, color: colors.successFg },
+    badgePending: { backgroundColor: colors.warningBg },
+    badgePendingText: { fontSize: 11, fontFamily: Fonts.extraBold, color: colors.warningFg },
   });
 }
