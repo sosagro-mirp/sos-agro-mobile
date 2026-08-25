@@ -212,7 +212,7 @@ function CampaignRow({
 
       <View style={styles.cardFooter}>
         <CacheStatusBadge fullyCached={fullyCached} />
-        <Text style={styles.cardMeta}>
+        <Text style={styles.cardMeta} numberOfLines={1} ellipsizeMode="tail">
           {campaign.steps.length} paso{campaign.steps.length !== 1 ? "s" : ""} ·{" "}
           {[...new Set(campaign.steps.map((s) => s.instrument.instrumentId))].length}{" "}
           instrumento
