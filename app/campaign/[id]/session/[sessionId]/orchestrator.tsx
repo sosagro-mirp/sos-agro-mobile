@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { Animated, Easing, Pressable, StyleSheet, Text, View, type DimensionValue } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { WifiOff, TriangleAlert, RefreshCw, ChevronLeft, LoaderCircle, type LucideIcon } from "lucide-react-native";
 import { useCampaignSessionStore } from "../../../../../src/store/useCampaignSessionStore";
 import { useCachedInstrumentsStore } from "../../../../../src/store/useCachedInstrumentsStore";
 import { useInstrumentSurveyStore } from "../../../../../src/store/useInstrumentSurveyStore";
@@ -686,20 +687,13 @@ export default function OrchestratorScreen() {
   if (screenState === 'offline') {
     return (
       <SafeAreaView style={styles.root}>
-        <View style={styles.center}>
-          <Text style={styles.bigIcon}>📡</Text>
-          <Text style={styles.title}>Sin conexión</Text>
-          <Text style={styles.desc}>
-            Necesitas conexión para continuar al siguiente paso.{"\n"}
-            El paso anterior ya fue guardado.
-          </Text>
-          <Pressable
-            style={[styles.button, isOnline && styles.buttonActive]}
-            onPress={() => { hasStarted.current = false; run(); }}
-          >
-            <Text style={styles.buttonText}>Reintentar</Text>
-          </Pressable>
-        </View>
+        <ErrorState
+          icon={WifiOff}
+          title="Sin conexión"
+          description={"Necesitas conexión para continuar al siguiente paso.\nEl paso anterior ya fue guardado."}
+          primaryLabel="Reintentar"
+          onPrimary={() => { hasStarted.current = false; run(); }}
+        />
       </SafeAreaView>
     );
   }
@@ -707,30 +701,19 @@ export default function OrchestratorScreen() {
   if (screenState === 'offline_extraction_pending') {
     return (
       <SafeAreaView style={styles.root}>
-        <View style={styles.center}>
-          <Text style={styles.bigIcon}>⚠️</Text>
-          <Text style={styles.title}>No se pudo identificar al encuestado</Text>
-          <Text style={styles.desc}>
-            No se pudo leer los datos del encuestado.{"\n"}
-            Conéctate para continuar o continúa sin identificar.
-          </Text>
-          <Pressable
-            style={styles.buttonActive}
-            onPress={() => { hasStarted.current = false; run(); }}
-          >
-            <Text style={styles.buttonText}>Reintentar</Text>
-          </Pressable>
-          <Pressable
-            style={styles.button}
-            onPress={() => {
-              store.completeS2Injection();
-              hasStarted.current = false;
-              run();
-            }}
-          >
-            <Text style={styles.buttonText}>Continuar sin identificar</Text>
-          </Pressable>
-        </View>
+        <ErrorState
+          icon={TriangleAlert}
+          title="No se pudo identificar al encuestado"
+          description="No se pudo leer los datos del encuestado. Conéctate para continuar o continúa sin identificar."
+          primaryLabel="Reintentar"
+          onPrimary={() => { hasStarted.current = false; run(); }}
+          secondaryLabel="Continuar sin identificar"
+          onSecondary={() => {
+            store.completeS2Injection();
+            hasStarted.current = false;
+            run();
+          }}
+        />
       </SafeAreaView>
     );
   }
@@ -738,27 +721,17 @@ export default function OrchestratorScreen() {
   if (screenState === 'injection_error') {
     return (
       <SafeAreaView style={styles.root}>
-        <View style={styles.center}>
-          <Text style={styles.bigIcon}>⚠️</Text>
-          <Text style={styles.title}>Error identificando encuestado</Text>
-          <Text style={styles.errorDesc}>{errorMessage}</Text>
-          <Text style={styles.desc}>
-            Debes identificar al encuestado antes de continuar.{"\n"}
-            Vuelve y regístralo si aún no existe en el sistema.
-          </Text>
-          <Pressable
-            style={styles.buttonActive}
-            onPress={() => { hasStarted.current = false; run(); }}
-          >
-            <Text style={styles.buttonText}>Reintentar</Text>
-          </Pressable>
-          <Pressable
-            style={styles.button}
-            onPress={() => returnToPreSurvey(router, id)}
-          >
-            <Text style={styles.buttonText}>← Volver a identificar</Text>
-          </Pressable>
-        </View>
+        <ErrorState
+          icon={TriangleAlert}
+          title="Error identificando encuestado"
+          errorDetail={errorMessage}
+          description={"Debes identificar al encuestado antes de continuar.\nVuelve y regístralo si aún no existe en el sistema."}
+          primaryLabel="Reintentar"
+          onPrimary={() => { hasStarted.current = false; run(); }}
+          secondaryLabel="Volver a identificar"
+          secondaryIcon={ChevronLeft}
+          onSecondary={() => returnToPreSurvey(router, id)}
+        />
       </SafeAreaView>
     );
   }
@@ -766,26 +739,30 @@ export default function OrchestratorScreen() {
   if (screenState === 'error') {
     return (
       <SafeAreaView style={styles.root}>
-        <View style={styles.center}>
-          <Text style={styles.bigIcon}>⚠️</Text>
-          <Text style={styles.title}>Error inesperado</Text>
-          <Text style={styles.errorDesc}>{errorMessage}</Text>
-          <Pressable
-            style={styles.buttonActive}
-            onPress={() => { hasStarted.current = false; run(); }}
-          >
-            <Text style={styles.buttonText}>Reintentar</Text>
-          </Pressable>
-        </View>
+        <ErrorState
+          icon={TriangleAlert}
+          title="Error inesperado"
+          errorDetail={errorMessage}
+          primaryLabel="Reintentar"
+          onPrimary={() => { hasStarted.current = false; run(); }}
+        />
       </SafeAreaView>
     );
   }
+
+  const stepLabel = store.currentStep
+    ? `Paso ${store.currentStep.order} de ${store.currentStep.totalSteps}${store.campaign?.name ? ` · ${store.campaign.name}` : ''}`
+    : undefined;
+  const progressPercent = store.currentStep
+    ? `${Math.round((store.currentStep.order / store.currentStep.totalSteps) * 100)}%`
+    : '0%';
 
   return (
     <SafeAreaView style={styles.root}>
       <DuplicateAlertModal
         visible={screenState === 'duplicate_pending'}
         instrumentName={duplicatePending?.instrument.name ?? ''}
+        farmerName={store.farmerName ?? undefined}
         isLoading={modalLoading}
         onOverwrite={handleOverwrite}
         onSkip={handleSkip}
@@ -797,6 +774,10 @@ export default function OrchestratorScreen() {
         existingFarmerName={documentCollisionPending?.existingFarmerName ?? ''}
         submittedName={documentCollisionPending?.submittedName ?? ''}
         isLoading={modalLoading}
+        // Decisión pendiente #3 del spec 74 (2026-08-25): "Es la misma
+        // persona" se ve siempre, pero deshabilitada con REQUIERE CONEXIÓN
+        // sin red — antes se ocultaba del todo (offline solo hay red para
+        // "corregir el documento", ver comentario original de spec 68).
         allowSamePerson={!documentCollisionPending?.offline}
         onCorrectDocument={handleCorrectDocument}
         onSamePerson={handleSamePerson}
@@ -804,10 +785,98 @@ export default function OrchestratorScreen() {
         onRequestClose={handleDocumentCollisionRequestClose}
       />
       <View style={styles.center}>
-        <ActivityIndicator size="large" color={colors.brand} />
+        <SpinningLoader size={42} color={colors.brand} />
         <Text style={styles.loadingLabel}>Cargando siguiente paso…</Text>
+        {stepLabel ? <Text style={styles.loadingSubLabel}>{stepLabel}</Text> : null}
+        {store.currentStep ? (
+          <View style={styles.loadingTrack}>
+            <View style={[styles.loadingFill, { width: progressPercent as DimensionValue }]} />
+          </View>
+        ) : null}
       </View>
     </SafeAreaView>
+  );
+}
+
+// Ícono girando con `Animated` en vez de `ActivityIndicator` (spec 74, mapa
+// de reemplazo). Copia local del mismo patrón que `login.tsx` y
+// `GpsCoordinateInput.tsx` — no hay componente compartido para esto todavía.
+function SpinningLoader({ size, color }: { size: number; color: string }) {
+  const rotation = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.timing(rotation, {
+        toValue: 1,
+        duration: 900,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      }),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [rotation]);
+
+  const spin = rotation.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
+
+  return (
+    <Animated.View style={{ transform: [{ rotate: spin }] }}>
+      <LoaderCircle size={size} color={color} />
+    </Animated.View>
+  );
+}
+
+// Patrón único de error a pantalla completa (spec 74, Fase 6): ícono lucide
+// dentro de un contenedor de 80 px, título, explicación y acciones en el
+// pie — reemplaza los 4 bloques casi idénticos que había antes, cada uno con
+// su propio emoji gigante (📡 / ⚠️).
+function ErrorState({
+  icon: Icon,
+  title,
+  description,
+  errorDetail,
+  primaryLabel,
+  onPrimary,
+  secondaryLabel,
+  secondaryIcon: SecondaryIcon,
+  onSecondary,
+}: {
+  icon: LucideIcon;
+  title: string;
+  description?: string;
+  errorDetail?: string | null;
+  primaryLabel: string;
+  onPrimary: () => void;
+  secondaryLabel?: string;
+  secondaryIcon?: LucideIcon;
+  onSecondary?: () => void;
+}) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+
+  return (
+    <View style={styles.errorScreen}>
+      <View style={styles.errorContent}>
+        <View style={styles.errorIconWrapper}>
+          <Icon size={36} color={colors.warningFg} strokeWidth={2} />
+        </View>
+        <Text style={styles.title}>{title}</Text>
+        {errorDetail ? <Text style={styles.errorDesc}>{errorDetail}</Text> : null}
+        {description ? <Text style={styles.desc}>{description}</Text> : null}
+      </View>
+      <View style={styles.errorFooter}>
+        <Pressable style={styles.errorButtonPrimary} onPress={onPrimary} accessibilityRole="button">
+          <RefreshCw size={18} color={colors.brandForeground} strokeWidth={2.4} />
+          <Text style={styles.errorButtonPrimaryText}>{primaryLabel}</Text>
+        </Pressable>
+        {secondaryLabel && onSecondary ? (
+          <Pressable style={styles.errorButtonSecondary} onPress={onSecondary} accessibilityRole="button">
+            {SecondaryIcon ? <SecondaryIcon size={16} color={colors.textPrimary} strokeWidth={2.4} /> : null}
+            <Text style={styles.errorButtonSecondaryText}>{secondaryLabel}</Text>
+          </Pressable>
+        ) : null}
+      </View>
+    </View>
   );
 }
 
@@ -819,38 +888,95 @@ function createStyles(colors: ThemeColors) {
       justifyContent: "center",
       alignItems: "center",
       paddingHorizontal: 32,
-      gap: 16,
     },
-    loadingLabel: { fontSize: 15, fontFamily: Fonts.regular, color: colors.textMuted },
-    bigIcon: { fontSize: 48 },
-    title: { fontSize: 20, fontFamily: Fonts.bold, color: colors.textPrimary },
-    desc: {
-      fontSize: 15,
+    loadingLabel: { fontSize: 17, fontFamily: Fonts.extraBold, color: colors.textPrimary, marginTop: 22 },
+    loadingSubLabel: {
+      fontSize: 12.5,
       fontFamily: Fonts.regular,
       color: colors.textMuted,
       textAlign: "center",
-      lineHeight: 22,
+      lineHeight: 18,
+      marginTop: 9,
+    },
+    loadingTrack: {
+      width: "100%",
+      maxWidth: 240,
+      height: 5,
+      backgroundColor: colors.border,
+      borderRadius: 99,
+      overflow: "hidden",
+      marginTop: 24,
+    },
+    loadingFill: { height: 5, backgroundColor: colors.brand, borderRadius: 99 },
+    title: {
+      fontSize: 20,
+      fontFamily: Fonts.extraBold,
+      color: colors.textPrimary,
+      letterSpacing: -0.3,
+      textAlign: "center",
+      marginBottom: 11,
+    },
+    desc: {
+      fontSize: 13,
+      fontFamily: Fonts.regular,
+      color: colors.textMuted,
+      textAlign: "center",
+      lineHeight: 21,
     },
     errorDesc: {
-      fontSize: 14,
+      fontSize: 13,
       fontFamily: Fonts.regular,
       color: colors.dangerFg,
       textAlign: "center",
+      marginBottom: 6,
     },
-    button: {
-      backgroundColor: colors.textMuted,
-      borderRadius: 12,
-      paddingVertical: 16,
-      paddingHorizontal: 40,
-      marginTop: 8,
+    // Estado de error a pantalla completa (spec 74, Fase 6)
+    errorScreen: { flex: 1 },
+    errorContent: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: 28,
     },
-    buttonActive: {
+    errorIconWrapper: {
+      width: 80,
+      height: 80,
+      borderRadius: 20,
+      backgroundColor: colors.warningBg,
+      borderWidth: 1,
+      borderColor: colors.warningFg,
+      alignItems: "center",
+      justifyContent: "center",
+      marginBottom: 22,
+    },
+    errorFooter: {
+      flexShrink: 0,
+      padding: 14,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+      backgroundColor: colors.surface,
+      gap: 10,
+    },
+    errorButtonPrimary: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 9,
       backgroundColor: colors.brand,
-      borderRadius: 12,
-      paddingVertical: 16,
-      paddingHorizontal: 40,
-      marginTop: 8,
+      borderRadius: 11,
+      paddingVertical: 17,
     },
-    buttonText: { fontSize: 16, fontFamily: Fonts.semiBold, color: colors.brandForeground },
+    errorButtonPrimaryText: { fontSize: 15, fontFamily: Fonts.extraBold, color: colors.brandForeground },
+    errorButtonSecondary: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 8,
+      borderWidth: 1,
+      borderColor: colors.borderStrong,
+      borderRadius: 11,
+      paddingVertical: 15,
+    },
+    errorButtonSecondaryText: { fontSize: 14, fontFamily: Fonts.bold, color: colors.textPrimary },
   });
 }

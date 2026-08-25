@@ -1,8 +1,9 @@
 import React, { useMemo, useState } from 'react';
-import { Alert, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Camera, Images, Trash2, Check, ImageIcon } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
+import { useSnackbar } from '../common/Snackbar';
 import { useTheme } from '../../theme/ThemeProvider';
 import type { ThemeColors } from '../../theme/colors';
 import type { InstrumentDraftAnswer } from '../../types/instrument';
@@ -34,11 +35,12 @@ export function ImageCaptureInput({ questionId, value, onChange }: Props): React
   const [localUri, setLocalUri] = useState<string | undefined>(value);
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const { show: showSnackbar } = useSnackbar();
 
   async function pickFromCamera(): Promise<void> {
     const { granted } = await ImagePicker.requestCameraPermissionsAsync();
     if (!granted) {
-      Alert.alert('Permiso requerido', 'SOSAgro necesita acceso a la cámara para tomar fotos.');
+      showSnackbar({ message: 'SOSAgro necesita acceso a la cámara para tomar fotos.', variant: 'error' });
       return;
     }
 
@@ -56,7 +58,7 @@ export function ImageCaptureInput({ questionId, value, onChange }: Props): React
   async function pickFromGallery(): Promise<void> {
     const { granted } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!granted) {
-      Alert.alert('Permiso requerido', 'SOSAgro necesita acceso a tu galería para adjuntar imágenes.');
+      showSnackbar({ message: 'SOSAgro necesita acceso a tu galería para adjuntar imágenes.', variant: 'error' });
       return;
     }
 
@@ -85,7 +87,7 @@ export function ImageCaptureInput({ questionId, value, onChange }: Props): React
         mimeType: pickedMimeType ?? mimeTypeFromExtension(ext),
       });
     } catch {
-      Alert.alert('Error', 'No se pudo guardar la imagen.');
+      showSnackbar({ message: 'No se pudo guardar la imagen.', variant: 'error' });
     }
   }
 
