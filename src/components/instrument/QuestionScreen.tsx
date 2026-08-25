@@ -27,6 +27,7 @@ import { useTheme } from "../../theme/ThemeProvider";
 import type { ThemeColors } from "../../theme/colors";
 import { OPTION_SEARCH_THRESHOLD } from "../../lib/optionSearch";
 import { useBreakpoint } from "../../lib/useBreakpoint";
+import { INSTRUMENT_PANELS_MIN_WIDTH } from "../../lib/resolveBreakpoint";
 import { resolveConditionReason } from "../../lib/resolveConditionReason";
 import type { InstrumentDraftAnswer } from "../../types";
 
@@ -45,8 +46,11 @@ export const QuestionScreen: React.FC<QuestionScreenProps> = ({
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const breakpoint = useBreakpoint();
-  const isTablet = breakpoint === "tablet";
+  // Umbral propio, más exigente que el general de 720dp: por debajo de
+  // INSTRUMENT_PANELS_MIN_WIDTH los tres paneles fijos comprimen la columna
+  // de lectura a un ancho inutilizable (hallazgo TC-074-87, tablet en
+  // portrait) — se degrada a una sola columna en vez de mostrarlos apretados.
+  const isTablet = useBreakpoint(INSTRUMENT_PANELS_MIN_WIDTH) === "tablet";
 
   const answers = useInstrumentSurveyStore((s) => s.answers);
   const currentIndex = useInstrumentSurveyStore((s) => s.currentIndex);

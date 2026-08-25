@@ -32,6 +32,7 @@ import { AppText } from "../../../src/components/common/AppText";
 import { PlotSketch } from "../../../src/components/plots/PlotSketch";
 import { polygonAreaHectares } from "../../../src/lib/polygonGeometry";
 import { useBreakpoint } from "../../../src/lib/useBreakpoint";
+import { LOTES_PANELS_MIN_WIDTH } from "../../../src/lib/resolveBreakpoint";
 import { Fonts } from "../../../src/theme/fonts";
 import { useTheme } from "../../../src/theme/ThemeProvider";
 import type { ThemeColors } from "../../../src/theme/colors";
@@ -63,7 +64,9 @@ export default function CapturePlotScreen() {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { show: showSnackbar } = useSnackbar();
-  const isTablet = useBreakpoint() === "tablet";
+  // Umbral propio (hallazgo TC-074-87): por debajo de LOTES_PANELS_MIN_WIDTH
+  // el croquis "panel" (380) + la lista de vértices (310) no caben cómodos.
+  const isTablet = useBreakpoint(LOTES_PANELS_MIN_WIDTH) === "tablet";
 
   const { points, startCapture, addPoint, removeLastPoint, reset } = useFarmPlotCaptureStore();
 

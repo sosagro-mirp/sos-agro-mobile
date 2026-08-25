@@ -181,6 +181,24 @@ describe('spec 74 · Fase 10 — breakpoint de tablet', () => {
 
     expect(TABLET_BREAKPOINT).toBe(720);
   });
+
+  // Hallazgo TC-074-87: una tablet en portrait puede clasificar como
+  // "tablet" por TABLET_BREAKPOINT (≥720dp) y aun así ser demasiado angosta
+  // para los paneles fijos del instrumento (280+560+250) o de Lotes
+  // (380+310) sin comprimirlos. `resolveBreakpoint` acepta un umbral propio
+  // para esos layouts específicos, más exigente que el general.
+  it('acepta un umbral propio, más alto que el general, para layouts de paneles fijos', () => {
+    const { resolveBreakpoint, INSTRUMENT_PANELS_MIN_WIDTH, LOTES_PANELS_MIN_WIDTH } =
+      require('../lib/resolveBreakpoint');
+
+    // 800dp: "tablet" por el umbral general, pero angosto para los paneles.
+    expect(resolveBreakpoint(800)).toBe('tablet');
+    expect(resolveBreakpoint(800, INSTRUMENT_PANELS_MIN_WIDTH)).toBe('phone');
+    expect(resolveBreakpoint(800, LOTES_PANELS_MIN_WIDTH)).toBe('tablet');
+
+    expect(resolveBreakpoint(INSTRUMENT_PANELS_MIN_WIDTH, INSTRUMENT_PANELS_MIN_WIDTH)).toBe('tablet');
+    expect(resolveBreakpoint(LOTES_PANELS_MIN_WIDTH, LOTES_PANELS_MIN_WIDTH)).toBe('tablet');
+  });
 });
 
 // ─── Fase 10 · Razón de visibilidad de las condicionales (panel de contexto) ─
