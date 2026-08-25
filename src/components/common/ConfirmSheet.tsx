@@ -229,7 +229,7 @@ function createStyles(colors: ThemeColors) {
     buttonPrimary: { backgroundColor: colors.brand },
     buttonSecondary: { borderWidth: 1, borderColor: colors.borderStrong },
     buttonDestructive: { borderWidth: 1, borderColor: colors.dangerFg, backgroundColor: colors.dangerBg },
-    buttonLabel: { fontFamily: Fonts.semiBold, fontSize: 15 },
+    buttonLabel: { flexShrink: 1, textAlign: "center", fontFamily: Fonts.semiBold, fontSize: 15 },
     buttonLabelPrimary: { color: colors.brandForeground },
     buttonLabelSecondary: { color: colors.textPrimary },
     buttonLabelDestructive: { color: colors.dangerFg, fontSize: 13.5 },
