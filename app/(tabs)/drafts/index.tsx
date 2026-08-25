@@ -1,7 +1,6 @@
 import { useState, useCallback, useMemo } from "react";
 import {
   ActivityIndicator,
-  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -10,11 +9,15 @@ import {
 } from "react-native";
 import { useRouter, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Trash2 } from "lucide-react-native";
+import { FileText, User, Trash2, ArrowRight } from "lucide-react-native";
 import { surveyDraftStore, type SurveyDraft } from "../../../src/storage/surveyDraftStore";
 import { instrumentCacheStorage } from "../../../src/storage/instrumentCache";
 import { farmerCacheStorage } from "../../../src/storage/farmerCache";
 import { useInstrumentSurveyStore } from "../../../src/store/useInstrumentSurveyStore";
+import { useDraftCountStore } from "../../../src/store/useDraftCountStore";
+import { AppText } from "../../../src/components/common/AppText";
+import { DestructiveButton } from "../../../src/components/common/DestructiveButton";
+import { ConfirmSheet } from "../../../src/components/common/ConfirmSheet";
 import { Fonts } from "../../../src/theme/fonts";
 import { useTheme } from "../../../src/theme/ThemeProvider";
 import type { ThemeColors } from "../../../src/theme/colors";
@@ -46,7 +49,6 @@ export default function DraftsScreen() {
   const [resumingId, setResumingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [confirmModal, setConfirmModal] = useState<{
-    title: string;
     body: string;
     confirmLabel: string;
     onConfirm: () => Promise<void>;
@@ -68,6 +70,9 @@ export default function DraftsScreen() {
           setError(err instanceof Error ? err.message : "Error cargando borradores")
         )
         .finally(() => setIsLoading(false));
+      // Fuente reactiva del badge en la pestaña (spec 74, deuda diferida de
+      // la Fase 3 a esta fase) — se refresca en cada foco, no solo acá.
+      useDraftCountStore.getState().refresh();
     }, [])
   );
 
@@ -92,29 +97,31 @@ export default function DraftsScreen() {
   };
 
   const handleDelete = (draft: EnrichedDraft) => {
+    const answerCount = Object.keys(draft.answers).length;
+    const who = draft.farmerName ? ` de ${draft.farmerName}` : "";
     setConfirmModal({
-      title: "Eliminar borrador",
-      body: `Se eliminará "${draft.instrumentName ?? "este borrador"}" y todas sus respuestas. Esta acción no se puede deshacer.`,
-      confirmLabel: "Eliminar",
+      body: `Se pierden las ${answerCount} respuesta${answerCount !== 1 ? "s" : ""} ya cargadas${who}. No se puede deshacer.`,
+      confirmLabel: "Borrar de todas formas",
       onConfirm: async () => {
         setDeletingId(draft.surveyId);
         await surveyDraftStore.deleteDraft(draft.surveyId);
         setDrafts((prev) => prev.filter((d: EnrichedDraft) => d.surveyId !== draft.surveyId));
         setDeletingId(null);
+        useDraftCountStore.getState().refresh();
       },
     });
   };
 
   const handleClearAll = () => {
     setConfirmModal({
-      title: "Limpiar borradores",
-      body: `Se eliminarán los ${drafts.length} borradores y todas sus respuestas. Esta acción no se puede deshacer.`,
-      confirmLabel: "Limpiar todo",
+      body: `Se eliminarán los ${drafts.length} borradores y todas sus respuestas. No se puede deshacer.`,
+      confirmLabel: "Borrar de todas formas",
       onConfirm: async () => {
         setIsLoading(true);
         await Promise.all(drafts.map((d) => surveyDraftStore.deleteDraft(d.surveyId)));
         setDrafts([]);
         setIsLoading(false);
+        useDraftCountStore.getState().refresh();
       },
     });
   };
@@ -168,11 +175,18 @@ export default function DraftsScreen() {
   return (
     <SafeAreaView style={styles.root} edges={[]}>
       <View style={styles.header}>
-        <Text style={styles.title}>Borradores</Text>
+        <View style={styles.headerTitleWrapper}>
+          <Text style={styles.title}>Borradores</Text>
+          <Text style={styles.subtitle}>
+            {isLoading
+              ? " "
+              : drafts.length === 0
+                ? "Sin borradores"
+                : `${drafts.length} encuesta${drafts.length !== 1 ? "s" : ""} sin terminar`}
+          </Text>
+        </View>
         {drafts.length > 0 && !isLoading ? (
-          <Pressable onPress={handleClearAll} style={styles.clearBtn}>
-            <Text style={styles.clearBtnText}>Limpiar todo</Text>
-          </Pressable>
+          <DestructiveButton label="Limpiar" icon={Trash2} onPress={handleClearAll} compact />
         ) : null}
       </View>
 
@@ -187,9 +201,12 @@ export default function DraftsScreen() {
           <ActivityIndicator size="large" color={colors.brand} style={styles.loader} />
         ) : drafts.length === 0 ? (
           <View style={styles.empty}>
-            <Text style={styles.emptyTitle}>Sin borradores</Text>
+            <View style={styles.emptyIconWrapper}>
+              <FileText size={26} color={colors.textMuted} strokeWidth={1.8} />
+            </View>
+            <Text style={styles.emptyTitle}>No hay borradores</Text>
             <Text style={styles.emptyDesc}>
-              Las encuestas en progreso aparecerán aquí.
+              Las encuestas que dejes a medio responder quedan acá para retomarlas.
             </Text>
           </View>
         ) : (
@@ -206,33 +223,21 @@ export default function DraftsScreen() {
         )}
       </ScrollView>
 
-      <Modal
+      <ConfirmSheet
         visible={confirmModal !== null}
-        transparent
-        animationType="fade"
-        statusBarTranslucent
+        icon={Trash2}
+        tone="danger"
+        title="¿Borrar este borrador?"
+        body={confirmModal?.body ?? ""}
+        isLoading={modalLoading}
+        secondaryAction={{ label: "Conservar borrador", onPress: closeModal }}
+        destructiveAction={
+          confirmModal
+            ? { label: confirmModal.confirmLabel, icon: Trash2, onPress: runModal }
+            : undefined
+        }
         onRequestClose={closeModal}
-      >
-        <View style={styles.overlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>{confirmModal?.title}</Text>
-            <Text style={styles.modalBody}>{confirmModal?.body}</Text>
-
-            {modalLoading ? (
-              <ActivityIndicator size="large" color={colors.dangerFg} style={styles.modalSpinner} />
-            ) : (
-              <>
-                <Pressable style={[styles.modalBtn, styles.modalBtnDestructive]} onPress={runModal}>
-                  <Text style={styles.modalBtnText}>{confirmModal?.confirmLabel}</Text>
-                </Pressable>
-                <Pressable style={[styles.modalBtn, styles.modalBtnSecondary]} onPress={closeModal}>
-                  <Text style={[styles.modalBtnText, styles.modalBtnSecondaryText]}>Cancelar</Text>
-                </Pressable>
-              </>
-            )}
-          </View>
-        </View>
-      </Modal>
+      />
     </SafeAreaView>
   );
 }
@@ -256,65 +261,64 @@ function DraftCard({
   const disabled = isResuming || isDeleting;
 
   return (
-    <Pressable
-      style={({ pressed }) => [styles.card, pressed && !disabled && styles.cardPressed]}
-      onPress={onResume}
-      disabled={disabled}
-      accessibilityRole="button"
-    >
+    <View style={styles.card}>
       <View style={styles.cardTop}>
-        <View style={styles.cardMain}>
+        <View style={styles.cardHeaderRow}>
           <Text style={styles.instrumentName} numberOfLines={2}>
             {draft.instrumentName ?? "Instrumento no disponible"}
           </Text>
-          <View style={styles.badges}>
-            {draft.campaignSessionId ? (
-              <View style={styles.campaignBadge}>
-                <Text style={styles.campaignBadgeText}>En campaña</Text>
-              </View>
-            ) : null}
-          </View>
+          {draft.campaignSessionId ? (
+            <View style={styles.campaignBadge}>
+              <Text style={styles.campaignBadgeText}>EN CAMPAÑA</Text>
+            </View>
+          ) : null}
         </View>
-        <View style={styles.cardActions}>
+
+        {draft.farmerName ? (
+          <View style={styles.farmerRow}>
+            <User size={13} color={colors.textMuted} strokeWidth={2.2} />
+            <Text style={styles.farmerName} numberOfLines={1}>{draft.farmerName}</Text>
+          </View>
+        ) : null}
+
+        <Text style={styles.metaText}>
+          {answerCount} respuesta{answerCount !== 1 ? "s" : ""} ·{" "}
+          {draft.updatedAt.toLocaleString("es-CO", { dateStyle: "short", timeStyle: "short" })}
+        </Text>
+      </View>
+
+      <View style={styles.cardActions}>
+        <Pressable
+          style={({ pressed }) => [styles.continueBtn, pressed && !disabled && styles.continueBtnPressed]}
+          onPress={onResume}
+          disabled={disabled}
+          accessibilityRole="button"
+        >
           {isResuming ? (
             <ActivityIndicator size="small" color={colors.brand} />
-          ) : isDeleting ? (
-            <ActivityIndicator size="small" color={colors.dangerFg} />
           ) : (
             <>
-              <Text style={styles.resumeHint}>Continuar →</Text>
-              <Pressable
-                onPress={(e) => { e.stopPropagation?.(); onDelete(); }}
-                style={({ pressed }) => [styles.deleteBtn, pressed && styles.deleteBtnPressed]}
-                hitSlop={8}
-                accessibilityLabel="Eliminar borrador"
-              >
-                <Trash2 size={18} color={colors.dangerFg} />
-              </Pressable>
+              <AppText style={styles.continueText}>Continuar</AppText>
+              <ArrowRight size={17} color={colors.brand} strokeWidth={2.6} />
             </>
           )}
-        </View>
+        </Pressable>
+        <View style={styles.actionsDivider} />
+        <Pressable
+          onPress={onDelete}
+          disabled={disabled}
+          style={({ pressed }) => [styles.deleteBtn, pressed && !disabled && styles.continueBtnPressed]}
+          accessibilityLabel="Eliminar borrador"
+          accessibilityRole="button"
+        >
+          {isDeleting ? (
+            <ActivityIndicator size="small" color={colors.dangerFg} />
+          ) : (
+            <Trash2 size={18} color={colors.dangerFg} strokeWidth={2.2} />
+          )}
+        </Pressable>
       </View>
-
-      {draft.farmerName ? (
-        <Text style={styles.farmerName} numberOfLines={1}>
-          Agricultor: {draft.farmerName}
-        </Text>
-      ) : null}
-
-      <View style={styles.metaRow}>
-        <Text style={styles.answers}>
-          {answerCount} respuesta{answerCount !== 1 ? "s" : ""}
-        </Text>
-        <Text style={styles.dot}>·</Text>
-        <Text style={styles.date}>
-          {draft.updatedAt.toLocaleString("es-CO", {
-            dateStyle: "short",
-            timeStyle: "short",
-          })}
-        </Text>
-      </View>
-    </Pressable>
+    </View>
   );
 }
 
@@ -330,10 +334,11 @@ function createStyles(colors: ThemeColors) {
       flexDirection: "row",
       justifyContent: "space-between",
       alignItems: "center",
+      gap: 12,
     },
-    title: { fontSize: 17, fontFamily: Fonts.bold, color: colors.textPrimary },
-    clearBtn: { paddingVertical: 4, paddingHorizontal: 8 },
-    clearBtnText: { fontSize: 14, fontFamily: Fonts.semiBold, color: colors.dangerFg },
+    headerTitleWrapper: { flex: 1, minWidth: 0 },
+    title: { fontSize: 19, fontFamily: Fonts.extraBold, color: colors.textPrimary, letterSpacing: -0.3 },
+    subtitle: { fontSize: 11.5, fontFamily: Fonts.regular, color: colors.textMuted, marginTop: 3 },
     errorBox: {
       margin: 16,
       padding: 12,
@@ -343,76 +348,72 @@ function createStyles(colors: ThemeColors) {
       borderColor: colors.dangerFg,
     },
     errorText: { fontSize: 14, fontFamily: Fonts.regular, color: colors.dangerFg },
-    list: { padding: 20, gap: 12 },
+    list: { padding: 14, gap: 12 },
     loader: { marginTop: 48 },
     card: {
       backgroundColor: colors.surface,
       borderRadius: 12,
-      padding: 18,
       borderWidth: 1,
       borderColor: colors.border,
-      gap: 6,
+      overflow: "hidden",
     },
-    cardPressed: { opacity: 0.8 },
-    cardTop: {
-      flexDirection: "row",
-      justifyContent: "space-between",
-      alignItems: "flex-start",
-      gap: 8,
-    },
-    cardMain: { flex: 1, gap: 4 },
-    cardActions: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 12,
-    },
-    deleteBtn: { padding: 2 },
-    deleteBtnPressed: { opacity: 0.5 },
-    instrumentName: { fontSize: 15, fontFamily: Fonts.semiBold, color: colors.textPrimary, lineHeight: 20 },
-    badges: { flexDirection: "row", gap: 6 },
+    cardTop: { padding: 14, paddingBottom: 12, gap: 5 },
+    cardHeaderRow: { flexDirection: "row", alignItems: "flex-start", gap: 9, marginBottom: 4 },
+    instrumentName: { flex: 1, fontSize: 13.5, fontFamily: Fonts.bold, color: colors.textPrimary, lineHeight: 18 },
     campaignBadge: {
       alignSelf: "flex-start",
-      backgroundColor: colors.successBg,
-      borderRadius: 6,
+      backgroundColor: colors.infoBg,
+      borderRadius: 99,
       paddingHorizontal: 8,
-      paddingVertical: 2,
+      paddingVertical: 3,
+      flexShrink: 0,
     },
-    campaignBadgeText: { fontSize: 11, fontFamily: Fonts.semiBold, color: colors.successFg },
-    farmerName: { fontSize: 13, fontFamily: Fonts.semiBold, color: colors.textPrimary },
-    resumeHint: { fontSize: 13, fontFamily: Fonts.semiBold, color: colors.brand },
-    metaRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-    answers: { fontSize: 12, fontFamily: Fonts.regular, color: colors.textMuted },
-    dot: { fontSize: 12, color: colors.borderStrong },
-    date: { fontSize: 12, fontFamily: Fonts.regular, color: colors.textMuted },
-    empty: { alignItems: "center", paddingVertical: 48, gap: 8 },
-    emptyTitle: { fontSize: 17, fontFamily: Fonts.semiBold, color: colors.textPrimary },
+    campaignBadgeText: { fontSize: 9.5, fontFamily: Fonts.extraBold, color: colors.infoFg },
+    farmerRow: { flexDirection: "row", alignItems: "center", gap: 7 },
+    farmerName: { fontSize: 11.5, fontFamily: Fonts.regular, color: colors.textMuted },
+    metaText: { fontSize: 11, fontFamily: Fonts.regular, color: colors.textMuted },
+    cardActions: {
+      flexDirection: "row",
+      alignItems: "stretch",
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+    },
+    continueBtn: {
+      flex: 1,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 8,
+      minHeight: 48,
+    },
+    continueBtnPressed: { opacity: 0.6 },
+    continueText: { fontSize: 13.5, fontFamily: Fonts.extraBold, color: colors.brand },
+    actionsDivider: { width: 1, backgroundColor: colors.border },
+    deleteBtn: {
+      width: 58,
+      alignItems: "center",
+      justifyContent: "center",
+      minHeight: 48,
+    },
+    empty: { alignItems: "center", paddingVertical: 70, paddingHorizontal: 20, gap: 0 },
+    emptyIconWrapper: {
+      width: 60,
+      height: 60,
+      borderRadius: 16,
+      backgroundColor: colors.surfaceMuted,
+      borderWidth: 1,
+      borderColor: colors.border,
+      alignItems: "center",
+      justifyContent: "center",
+      marginBottom: 18,
+    },
+    emptyTitle: { fontSize: 16, fontFamily: Fonts.extraBold, color: colors.textPrimary, marginBottom: 9 },
     emptyDesc: {
-      fontSize: 14,
+      fontSize: 12.5,
       fontFamily: Fonts.regular,
       color: colors.textMuted,
       textAlign: "center",
+      lineHeight: 19,
     },
-    overlay: {
-      flex: 1,
-      backgroundColor: "rgba(0,0,0,0.5)",
-      justifyContent: "center",
-      alignItems: "center",
-      padding: 24,
-    },
-    modalCard: {
-      width: "100%",
-      backgroundColor: colors.surface,
-      borderRadius: 16,
-      padding: 24,
-      gap: 12,
-    },
-    modalTitle: { fontSize: 18, fontFamily: Fonts.bold, color: colors.textPrimary },
-    modalBody: { fontSize: 15, fontFamily: Fonts.regular, color: colors.textPrimary, lineHeight: 22 },
-    modalSpinner: { marginVertical: 16 },
-    modalBtn: { borderRadius: 12, paddingVertical: 16, alignItems: "center" },
-    modalBtnDestructive: { backgroundColor: colors.dangerFg },
-    modalBtnSecondary: { backgroundColor: colors.surfaceMuted, borderWidth: 1, borderColor: colors.border },
-    modalBtnText: { fontSize: 15, fontFamily: Fonts.semiBold, color: colors.brandForeground },
-    modalBtnSecondaryText: { color: colors.textPrimary },
   });
 }

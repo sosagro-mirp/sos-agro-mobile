@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Clock, MessageCircle, Check, type LucideIcon } from "lucide-react-native";
 import { ChangeRequestForm } from "../../../src/components/requests/ChangeRequestForm";
 import { useChangeRequestStore } from "../../../src/store/useChangeRequestStore";
 import { Fonts } from "../../../src/theme/fonts";
@@ -14,11 +15,17 @@ const STATUS_LABELS: Record<string, string> = {
   resolved: "Resuelta",
 };
 
-function getStatusColors(colors: ThemeColors): Record<string, string> {
+const STATUS_ICONS: Record<string, LucideIcon> = {
+  pending_sync: Clock,
+  open: MessageCircle,
+  resolved: Check,
+};
+
+function getStatusColors(colors: ThemeColors): Record<string, { fg: string; bg: string }> {
   return {
-    pending_sync: colors.warningFg,
-    open: colors.infoFg,
-    resolved: colors.successFg,
+    pending_sync: { fg: colors.warningFg, bg: colors.warningBg },
+    open: { fg: colors.infoFg, bg: colors.infoBg },
+    resolved: { fg: colors.successFg, bg: colors.successBg },
   };
 }
 
@@ -35,7 +42,7 @@ export default function RequestsScreen() {
   return (
     <SafeAreaView style={styles.root} edges={[]}>
       <View style={styles.header}>
-        <Text style={styles.title}>Solicitudes de cambio</Text>
+        <Text style={styles.title}>Solicitudes</Text>
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
@@ -43,32 +50,34 @@ export default function RequestsScreen() {
 
         {requests.length > 0 && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Mis solicitudes</Text>
-            {requests.map((r) => (
-              <View key={r.id} style={styles.card}>
-                <View style={styles.cardHeader}>
-                  <Text
-                    style={[
-                      styles.statusBadge,
-                      { color: statusColors[r.status] ?? colors.textMuted },
-                    ]}
-                  >
-                    {STATUS_LABELS[r.status] ?? r.status}
+            <Text style={styles.sectionTitle}>MIS SOLICITUDES</Text>
+            {requests.map((r) => {
+              const tone = statusColors[r.status] ?? { fg: colors.textMuted, bg: colors.surfaceMuted };
+              const StatusIcon = STATUS_ICONS[r.status] ?? Clock;
+              return (
+                <View key={r.id} style={styles.card}>
+                  <View style={styles.cardHeader}>
+                    <View style={[styles.statusBadge, { backgroundColor: tone.bg }]}>
+                      <StatusIcon size={11} color={tone.fg} strokeWidth={2.6} />
+                      <Text style={[styles.statusBadgeText, { color: tone.fg }]}>
+                        {STATUS_LABELS[r.status] ?? r.status}
+                      </Text>
+                    </View>
+                    <Text style={styles.dateText}>
+                      {r.createdAt.toLocaleDateString("es-CO")}
+                    </Text>
+                  </View>
+                  <Text style={styles.description} numberOfLines={3}>
+                    {r.description}
                   </Text>
-                  <Text style={styles.dateText}>
-                    {r.createdAt.toLocaleDateString("es-CO")}
-                  </Text>
+                  {r.resolvedAt && (
+                    <Text style={styles.resolvedAt}>
+                      Resuelta el {r.resolvedAt.toLocaleDateString("es-CO")}
+                    </Text>
+                  )}
                 </View>
-                <Text style={styles.description} numberOfLines={3}>
-                  {r.description}
-                </Text>
-                {r.resolvedAt && (
-                  <Text style={styles.resolvedAt}>
-                    Resuelta el {r.resolvedAt.toLocaleDateString("es-CO")}
-                  </Text>
-                )}
-              </View>
-            ))}
+              );
+            })}
           </View>
         )}
       </ScrollView>
@@ -86,23 +95,24 @@ function createStyles(colors: ThemeColors) {
       borderBottomWidth: 1,
       borderBottomColor: colors.border,
     },
-    title: { fontSize: 17, fontFamily: Fonts.bold, color: colors.textPrimary },
-    content: { padding: 20, gap: 20 },
+    title: { fontSize: 19, fontFamily: Fonts.extraBold, color: colors.textPrimary, letterSpacing: -0.3 },
+    content: { padding: 14, gap: 22 },
 
-    section: { gap: 10 },
+    section: { gap: 11 },
     sectionTitle: {
-      fontSize: 15,
-      fontFamily: Fonts.semiBold,
-      color: colors.textPrimary,
+      fontSize: 11.5,
+      fontFamily: Fonts.extraBold,
+      color: colors.textMuted,
+      letterSpacing: 0.6,
     },
 
     card: {
       backgroundColor: colors.surface,
       borderRadius: 12,
-      padding: 14,
+      padding: 13,
       borderWidth: 1,
       borderColor: colors.border,
-      gap: 6,
+      gap: 9,
     },
     cardHeader: {
       flexDirection: "row",
@@ -110,22 +120,27 @@ function createStyles(colors: ThemeColors) {
       alignItems: "center",
     },
     statusBadge: {
-      fontSize: 12,
-      fontFamily: Fonts.semiBold,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      borderRadius: 99,
+      paddingHorizontal: 10,
+      paddingVertical: 4,
     },
+    statusBadgeText: { fontSize: 10, fontFamily: Fonts.extraBold },
     dateText: {
-      fontSize: 12,
+      fontSize: 10.5,
       fontFamily: Fonts.regular,
       color: colors.textMuted,
     },
     description: {
-      fontSize: 14,
+      fontSize: 12.5,
       fontFamily: Fonts.regular,
       color: colors.textPrimary,
-      lineHeight: 20,
+      lineHeight: 19,
     },
     resolvedAt: {
-      fontSize: 12,
+      fontSize: 11,
       fontFamily: Fonts.regular,
       color: colors.brand,
     },

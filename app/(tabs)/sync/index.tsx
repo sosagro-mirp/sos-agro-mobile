@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Animated,
+  Easing,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -8,7 +10,19 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import {
+  Check,
+  CircleAlert,
+  LoaderCircle,
+  Image as ImageIcon,
+  Mic,
+  FileText,
+  Paperclip,
+  RefreshCw,
+  Trash2,
+} from "lucide-react-native";
 import { useSnackbar } from "../../../src/components/common/Snackbar";
+import { DestructiveButton } from "../../../src/components/common/DestructiveButton";
 import { useSyncStatusStore } from "../../../src/store/useSyncStatusStore";
 import { syncQueueStorage, type SyncQueueEntry } from "../../../src/storage/syncQueue";
 import {
@@ -16,12 +30,81 @@ import {
   type MediaUploadEntry,
 } from "../../../src/storage/mediaUploadQueueStorage";
 import { surveyDraftStore } from "../../../src/storage/surveyDraftStore";
+import { instrumentCacheStorage } from "../../../src/storage/instrumentCache";
+import { farmerCacheStorage } from "../../../src/storage/farmerCache";
 import { NetworkMonitor } from "../../../src/sync/NetworkMonitor";
 import { MediaUploadService } from "../../../src/sync/MediaUploadService";
 import { Fonts } from "../../../src/theme/fonts";
 import { useTheme } from "../../../src/theme/ThemeProvider";
 import type { ThemeColors } from "../../../src/theme/colors";
 import { logger } from "../../../src/lib/logger";
+
+function attachmentIcon(mimeType: string) {
+  if (mimeType.startsWith("image/")) return ImageIcon;
+  if (mimeType.startsWith("audio/")) return Mic;
+  return FileText;
+}
+
+interface EntryIdentity {
+  instrumentName: string | null;
+  farmerName: string | null;
+}
+
+// Los errores de validación y los adjuntos sin subir se identifican por
+// instrumento + agricultor + hora (spec 74, Fase 7) — el `surveyId` técnico
+// queda relegado al pie de la tarjeta, no como título. `SyncQueueEntry` y
+// `MediaUploadEntry` solo guardan el `surveyId`; hay que resolverlo contra
+// el borrador (mismo patrón que `drafts/index.tsx`) para llegar al nombre
+// real de instrumento y agricultor.
+async function resolveEntryIdentity(surveyId: string): Promise<EntryIdentity> {
+  const draft = await surveyDraftStore.loadDraft(surveyId).catch(() => null);
+  if (!draft) return { instrumentName: null, farmerName: null };
+
+  const [instrument, farmer] = await Promise.all([
+    instrumentCacheStorage.get(draft.instrumentId).catch(() => null),
+    draft.farmerId ? farmerCacheStorage.get(draft.farmerId).catch(() => null) : Promise.resolve(null),
+  ]);
+
+  return {
+    instrumentName: instrument?.name ?? null,
+    farmerName: farmer?.name ?? null,
+  };
+}
+
+function formatSize(bytes: number | null): string {
+  if (bytes == null) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${Math.round(kb)} KB`;
+  return `${(kb / 1024).toFixed(1)} MB`;
+}
+
+// Ícono girando con `Animated` en vez de `ActivityIndicator` (spec 74, mapa
+// de reemplazo). Copia local del mismo patrón que login/GPS/orquestador.
+function SpinningLoader({ size, color }: { size: number; color: string }) {
+  const rotation = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.timing(rotation, {
+        toValue: 1,
+        duration: 900,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      }),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [rotation]);
+
+  const spin = rotation.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
+
+  return (
+    <Animated.View style={{ transform: [{ rotate: spin }] }}>
+      <LoaderCircle size={size} color={color} />
+    </Animated.View>
+  );
+}
 
 export default function SyncScreen() {
   const {
@@ -37,6 +120,7 @@ export default function SyncScreen() {
 
   const [failedEntries, setFailedEntries] = useState<SyncQueueEntry[]>([]);
   const [failedMedia, setFailedMedia] = useState<MediaUploadEntry[]>([]);
+  const [identities, setIdentities] = useState<Record<string, EntryIdentity>>({});
   const [isSyncing, setIsSyncing] = useState(false);
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [retryingMediaId, setRetryingMediaId] = useState<string | null>(null);
@@ -51,6 +135,10 @@ export default function SyncScreen() {
     setFailedEntries(failed);
     const failedMediaEntries = await mediaUploadQueueStorage.listFailed();
     setFailedMedia(failedMediaEntries);
+
+    const surveyIds = [...new Set([...failed.map((e) => e.surveyId), ...failedMediaEntries.map((e) => e.surveyId)])];
+    const resolved = await Promise.all(surveyIds.map((id) => resolveEntryIdentity(id)));
+    setIdentities(Object.fromEntries(surveyIds.map((id, i) => [id, resolved[i]])));
   };
 
   useEffect(() => {
@@ -138,6 +226,7 @@ export default function SyncScreen() {
   const isBusy = isSyncing || Boolean(currentlySyncingId);
   const statusColor = isOnline ? colors.successFg : colors.dangerFg;
   const statusLabel = isOnline ? "En línea" : "Sin conexión";
+  const allDone = pendingCount === 0 && failedEntries.length === 0 && failedMedia.length === 0;
 
   return (
     <SafeAreaView style={styles.root} edges={[]}>
@@ -146,15 +235,13 @@ export default function SyncScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
-        <View style={styles.statusCard}>
+        <View style={[styles.statusCard, !isOnline && styles.statusCardOffline]}>
           <View style={styles.statusRow}>
             <View style={[styles.dot, { backgroundColor: statusColor }]} />
             <Text style={[styles.statusLabel, { color: statusColor }]}>
               {statusLabel}
             </Text>
-            {isBusy ? (
-              <ActivityIndicator size="small" color={colors.brand} style={{ marginLeft: 8 }} />
-            ) : null}
+            {isBusy ? <SpinningLoader size={16} color={colors.brand} /> : null}
           </View>
           {currentlySyncingId ? (
             <Text style={styles.syncingDetail} numberOfLines={1}>
@@ -170,34 +257,156 @@ export default function SyncScreen() {
         </View>
 
         <View style={styles.countersRow}>
-          <CounterCard label="Pendientes" value={pendingCount} color={colors.warningFg} />
-          <CounterCard label="Con error" value={failedEntries.length} color={colors.dangerFg} />
-          <CounterCard label="Adjuntos" value={failedMedia.length} color={colors.dangerFg} />
+          <CounterCard label="Pendientes" value={pendingCount} tone="warning" />
+          <CounterCard label="Con error" value={failedEntries.length} tone="danger" />
+          <CounterCard label="Adjuntos" value={failedMedia.length} tone="danger" />
         </View>
 
-        <Pressable
-          style={[styles.syncButton, (!isOnline || isBusy) && styles.syncButtonDisabled]}
-          onPress={handleSyncNow}
-          disabled={!isOnline || isBusy}
-        >
-          {isBusy ? (
-            <ActivityIndicator color={colors.brandForeground} />
-          ) : (
-            <Text style={styles.syncButtonText}>Sincronizar ahora</Text>
-          )}
-        </Pressable>
+        {allDone ? (
+          <View style={styles.allGood}>
+            <Check size={34} color={colors.successFg} strokeWidth={2.6} />
+            <Text style={styles.allGoodText}>Todo sincronizado</Text>
+            <Text style={styles.allGoodDesc}>No hay encuestas ni adjuntos en cola.</Text>
+          </View>
+        ) : (
+          <Pressable
+            style={[styles.syncButton, (!isOnline || isBusy) && styles.syncButtonDisabled]}
+            onPress={handleSyncNow}
+            disabled={!isOnline || isBusy}
+            accessibilityRole="button"
+          >
+            {isBusy ? (
+              <ActivityIndicator color={colors.brandForeground} />
+            ) : (
+              <>
+                <RefreshCw size={18} color={colors.brandForeground} strokeWidth={2.4} />
+                <Text style={styles.syncButtonText}>Sincronizar ahora</Text>
+              </>
+            )}
+          </Pressable>
+        )}
 
-        <Pressable
-          style={[styles.purgeButton, isPurging && styles.syncButtonDisabled]}
+        {failedEntries.length > 0 ? (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <CircleAlert size={15} color={colors.dangerFg} strokeWidth={2.4} />
+              <Text style={styles.sectionTitleDanger}>
+                ERRORES DE VALIDACIÓN ({failedEntries.length})
+              </Text>
+              <Pressable onPress={handleClearFailed} disabled={isClearingFailed}>
+                {isClearingFailed ? (
+                  <ActivityIndicator size="small" color={colors.dangerFg} />
+                ) : (
+                  <Text style={styles.clearFailedBtn}>Limpiar</Text>
+                )}
+              </Pressable>
+            </View>
+            {failedEntries.map((entry) => {
+              const identity = identities[entry.surveyId];
+              const who = [identity?.instrumentName, identity?.farmerName].filter(Boolean).join(" · ");
+              const when = (entry.lastAttemptAt ?? entry.createdAt).toLocaleString("es-CO", {
+                dateStyle: "short",
+                timeStyle: "short",
+              });
+              return (
+              <View key={entry.id} style={styles.failedCard}>
+                <View style={styles.failedCardBody}>
+                  <Text style={styles.failedId} numberOfLines={1}>
+                    {who || "Instrumento no disponible"}
+                  </Text>
+                  <Text style={styles.failedWhen}>{when}</Text>
+                  {entry.errorDetail ? (
+                    <Text style={styles.failedError}>{entry.errorDetail}</Text>
+                  ) : null}
+                </View>
+                <View style={styles.failedFooter}>
+                  <Text style={styles.failedAttempts} numberOfLines={1}>
+                    {entry.id} · {entry.attempts} intento{entry.attempts !== 1 ? "s" : ""}
+                  </Text>
+                  <Pressable
+                    style={styles.retryBtn}
+                    onPress={() => handleRetry(entry)}
+                    disabled={!isOnline || Boolean(retryingId)}
+                    accessibilityRole="button"
+                  >
+                    {retryingId === entry.id ? (
+                      <ActivityIndicator size="small" color={colors.dangerFg} />
+                    ) : (
+                      <>
+                        <RefreshCw size={15} color={colors.dangerFg} strokeWidth={2.4} />
+                        <Text style={styles.retryBtnText}>Reintentar</Text>
+                      </>
+                    )}
+                  </Pressable>
+                </View>
+              </View>
+              );
+            })}
+          </View>
+        ) : null}
+
+        {failedMedia.length > 0 ? (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Paperclip size={15} color={colors.warningFg} strokeWidth={2.4} />
+              <Text style={styles.sectionTitleWarning}>
+                ADJUNTOS SIN SUBIR ({failedMedia.length})
+              </Text>
+              <Pressable onPress={handleClearFailedMedia} disabled={isClearingFailedMedia}>
+                {isClearingFailedMedia ? (
+                  <ActivityIndicator size="small" color={colors.warningFg} />
+                ) : (
+                  <Text style={styles.clearFailedBtnWarning}>Limpiar</Text>
+                )}
+              </Pressable>
+            </View>
+            <View style={styles.attachmentsBox}>
+              {failedMedia.map((entry, index) => {
+                const Icon = attachmentIcon(entry.mimeType);
+                const identity = identities[entry.surveyId];
+                return (
+                  <View
+                    key={entry.id}
+                    style={[
+                      styles.attachmentRow,
+                      index !== failedMedia.length - 1 && styles.attachmentRowDivider,
+                    ]}
+                  >
+                    <Icon size={16} color={colors.warningFg} strokeWidth={2.2} />
+                    <View style={styles.attachmentInfo}>
+                      <Text style={styles.attachmentFile} numberOfLines={1}>
+                        {entry.originalFilename ?? entry.mimeType}
+                      </Text>
+                      <Text style={styles.attachmentMeta} numberOfLines={1}>
+                        {identity?.farmerName ?? identity?.instrumentName ?? "Sin identificar"}
+                      </Text>
+                    </View>
+                    <Text style={styles.attachmentSize}>{formatSize(entry.fileSizeBytes)}</Text>
+                    <Pressable
+                      style={styles.attachmentRetry}
+                      onPress={() => handleRetryMedia(entry)}
+                      disabled={!isOnline || Boolean(retryingMediaId)}
+                      accessibilityLabel="Reintentar adjunto"
+                    >
+                      {retryingMediaId === entry.id ? (
+                        <ActivityIndicator size="small" color={colors.warningFg} />
+                      ) : (
+                        <RefreshCw size={15} color={colors.warningFg} strokeWidth={2.4} />
+                      )}
+                    </Pressable>
+                  </View>
+                );
+              })}
+            </View>
+          </View>
+        ) : null}
+
+        <DestructiveButton
+          label="Limpiar historial sincronizado"
+          icon={Trash2}
           onPress={handlePurge}
-          disabled={isPurging}
-        >
-          {isPurging ? (
-            <ActivityIndicator color={colors.brand} />
-          ) : (
-            <Text style={styles.purgeButtonText}>Limpiar historial sincronizado</Text>
-          )}
-        </Pressable>
+          loading={isPurging}
+        />
         {purgeResult !== null ? (
           <Text style={styles.purgeResult}>
             {purgeResult === 0
@@ -205,123 +414,33 @@ export default function SyncScreen() {
               : `${purgeResult} registro${purgeResult !== 1 ? 's' : ''} eliminado${purgeResult !== 1 ? 's' : ''}.`}
           </Text>
         ) : null}
-
-        {failedEntries.length > 0 ? (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Errores de validación</Text>
-              <Pressable onPress={handleClearFailed} disabled={isClearingFailed}>
-                {isClearingFailed ? (
-                  <ActivityIndicator size="small" color={colors.dangerFg} />
-                ) : (
-                  <Text style={styles.clearFailedBtn}>Limpiar todo</Text>
-                )}
-              </Pressable>
-            </View>
-            <Text style={styles.sectionHint}>
-              Estos registros fueron rechazados por el servidor. Revisa el error
-              y toca &quot;Reintentar&quot; si crees que el problema fue temporal.
-            </Text>
-            {failedEntries.map((entry) => (
-              <View key={entry.id} style={styles.failedCard}>
-                <Text style={styles.failedId} numberOfLines={1}>
-                  Survey: {entry.surveyId}
-                </Text>
-                {entry.errorDetail ? (
-                  <Text style={styles.failedError}>{entry.errorDetail}</Text>
-                ) : null}
-                <View style={styles.failedFooter}>
-                  <Text style={styles.failedAttempts}>
-                    {entry.attempts} intento{entry.attempts !== 1 ? "s" : ""}
-                  </Text>
-                  <Pressable
-                    style={[
-                      styles.retryBtn,
-                      (!isOnline || Boolean(retryingId)) && styles.retryBtnDisabled,
-                    ]}
-                    onPress={() => handleRetry(entry)}
-                    disabled={!isOnline || Boolean(retryingId)}
-                  >
-                    {retryingId === entry.id ? (
-                      <ActivityIndicator size="small" color={colors.brandForeground} />
-                    ) : (
-                      <Text style={styles.retryBtnText}>Reintentar</Text>
-                    )}
-                  </Pressable>
-                </View>
-              </View>
-            ))}
-          </View>
-        ) : null}
-
-        {failedMedia.length > 0 ? (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Adjuntos sin subir</Text>
-              <Pressable onPress={handleClearFailedMedia} disabled={isClearingFailedMedia}>
-                {isClearingFailedMedia ? (
-                  <ActivityIndicator size="small" color={colors.dangerFg} />
-                ) : (
-                  <Text style={styles.clearFailedBtn}>Limpiar todo</Text>
-                )}
-              </Pressable>
-            </View>
-            <Text style={styles.sectionHint}>
-              Estas fotos o audios no se pudieron subir; la respuesta de texto
-              ya está sincronizada, pero el adjunto se perdería si no lo
-              reintentas.
-            </Text>
-            {failedMedia.map((entry) => (
-              <View key={entry.id} style={styles.failedCard}>
-                <Text style={styles.failedId} numberOfLines={1}>
-                  Survey: {entry.surveyId} · {entry.originalFilename ?? entry.mimeType}
-                </Text>
-                {entry.errorDetail ? (
-                  <Text style={styles.failedError}>{entry.errorDetail}</Text>
-                ) : null}
-                <View style={styles.failedFooter}>
-                  <Text style={styles.failedAttempts}>
-                    {entry.attempts} intento{entry.attempts !== 1 ? "s" : ""}
-                  </Text>
-                  <Pressable
-                    style={[
-                      styles.retryBtn,
-                      (!isOnline || Boolean(retryingMediaId)) && styles.retryBtnDisabled,
-                    ]}
-                    onPress={() => handleRetryMedia(entry)}
-                    disabled={!isOnline || Boolean(retryingMediaId)}
-                  >
-                    {retryingMediaId === entry.id ? (
-                      <ActivityIndicator size="small" color={colors.brandForeground} />
-                    ) : (
-                      <Text style={styles.retryBtnText}>Reintentar</Text>
-                    )}
-                  </Pressable>
-                </View>
-              </View>
-            ))}
-          </View>
-        ) : null}
-
-        {pendingCount === 0 && failedEntries.length === 0 && failedMedia.length === 0 ? (
-          <View style={styles.allGood}>
-            <Text style={styles.allGoodIcon}>✓</Text>
-            <Text style={styles.allGoodText}>Todo sincronizado</Text>
-          </View>
-        ) : null}
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-function CounterCard({ label, value, color }: { label: string; value: number; color: string }) {
+function CounterCard({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone: "warning" | "danger";
+}) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  // Los contadores se apagan a neutro en cero (spec 74, Fase 7) — un
+  // contador en 0 no debe leerse como una alerta.
+  const isZero = value === 0;
+  const fg = isZero ? colors.textMuted : tone === "warning" ? colors.warningFg : colors.dangerFg;
+  const bg = isZero ? colors.surface : tone === "warning" ? colors.warningBg : colors.dangerBg;
+  const bd = isZero ? colors.border : tone === "warning" ? colors.warningFg : colors.dangerFg;
 
   return (
-    <View style={styles.counterCard}>
-      <Text style={[styles.counterValue, { color }]}>{value}</Text>
-      <Text style={styles.counterLabel}>{label}</Text>
+    <View style={[styles.counterCard, { backgroundColor: bg, borderColor: bd }]}>
+      <Text style={[styles.counterValue, { color: fg }]}>{value}</Text>
+      <Text style={[styles.counterLabel, { color: fg }]}>{label}</Text>
     </View>
   );
 }
@@ -336,89 +455,117 @@ function createStyles(colors: ThemeColors) {
       borderBottomWidth: 1,
       borderBottomColor: colors.border,
     },
-    title: { fontSize: 17, fontFamily: Fonts.bold, color: colors.textPrimary },
-    content: { padding: 20, gap: 16 },
+    title: { fontSize: 19, fontFamily: Fonts.extraBold, color: colors.textPrimary, letterSpacing: -0.3 },
+    content: { padding: 14, gap: 14 },
 
     statusCard: {
       backgroundColor: colors.surface,
       borderRadius: 12,
-      padding: 16,
+      padding: 15,
       borderWidth: 1,
       borderColor: colors.border,
-      gap: 6,
     },
-    statusRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-    dot: { width: 10, height: 10, borderRadius: 5 },
-    statusLabel: { fontSize: 16, fontFamily: Fonts.semiBold },
-    syncingDetail: { fontSize: 13, fontFamily: Fonts.regular, color: colors.brand },
-    lastSync: { fontSize: 13, fontFamily: Fonts.regular, color: colors.textMuted },
+    statusCardOffline: { backgroundColor: colors.dangerBg, borderColor: colors.dangerFg },
+    statusRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+    dot: { width: 9, height: 9, borderRadius: 5 },
+    statusLabel: { flex: 1, fontSize: 13.5, fontFamily: Fonts.extraBold },
+    syncingDetail: { fontSize: 11.5, fontFamily: Fonts.regular, color: colors.brand, marginTop: 7 },
+    lastSync: { fontSize: 11.5, fontFamily: Fonts.regular, color: colors.textMuted, marginTop: 7 },
 
-    countersRow: { flexDirection: "row", gap: 12 },
+    countersRow: { flexDirection: "row", gap: 9 },
     counterCard: {
       flex: 1,
-      backgroundColor: colors.surface,
       borderRadius: 12,
-      padding: 16,
+      paddingVertical: 13,
+      paddingHorizontal: 10,
       alignItems: "center",
       borderWidth: 1,
-      borderColor: colors.border,
     },
-    counterValue: { fontSize: 32, fontFamily: Fonts.bold },
-    counterLabel: { fontSize: 13, fontFamily: Fonts.regular, color: colors.textMuted, marginTop: 2 },
+    counterValue: { fontSize: 26, fontFamily: Fonts.extraBold, lineHeight: 28, marginBottom: 6 },
+    counterLabel: { fontSize: 10, fontFamily: Fonts.bold, textAlign: "center", lineHeight: 13 },
 
     syncButton: {
-      backgroundColor: colors.brand,
-      borderRadius: 12,
-      paddingVertical: 18,
+      flexDirection: "row",
       alignItems: "center",
+      justifyContent: "center",
+      gap: 9,
+      backgroundColor: colors.brand,
+      borderRadius: 11,
+      paddingVertical: 16,
     },
     syncButtonDisabled: { backgroundColor: colors.textMuted },
-    syncButtonText: { fontSize: 17, fontFamily: Fonts.bold, color: colors.brandForeground },
+    syncButtonText: { fontSize: 15, fontFamily: Fonts.extraBold, color: colors.brandForeground },
 
-    purgeButton: {
-      backgroundColor: colors.surface,
-      borderRadius: 12,
-      paddingVertical: 14,
-      alignItems: "center",
-      borderWidth: 1,
-      borderColor: colors.borderStrong,
-    },
-    purgeButtonText: { fontSize: 15, fontFamily: Fonts.medium, color: colors.textPrimary },
-    purgeResult: { fontSize: 13, fontFamily: Fonts.regular, color: colors.textMuted, textAlign: "center" },
+    purgeResult: { fontSize: 12, fontFamily: Fonts.regular, color: colors.textMuted, textAlign: "center" },
 
     section: { gap: 10 },
-    sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-    sectionTitle: { fontSize: 15, fontFamily: Fonts.semiBold, color: colors.textPrimary },
-    clearFailedBtn: { fontSize: 14, fontFamily: Fonts.semiBold, color: colors.dangerFg },
-    sectionHint: { fontSize: 13, fontFamily: Fonts.regular, color: colors.textMuted, lineHeight: 18 },
+    sectionHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
+    sectionTitleDanger: { flex: 1, fontSize: 11.5, fontFamily: Fonts.extraBold, color: colors.dangerFg, letterSpacing: 0.5 },
+    sectionTitleWarning: { flex: 1, fontSize: 11.5, fontFamily: Fonts.extraBold, color: colors.warningFg, letterSpacing: 0.5 },
+    clearFailedBtn: { fontSize: 11, fontFamily: Fonts.bold, color: colors.dangerFg, textDecorationLine: "underline" },
+    clearFailedBtnWarning: { fontSize: 11, fontFamily: Fonts.bold, color: colors.warningFg, textDecorationLine: "underline" },
     failedCard: {
       backgroundColor: colors.dangerBg,
-      borderRadius: 10,
-      padding: 14,
+      borderRadius: 11,
       borderWidth: 1,
       borderColor: colors.dangerFg,
-      gap: 6,
+      overflow: "hidden",
     },
-    failedId: { fontSize: 13, fontFamily: Fonts.semiBold, color: colors.textPrimary },
-    failedError: { fontSize: 12, fontFamily: Fonts.regular, color: colors.dangerFg, lineHeight: 18 },
+    failedCardBody: { padding: 13, paddingBottom: 9, gap: 4 },
+    failedId: { fontSize: 13, fontFamily: Fonts.extraBold, color: colors.textPrimary },
+    failedWhen: { fontSize: 11, fontFamily: Fonts.regular, color: colors.textMuted, marginTop: 2 },
+    failedError: { fontSize: 12, fontFamily: Fonts.medium, color: colors.dangerFg, lineHeight: 17, marginTop: 6 },
     failedFooter: {
       flexDirection: "row",
-      justifyContent: "space-between",
       alignItems: "center",
-      marginTop: 4,
+      borderTopWidth: 1,
+      borderTopColor: colors.dangerFg,
     },
-    failedAttempts: { fontSize: 12, fontFamily: Fonts.regular, color: colors.textMuted },
+    failedAttempts: { flex: 1, fontSize: 9.5, fontFamily: Fonts.regular, color: colors.textMuted, paddingHorizontal: 14 },
     retryBtn: {
-      backgroundColor: colors.brand,
-      borderRadius: 8,
-      paddingVertical: 6,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 7,
+      paddingVertical: 12,
       paddingHorizontal: 14,
+      borderLeftWidth: 1,
+      borderLeftColor: colors.dangerFg,
     },
-    retryBtnDisabled: { backgroundColor: colors.textMuted },
-    retryBtnText: { fontSize: 13, fontFamily: Fonts.semiBold, color: colors.brandForeground },
+    retryBtnText: { fontSize: 12, fontFamily: Fonts.extraBold, color: colors.dangerFg },
 
-    allGood: { alignItems: "center", paddingVertical: 32, gap: 8 },
-    allGoodIcon: { fontSize: 40, color: colors.brand },
-    allGoodText: { fontSize: 16, fontFamily: Fonts.semiBold, color: colors.textPrimary },
+    attachmentsBox: {
+      borderWidth: 1,
+      borderColor: colors.warningFg,
+      borderRadius: 11,
+      backgroundColor: colors.warningBg,
+      overflow: "hidden",
+    },
+    attachmentRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 11,
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+      minHeight: 56,
+    },
+    attachmentRowDivider: { borderBottomWidth: 1, borderBottomColor: colors.warningFg },
+    attachmentInfo: { flex: 1, minWidth: 0 },
+    attachmentFile: { fontSize: 12.5, fontFamily: Fonts.bold, color: colors.textPrimary },
+    attachmentMeta: { fontSize: 10.5, fontFamily: Fonts.regular, color: colors.textMuted, marginTop: 2 },
+    attachmentSize: { fontSize: 10.5, fontFamily: Fonts.bold, color: colors.warningFg },
+    attachmentRetry: { padding: 4 },
+
+    allGood: {
+      alignItems: "center",
+      borderWidth: 1,
+      borderColor: colors.successFg,
+      borderRadius: 12,
+      backgroundColor: colors.successBg,
+      paddingVertical: 30,
+      paddingHorizontal: 20,
+      gap: 6,
+    },
+    allGoodText: { fontSize: 15, fontFamily: Fonts.extraBold, color: colors.successFg },
+    allGoodDesc: { fontSize: 12, fontFamily: Fonts.regular, color: colors.successFg, opacity: 0.85 },
   });
 }

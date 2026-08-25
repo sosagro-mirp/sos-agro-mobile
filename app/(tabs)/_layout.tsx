@@ -12,6 +12,7 @@ import { Pressable, StyleSheet, Text, useWindowDimensions, View, type TextStyle 
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuthStore } from "../../src/store/useAuthStore";
 import { useSyncStatusStore } from "../../src/store/useSyncStatusStore";
+import { useDraftCountStore } from "../../src/store/useDraftCountStore";
 import { Fonts } from "../../src/theme/fonts";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import type { ThemeColors } from "../../src/theme/colors";
@@ -19,7 +20,7 @@ import type { EffectiveTheme } from "../../src/theme/resolveTheme";
 import { AppText } from "../../src/components/common/AppText";
 import { ThemeToggle } from "../../src/components/common/ThemeToggle";
 import { resolveTabBarStyle, TAB_BAR_PADDING_TOP } from "../../src/lib/resolveTabBarStyle";
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 
 // Pantallas angostas (spec 74, Fase 3 — a pedido del usuario): por debajo de
 // este ancho el texto "Salir" se oculta y el botón queda solo-ícono, para
@@ -177,6 +178,14 @@ export default function TabsLayout() {
     () => resolveTabBarStyle({ bottomInset: insets.bottom, colors }),
     [insets.bottom, colors],
   );
+  const draftCount = useDraftCountStore((s) => s.count);
+
+  // Fuente reactiva del badge de Borradores (spec 74, deuda diferida de la
+  // Fase 3 a esta fase): sin esto el conteo solo se conocería después de
+  // visitar esa pestaña al menos una vez.
+  useEffect(() => {
+    useDraftCountStore.getState().refresh();
+  }, []);
 
   return (
     <View style={{ flex: 1 }}>
@@ -206,7 +215,16 @@ export default function TabsLayout() {
             title: "Borradores",
             tabBarLabel: renderTabLabel("Borradores", styles.tabLabel),
             tabBarIcon: ({ color, size }) => (
-              <FileText size={size} color={color} />
+              <View>
+                <FileText size={size} color={color} />
+                {draftCount > 0 ? (
+                  <View style={styles.tabBadge}>
+                    <Text style={styles.tabBadgeText} numberOfLines={1}>
+                      {draftCount > 99 ? "99+" : draftCount}
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
             ),
           }}
         />
@@ -403,6 +421,23 @@ function createStyles(colors: ThemeColors, effectiveTheme: EffectiveTheme) {
     tabLabel: {
       fontFamily: Fonts.semiBold,
       fontSize: 11,
+    },
+    tabBadge: {
+      position: "absolute",
+      top: -4,
+      right: -8,
+      minWidth: 15,
+      height: 15,
+      borderRadius: 8,
+      paddingHorizontal: 3,
+      backgroundColor: colors.dangerFg,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    tabBadgeText: {
+      fontFamily: Fonts.extraBold,
+      fontSize: 9,
+      color: "#FFFFFF",
     },
   });
 }
