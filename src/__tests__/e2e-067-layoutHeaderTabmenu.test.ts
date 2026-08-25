@@ -155,6 +155,15 @@ describe("resolveTabBarStyle — presentación", () => {
     expect(style.borderTopWidth).toBe(1);
   });
 
+  // Hallazgo de la ronda manual de la Fase 3 (spec 74, 2026-08-25): el tab
+  // bar no tenía padding horizontal y quedaba desalineado del resto de la
+  // app, que usa 20 px en header y listas.
+  it("usa el mismo padding horizontal que el resto de la app (20 px)", () => {
+    const style = resolveTabBarStyle({ bottomInset: NO_INSET, colors: lightColors });
+
+    expect(style.paddingHorizontal).toBe(20);
+  });
+
   it("es una función pura: mismas entradas, mismo resultado", () => {
     const a = resolveTabBarStyle({ bottomInset: GESTURE_INSET, colors: lightColors });
     const b = resolveTabBarStyle({ bottomInset: GESTURE_INSET, colors: lightColors });

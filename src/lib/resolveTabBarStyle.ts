@@ -11,6 +11,15 @@ export const TAB_BAR_CONTENT_HEIGHT = 48;
 export const TAB_BAR_PADDING_TOP = 6;
 
 /**
+ * Padding horizontal del tab bar — mismo valor que el resto de la app
+ * (header y listas de todas las pestañas usan 20 px). Sin esto, los ítems de
+ * la barra quedaban pegados al borde de la pantalla mientras el resto del
+ * contenido respeta ese margen, y la barra se leía desalineada (hallazgo de
+ * la ronda manual de la Fase 3, 2026-08-25).
+ */
+export const TAB_BAR_PADDING_HORIZONTAL = 20;
+
+/**
  * Padding inferior visual del tab bar, antes de sumar el inset del sistema.
  * Es el valor histórico (spec 67, hallazgo B): el proyecto lo fijaba como
  * único padding inferior, sobrescribiendo el que `@react-navigation/bottom-tabs`
@@ -29,6 +38,7 @@ export interface TabBarStyle {
   height: number;
   paddingTop: number;
   paddingBottom: number;
+  paddingHorizontal: number;
   backgroundColor: string;
   borderTopColor: string;
   borderTopWidth: number;
@@ -62,6 +72,7 @@ export function resolveTabBarStyle({
     height: TAB_BAR_CONTENT_HEIGHT + TAB_BAR_PADDING_TOP + TAB_BAR_PADDING_BOTTOM + safeInset,
     paddingTop: TAB_BAR_PADDING_TOP,
     paddingBottom: TAB_BAR_PADDING_BOTTOM + safeInset,
+    paddingHorizontal: TAB_BAR_PADDING_HORIZONTAL,
     backgroundColor: colors.surface,
     borderTopColor: colors.border,
     borderTopWidth: 1,
