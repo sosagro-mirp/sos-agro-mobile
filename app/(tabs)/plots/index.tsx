@@ -10,9 +10,12 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
+import { LandPlot, WifiOff } from "lucide-react-native";
 import { searchFarmers } from "../../../src/api/farmers";
 import { useSyncStatusStore } from "../../../src/store/useSyncStatusStore";
 import type { FarmerSearchResult } from "../../../src/types";
+import { AppText } from "../../../src/components/common/AppText";
+import { EmptyState } from "../../../src/components/common/EmptyState";
 import { Fonts } from "../../../src/theme/fonts";
 import { useTheme } from "../../../src/theme/ThemeProvider";
 import type { ThemeColors } from "../../../src/theme/colors";
@@ -52,30 +55,33 @@ export default function PlotsIndexScreen() {
 
   function handleSelect(farmer: FarmerSearchResult) {
     if (!farmer.farm?.farmId) return;
-    const farmName = farmer.farm.name;
     router.push({
       pathname: "/plots/farm/[farmId]",
-      params: { farmId: farmer.farm.farmId, farmName },
+      params: {
+        farmId: farmer.farm.farmId,
+        farmName: farmer.farm.name,
+        farmerName: farmer.name,
+      },
     });
   }
 
   return (
     <SafeAreaView style={styles.root} edges={[]}>
       <View style={styles.header}>
-        <Text style={styles.title}>Lotes</Text>
+        <AppText style={styles.title}>Lotes</AppText>
+        <Text style={styles.subtitle}>Busca un agricultor para ver o capturar los lotes de su finca</Text>
       </View>
 
       {!isOnline ? (
         <View style={styles.offlineBanner}>
+          <WifiOff size={14} color={colors.warningFg} strokeWidth={2.4} />
           <Text style={styles.offlineText}>
-            Sin conexión — la búsqueda de agricultores requiere conexión a internet.
+            Sin conexión — la búsqueda de agricultores requiere internet
           </Text>
         </View>
       ) : null}
 
       <View style={styles.body}>
-        <Text style={styles.label}>Busca un agricultor para ver o capturar lotes de su finca</Text>
-
         <TextInput
           style={[styles.searchInput, !isOnline && styles.searchInputDisabled]}
           placeholder="Nombre o número de documento"
@@ -94,7 +100,13 @@ export default function PlotsIndexScreen() {
           <Text style={styles.errorText}>{searchError}</Text>
         ) : null}
 
-        {results.length > 0 ? (
+        {!isOnline ? (
+          <EmptyState
+            icon={LandPlot}
+            title="Sin conexión no podés buscar"
+            description="Conéctate a internet para buscar un agricultor y ver o capturar los lotes de su finca."
+          />
+        ) : results.length > 0 ? (
           <FlatList
             data={results}
             keyExtractor={(item) => item.farmerId}
@@ -145,34 +157,33 @@ function createStyles(colors: ThemeColors) {
     root: { flex: 1, backgroundColor: colors.surfaceMuted },
 
     header: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
       paddingHorizontal: 20,
       paddingVertical: 14,
       backgroundColor: colors.surface,
       borderBottomWidth: 1,
       borderBottomColor: colors.border,
+      gap: 4,
     },
-    title: { fontSize: 17, fontFamily: Fonts.bold, color: colors.textPrimary },
+    title: { fontSize: 18, fontFamily: Fonts.extraBold, color: colors.textPrimary },
+    subtitle: { fontSize: 12.5, fontFamily: Fonts.regular, color: colors.textMuted },
 
     offlineBanner: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 7,
+      justifyContent: "center",
       backgroundColor: colors.warningBg,
       paddingHorizontal: 20,
       paddingVertical: 10,
       borderBottomWidth: 1,
       borderBottomColor: colors.warningFg,
     },
-    offlineText: { fontSize: 13, fontFamily: Fonts.regular, color: colors.warningFg },
+    offlineText: { fontSize: 12.5, fontFamily: Fonts.regular, color: colors.warningFg, flexShrink: 1 },
 
     body: {
       padding: 20,
       gap: 12,
-    },
-    label: {
-      fontSize: 14,
-      fontFamily: Fonts.regular,
-      color: colors.textMuted,
+      flex: 1,
     },
     searchInput: {
       height: 48,
@@ -188,6 +199,7 @@ function createStyles(colors: ThemeColors) {
     searchInputDisabled: {
       backgroundColor: colors.surfaceMuted,
       color: colors.textMuted,
+      opacity: 0.55,
     },
     spinner: { alignSelf: "center" },
     errorText: { fontSize: 13, fontFamily: Fonts.regular, color: colors.dangerFg },
