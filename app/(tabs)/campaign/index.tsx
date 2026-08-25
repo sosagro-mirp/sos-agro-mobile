@@ -325,7 +325,7 @@ function createStyles(colors: ThemeColors) {
     cardChevron: { marginTop: 2, flexShrink: 0 },
     campaignName: { flex: 1, fontSize: 17, fontFamily: Fonts.extraBold, color: colors.textPrimary },
     campaignDesc: {
-      fontSize: 14,
+      fontSize: 12,
       fontFamily: Fonts.regular,
       color: colors.textMuted,
       paddingHorizontal: 16,
