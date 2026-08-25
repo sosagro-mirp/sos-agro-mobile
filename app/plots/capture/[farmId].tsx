@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Modal,
   Pressable,
@@ -13,10 +12,13 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as Location from "expo-location";
+import { Trash2 } from "lucide-react-native";
 import { useFarmPlotCaptureStore } from "../../../src/store/useFarmPlotCaptureStore";
 import { farmPlotStore } from "../../../src/storage/farmPlotStore";
 import { syncQueueStorage } from "../../../src/storage/syncQueue";
 import { useSyncStatusStore } from "../../../src/store/useSyncStatusStore";
+import { useSnackbar } from "../../../src/components/common/Snackbar";
+import { ConfirmSheet } from "../../../src/components/common/ConfirmSheet";
 import { Fonts } from "../../../src/theme/fonts";
 import { useTheme } from "../../../src/theme/ThemeProvider";
 import type { ThemeColors } from "../../../src/theme/colors";
@@ -34,6 +36,7 @@ export default function CapturePlotScreen() {
   const { isOnline } = useSyncStatusStore();
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const { show: showSnackbar } = useSnackbar();
 
   const { points, startCapture, addPoint, removeLastPoint, reset } = useFarmPlotCaptureStore();
 
@@ -43,6 +46,7 @@ export default function CapturePlotScreen() {
   const [plotName, setPlotName] = useState("");
   const [plotDescription, setPlotDescription] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [discardConfirmVisible, setDiscardConfirmVisible] = useState(false);
 
   useEffect(() => {
     startCapture(farmId, farmName ?? "");
@@ -80,10 +84,10 @@ export default function CapturePlotScreen() {
       };
       addPoint(point);
     } catch {
-      Alert.alert(
-        "Error GPS",
-        "No se pudo obtener la ubicación. Asegúrate de tener señal GPS y vuelve a intentarlo.",
-      );
+      showSnackbar({
+        message: "No se pudo obtener la ubicación. Asegúrate de tener señal GPS y vuelve a intentarlo.",
+        variant: "error",
+      });
     } finally {
       setIsAcquiring(false);
     }
@@ -124,7 +128,7 @@ export default function CapturePlotScreen() {
       reset();
       router.back();
     } catch {
-      Alert.alert("Error", "No se pudo guardar el lote. Intenta de nuevo.");
+      showSnackbar({ message: "No se pudo guardar el lote. Intenta de nuevo.", variant: "error" });
     } finally {
       setIsSaving(false);
       setSaveModalVisible(false);
@@ -162,14 +166,7 @@ export default function CapturePlotScreen() {
         <Pressable
           onPress={() => {
             if (points.length > 0) {
-              Alert.alert(
-                "¿Descartar puntos?",
-                "Si vuelves atrás perderás los puntos capturados.",
-                [
-                  { text: "Cancelar", style: "cancel" },
-                  { text: "Descartar", style: "destructive", onPress: () => { reset(); router.back(); } },
-                ],
-              );
+              setDiscardConfirmVisible(true);
             } else {
               router.back();
             }
@@ -313,6 +310,25 @@ export default function CapturePlotScreen() {
           </View>
         </View>
       </Modal>
+
+      <ConfirmSheet
+        visible={discardConfirmVisible}
+        icon={Trash2}
+        tone="danger"
+        title="¿Descartar puntos?"
+        body="Si vuelves atrás perderás los puntos capturados."
+        secondaryAction={{ label: "Cancelar", onPress: () => setDiscardConfirmVisible(false) }}
+        destructiveAction={{
+          label: "Descartar",
+          icon: Trash2,
+          onPress: () => {
+            setDiscardConfirmVisible(false);
+            reset();
+            router.back();
+          },
+        }}
+        onRequestClose={() => setDiscardConfirmVisible(false)}
+      />
     </SafeAreaView>
   );
 }

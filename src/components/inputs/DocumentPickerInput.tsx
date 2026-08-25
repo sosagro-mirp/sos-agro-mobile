@@ -1,8 +1,9 @@
 import React, { useMemo, useState } from 'react';
-import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { FolderOpen, FileText, Trash2 } from 'lucide-react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
+import { useSnackbar } from '../common/Snackbar';
 import { useTheme } from '../../theme/ThemeProvider';
 import type { ThemeColors } from '../../theme/colors';
 import type { InstrumentDraftAnswer } from '../../types/instrument';
@@ -21,6 +22,7 @@ export function DocumentPickerInput({ questionId, value, filename, onChange }: P
   const [localFilename, setLocalFilename] = useState<string | undefined>(filename);
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const { show: showSnackbar } = useSnackbar();
 
   async function pickDocument(): Promise<void> {
     try {
@@ -41,7 +43,7 @@ export function DocumentPickerInput({ questionId, value, filename, onChange }: P
       setLocalFilename(asset.name);
       onChange({ questionId, mediaLocalPath: dest, mimeType: 'application/pdf' });
     } catch {
-      Alert.alert('Error', 'No se pudo seleccionar el documento.');
+      showSnackbar({ message: 'No se pudo seleccionar el documento.', variant: 'error' });
     }
   }
 

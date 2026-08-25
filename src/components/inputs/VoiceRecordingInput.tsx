@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Mic, Square, Play, Trash2, Check } from 'lucide-react-native';
 import {
   AudioModule,
@@ -10,6 +10,7 @@ import {
   useAudioRecorderState,
 } from 'expo-audio';
 import * as FileSystem from 'expo-file-system/legacy';
+import { useSnackbar } from '../common/Snackbar';
 import { useTheme } from '../../theme/ThemeProvider';
 import type { ThemeColors } from '../../theme/colors';
 import type { InstrumentDraftAnswer } from '../../types/instrument';
@@ -33,6 +34,7 @@ export function VoiceRecordingInput({ questionId, value, onChange }: Props): Rea
   const [state, setState] = useState<RecordingState>(value ? 'recorded' : 'idle');
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const { show: showSnackbar } = useSnackbar();
   const autoStoppedRef = useRef(false);
   const isRecordingRef = useRef(false);
 
@@ -106,7 +108,7 @@ export function VoiceRecordingInput({ questionId, value, onChange }: Props): Rea
     if (duration >= MAX_DURATION_SECONDS && !autoStoppedRef.current) {
       autoStoppedRef.current = true;
       finishRecording().catch(() => {
-        Alert.alert('Error', 'No se pudo guardar la grabación.');
+        showSnackbar({ message: 'No se pudo guardar la grabación.', variant: 'error' });
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -116,7 +118,7 @@ export function VoiceRecordingInput({ questionId, value, onChange }: Props): Rea
     try {
       const { granted } = await AudioModule.requestRecordingPermissionsAsync();
       if (!granted) {
-        Alert.alert('Permiso requerido', 'SOSAgro necesita acceso al micrófono para grabar audio.');
+        showSnackbar({ message: 'SOSAgro necesita acceso al micrófono para grabar audio.', variant: 'error' });
         return;
       }
 
@@ -127,7 +129,7 @@ export function VoiceRecordingInput({ questionId, value, onChange }: Props): Rea
       recorder.record();
       setState('recording');
     } catch {
-      Alert.alert('Error', 'No se pudo iniciar la grabación.');
+      showSnackbar({ message: 'No se pudo iniciar la grabación.', variant: 'error' });
     }
   }
 
@@ -135,7 +137,7 @@ export function VoiceRecordingInput({ questionId, value, onChange }: Props): Rea
     try {
       await finishRecording();
     } catch {
-      Alert.alert('Error', 'No se pudo guardar la grabación.');
+      showSnackbar({ message: 'No se pudo guardar la grabación.', variant: 'error' });
     }
   }
 
@@ -145,7 +147,7 @@ export function VoiceRecordingInput({ questionId, value, onChange }: Props): Rea
       await player.seekTo(0);
       player.play();
     } catch {
-      Alert.alert('Error', 'No se pudo reproducir la grabación.');
+      showSnackbar({ message: 'No se pudo reproducir la grabación.', variant: 'error' });
     }
   }
 

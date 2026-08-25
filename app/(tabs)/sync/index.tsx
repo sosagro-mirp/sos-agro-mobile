@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -9,6 +8,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useSnackbar } from "../../../src/components/common/Snackbar";
 import { useSyncStatusStore } from "../../../src/store/useSyncStatusStore";
 import { syncQueueStorage, type SyncQueueEntry } from "../../../src/storage/syncQueue";
 import {
@@ -33,6 +33,7 @@ export default function SyncScreen() {
   } = useSyncStatusStore();
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const { show: showSnackbar } = useSnackbar();
 
   const [failedEntries, setFailedEntries] = useState<SyncQueueEntry[]>([]);
   const [failedMedia, setFailedMedia] = useState<MediaUploadEntry[]>([]);
@@ -128,7 +129,7 @@ export default function SyncScreen() {
       await refreshData();
     } catch (err) {
       const message = err instanceof Error ? err.message : 'No se pudo reintentar el adjunto.';
-      Alert.alert('Error', message);
+      showSnackbar({ message, variant: 'error' });
     } finally {
       setRetryingMediaId(null);
     }

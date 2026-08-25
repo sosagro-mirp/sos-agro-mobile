@@ -22,6 +22,7 @@ import { initSentry, captureError } from "../src/lib/sentry";
 import { logger } from "../src/lib/logger";
 import { ChangeRequestBanner } from "../src/components/requests/ChangeRequestBanner";
 import { ThemeProvider, useTheme } from "../src/theme/ThemeProvider";
+import { SnackbarProvider } from "../src/components/common/Snackbar";
 
 initSentry();
 
@@ -172,10 +173,12 @@ export default function RootLayout() {
   return (
     <ThemeProvider>
       <QueryClientProvider client={queryClient}>
-        <SplashGate ready={fontsLoaded && !isRestoring && dbReady} />
-        <AuthGuard />
-        <ChangeRequestBanner />
-        <AppStack />
+        <SnackbarProvider>
+          <SplashGate ready={fontsLoaded && !isRestoring && dbReady} />
+          <AuthGuard />
+          <ChangeRequestBanner />
+          <AppStack />
+        </SnackbarProvider>
       </QueryClientProvider>
     </ThemeProvider>
   );

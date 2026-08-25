@@ -1,5 +1,7 @@
 import { useMemo } from 'react';
-import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { UserX, WifiOff, LoaderCircle } from 'lucide-react-native';
+import { AppText } from '../common/AppText';
 import { Fonts } from '../../theme/fonts';
 import { useTheme } from '../../theme/ThemeProvider';
 import type { ThemeColors } from '../../theme/colors';
@@ -10,9 +12,11 @@ interface DocumentCollisionModalProps {
   existingFarmerName: string;
   submittedName: string;
   isLoading: boolean;
-  // Spec 68, Fase 4 — offline solo hay red para "corregir el documento";
+  // Spec 68, Fase 4 — offline solo hay red para "corregir el documento":
   // confirmar que es la misma persona requiere resolverlo contra el
-  // backend, así que ese botón se oculta sin conexión.
+  // backend. Spec 74, Fase 6 (Decisión pendiente #3, 2026-08-25): antes ese
+  // botón se ocultaba del todo sin conexión; ahora se ve siempre pero
+  // deshabilitado con la etiqueta REQUIERE CONEXIÓN, siguiendo el mockup.
   allowSamePerson: boolean;
   onCorrectDocument: () => void;
   onSamePerson: () => void;
@@ -50,32 +54,61 @@ export function DocumentCollisionModal({
       onRequestClose={onRequestClose}
     >
       <View style={styles.overlay}>
-        <View style={styles.card}>
-          <Text style={styles.title}>Documento ya registrado</Text>
-          <Text style={styles.body}>
-            El documento <Text style={styles.bold}>{documentId}</Text> ya está registrado a nombre
-            de <Text style={styles.bold}>{existingFarmerName}</Text>, pero acabas de digitar{' '}
-            <Text style={styles.bold}>{submittedName}</Text>. ¿Qué deseas hacer?
-          </Text>
+        <View style={styles.sheet}>
+          <View style={styles.handle} />
+
+          <View style={styles.header}>
+            <View style={styles.iconWrapper}>
+              <UserX size={22} color={colors.warningFg} strokeWidth={2.2} />
+            </View>
+            <View style={styles.headerText}>
+              <AppText style={styles.title}>Ese documento ya está registrado</AppText>
+              <AppText style={styles.body}>
+                El documento <Text style={styles.bold}>{documentId}</Text> pertenece a otra
+                persona en el sistema.
+              </AppText>
+            </View>
+          </View>
+
+          <View style={styles.compareBox}>
+            <View style={styles.compareRow}>
+              <Text style={styles.compareLabel}>EN EL SISTEMA</Text>
+              <Text style={styles.compareValue} numberOfLines={1}>{existingFarmerName}</Text>
+            </View>
+            <View style={styles.compareRow}>
+              <Text style={styles.compareLabel}>ESTÁS REGISTRANDO</Text>
+              <Text style={styles.compareValue} numberOfLines={1}>{submittedName}</Text>
+            </View>
+          </View>
 
           {isLoading ? (
-            <ActivityIndicator size="large" color={colors.brand} style={styles.spinner} />
+            <LoaderCircle size={28} color={colors.brand} style={styles.spinner} />
           ) : (
-            <>
-              <Pressable style={[styles.button, styles.primary]} onPress={onCorrectDocument}>
-                <Text style={[styles.buttonText, styles.primaryText]}>Corregir el documento</Text>
+            <View style={styles.actions}>
+              <Pressable style={styles.buttonPrimary} onPress={onCorrectDocument} accessibilityRole="button">
+                <AppText style={styles.buttonPrimaryText}>Corregir el documento</AppText>
               </Pressable>
 
-              {allowSamePerson ? (
-                <Pressable style={[styles.button, styles.secondary]} onPress={onSamePerson}>
-                  <Text style={[styles.buttonText, styles.secondaryText]}>Es la misma persona</Text>
-                </Pressable>
-              ) : null}
-
-              <Pressable style={[styles.button, styles.secondary]} onPress={onSeparatePerson}>
-                <Text style={[styles.buttonText, styles.secondaryText]}>Registrar aparte</Text>
+              <Pressable style={styles.buttonSecondary} onPress={onSeparatePerson} accessibilityRole="button">
+                <AppText style={styles.buttonSecondaryText}>Registrar aparte</AppText>
               </Pressable>
-            </>
+
+              <Pressable
+                style={[styles.samePersonRow, !allowSamePerson && styles.samePersonRowDisabled]}
+                onPress={allowSamePerson ? onSamePerson : undefined}
+                disabled={!allowSamePerson}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: !allowSamePerson }}
+              >
+                <AppText style={styles.samePersonText}>Es la misma persona</AppText>
+                {!allowSamePerson ? (
+                  <View style={styles.samePersonBadge}>
+                    <WifiOff size={13} color={colors.textMuted} strokeWidth={2.4} />
+                    <Text style={styles.samePersonBadgeText}>REQUIERE CONEXIÓN</Text>
+                  </View>
+                ) : null}
+              </Pressable>
+            </View>
           )}
         </View>
       </View>
@@ -87,31 +120,84 @@ function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
     overlay: {
       flex: 1,
-      backgroundColor: 'rgba(0,0,0,0.5)',
-      justifyContent: 'center',
-      alignItems: 'center',
-      padding: 24,
+      backgroundColor: 'rgba(0,0,0,0.55)',
+      justifyContent: 'flex-end',
     },
-    card: {
-      width: '100%',
+    sheet: {
       backgroundColor: colors.surface,
-      borderRadius: 16,
-      padding: 24,
-      gap: 12,
+      borderTopLeftRadius: 20,
+      borderTopRightRadius: 20,
+      paddingTop: 12,
+      paddingHorizontal: 18,
+      paddingBottom: 20,
     },
-    title: { fontSize: 18, fontFamily: Fonts.bold, color: colors.textPrimary },
-    body: { fontSize: 15, fontFamily: Fonts.regular, color: colors.textPrimary, lineHeight: 22 },
-    bold: { fontFamily: Fonts.semiBold },
-    spinner: { marginVertical: 16 },
-    button: {
+    handle: {
+      alignSelf: 'center',
+      width: 38,
+      height: 4,
+      borderRadius: 99,
+      backgroundColor: colors.borderStrong,
+      marginBottom: 20,
+    },
+    header: { flexDirection: 'row', gap: 13, marginBottom: 16 },
+    iconWrapper: {
+      width: 44,
+      height: 44,
       borderRadius: 12,
-      paddingVertical: 16,
+      backgroundColor: colors.warningBg,
       alignItems: 'center',
+      justifyContent: 'center',
+      flexShrink: 0,
     },
-    primary: { backgroundColor: colors.brand },
-    secondary: { backgroundColor: colors.surfaceMuted, borderWidth: 1, borderColor: colors.border },
-    buttonText: { fontSize: 15, fontFamily: Fonts.semiBold, color: colors.brandForeground },
-    primaryText: { color: colors.brandForeground },
-    secondaryText: { color: colors.textPrimary },
+    headerText: { flex: 1, minWidth: 0 },
+    title: { fontSize: 16.5, fontFamily: Fonts.bold, color: colors.textPrimary, lineHeight: 21, marginBottom: 7 },
+    body: { fontSize: 12.5, fontFamily: Fonts.regular, color: colors.textMuted, lineHeight: 19 },
+    bold: { fontFamily: Fonts.semiBold, color: colors.textPrimary },
+    compareBox: {
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 11,
+      backgroundColor: colors.surfaceMuted,
+      padding: 13,
+      gap: 8,
+      marginBottom: 18,
+    },
+    compareRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 12 },
+    compareLabel: { fontSize: 10.5, fontFamily: Fonts.bold, color: colors.textMuted },
+    compareValue: { flex: 1, fontSize: 12.5, fontFamily: Fonts.bold, color: colors.textPrimary, textAlign: 'right' },
+    spinner: { marginVertical: 16, alignSelf: 'center' },
+    actions: { gap: 10 },
+    buttonPrimary: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.brand,
+      borderRadius: 11,
+      paddingVertical: 17,
+    },
+    buttonPrimaryText: { fontSize: 15, fontFamily: Fonts.bold, color: colors.brandForeground },
+    buttonSecondary: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderColor: colors.borderStrong,
+      borderRadius: 11,
+      paddingVertical: 15,
+    },
+    buttonSecondaryText: { fontSize: 14, fontFamily: Fonts.semiBold, color: colors.textPrimary },
+    samePersonRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 9,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 11,
+      paddingVertical: 15,
+      paddingHorizontal: 15,
+    },
+    samePersonRowDisabled: { opacity: 0.6 },
+    samePersonText: { fontSize: 14, fontFamily: Fonts.semiBold, color: colors.textMuted },
+    samePersonBadge: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+    samePersonBadgeText: { fontSize: 10, fontFamily: Fonts.bold, color: colors.textMuted },
   });
 }
