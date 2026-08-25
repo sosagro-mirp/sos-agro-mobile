@@ -14,6 +14,7 @@ import { surveyDraftStore, type SurveyDraft } from "../../../src/storage/surveyD
 import { instrumentCacheStorage } from "../../../src/storage/instrumentCache";
 import { farmerCacheStorage } from "../../../src/storage/farmerCache";
 import { useInstrumentSurveyStore } from "../../../src/store/useInstrumentSurveyStore";
+import { useDraftCountStore } from "../../../src/store/useDraftCountStore";
 import { AppText } from "../../../src/components/common/AppText";
 import { DestructiveButton } from "../../../src/components/common/DestructiveButton";
 import { ConfirmSheet } from "../../../src/components/common/ConfirmSheet";
@@ -69,6 +70,9 @@ export default function DraftsScreen() {
           setError(err instanceof Error ? err.message : "Error cargando borradores")
         )
         .finally(() => setIsLoading(false));
+      // Fuente reactiva del badge en la pestaña (spec 74, deuda diferida de
+      // la Fase 3 a esta fase) — se refresca en cada foco, no solo acá.
+      useDraftCountStore.getState().refresh();
     }, [])
   );
 
@@ -103,6 +107,7 @@ export default function DraftsScreen() {
         await surveyDraftStore.deleteDraft(draft.surveyId);
         setDrafts((prev) => prev.filter((d: EnrichedDraft) => d.surveyId !== draft.surveyId));
         setDeletingId(null);
+        useDraftCountStore.getState().refresh();
       },
     });
   };
@@ -116,6 +121,7 @@ export default function DraftsScreen() {
         await Promise.all(drafts.map((d) => surveyDraftStore.deleteDraft(d.surveyId)));
         setDrafts([]);
         setIsLoading(false);
+        useDraftCountStore.getState().refresh();
       },
     });
   };
