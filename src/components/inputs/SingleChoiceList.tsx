@@ -272,7 +272,6 @@ function createStyles(colors: ThemeColors) {
       paddingVertical: 12,
       minHeight: 64,
       margin: 10,
-      marginTop: 0,
     },
     otherInputFocused: {
       borderColor: colors.brand,
