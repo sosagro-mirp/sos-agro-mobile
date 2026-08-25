@@ -341,7 +341,11 @@ function createStyles(colors: ThemeColors) {
       borderTopColor: colors.border,
       backgroundColor: colors.surfaceMuted,
     },
-    cardMeta: { flex: 1, fontSize: 11.5, fontFamily: Fonts.regular, color: colors.textMuted, textAlign: "right" },
+    // Sin `flex: 1` + `textAlign: "right"`: eso estiraba el texto al borde
+    // derecho de la card y dejaba un hueco enorme entre el badge y el texto
+    // en vez del gap de 10 px real de `cardFooter` (hallazgo de la ronda
+    // manual, spec 74, 2026-08-25). Ahora queda justo después del badge.
+    cardMeta: { fontSize: 11.5, fontFamily: Fonts.regular, color: colors.textMuted },
 
     badge: { flexDirection: "row", alignItems: "center", gap: 5, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
     badgeCached: { backgroundColor: colors.successBg },
