@@ -144,8 +144,8 @@ const tabButtonStyles = StyleSheet.create({
     // fila de botones) — top:0 quedaba pegado al borde del botón, no al
     // borde real de la barra (hallazgo TC-074-12, 2026-08-24).
     top: -TAB_BAR_PADDING_TOP,
-    left: "22%",
-    right: "22%",
+    left: 0,
+    right: 0,
     height: 3.5,
     borderRadius: 99,
   },
