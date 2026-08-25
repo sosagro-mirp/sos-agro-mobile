@@ -59,6 +59,37 @@ function AuthGuard() {
   return null;
 }
 
+// Mismo motivo que `SplashGate`: `RootLayout` renderiza `<ThemeProvider>`,
+// así que no puede leer `useTheme()` en su propio cuerpo (el provider todavía
+// no montó). Vive dentro de `<ThemeProvider>` solo para poder aplicar
+// `contentStyle` al Stack — sin esto, cada transición entre pantallas (ej.
+// pregunta → pregunta, spec 74 Fase 4) mostraba un flash del blanco por
+// defecto de `react-native-screens` antes de que el fondo real de cada
+// pantalla se pintara, mucho más visible en tema oscuro.
+function AppStack() {
+  const { colors } = useTheme();
+
+  return (
+    <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.surfaceMuted } }}>
+      <Stack.Screen name="login" />
+      <Stack.Screen name="index" />
+      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      <Stack.Screen name="campaign/[id]/pre-survey" />
+      <Stack.Screen name="campaign/[id]/session/[sessionId]/orchestrator" />
+      <Stack.Screen name="campaign/[id]/session/[sessionId]/completed" />
+      <Stack.Screen name="instrument/[id]/download" />
+      <Stack.Screen name="instrument/[id]/start" />
+      <Stack.Screen
+        name="instrument/[id]/question/[index]"
+        options={{ animation: "none" }}
+      />
+      <Stack.Screen name="instrument/[id]/review" />
+      <Stack.Screen name="instrument/[id]/completed" />
+      <Stack.Screen name="dev/logs" />
+    </Stack>
+  );
+}
+
 // Oculta el splash solo cuando fuentes, DB, sesión Y tema están listos. Vive
 // dentro de <ThemeProvider> para poder leer `restored`: mantener el splash
 // hasta restaurar el tema es lo que evita el flash claro→oscuro, en lugar del
@@ -144,23 +175,7 @@ export default function RootLayout() {
         <SplashGate ready={fontsLoaded && !isRestoring && dbReady} />
         <AuthGuard />
         <ChangeRequestBanner />
-        <Stack screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="login" />
-          <Stack.Screen name="index" />
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen name="campaign/[id]/pre-survey" />
-          <Stack.Screen name="campaign/[id]/session/[sessionId]/orchestrator" />
-          <Stack.Screen name="campaign/[id]/session/[sessionId]/completed" />
-          <Stack.Screen name="instrument/[id]/download" />
-          <Stack.Screen name="instrument/[id]/start" />
-          <Stack.Screen
-            name="instrument/[id]/question/[index]"
-            options={{ animation: "none" }}
-          />
-          <Stack.Screen name="instrument/[id]/review" />
-          <Stack.Screen name="instrument/[id]/completed" />
-          <Stack.Screen name="dev/logs" />
-        </Stack>
+        <AppStack />
       </QueryClientProvider>
     </ThemeProvider>
   );

@@ -20,8 +20,7 @@ export const RequiredFieldIndicator: React.FC<RequiredFieldIndicatorProps> = ({
 
   return (
     <View style={styles.row}>
-      <Text style={styles.asterisk}>*</Text>
-      <Text style={styles.text}>Requerido</Text>
+      <Text style={styles.text}>* REQUERIDO</Text>
     </View>
   );
 };
@@ -29,21 +28,13 @@ export const RequiredFieldIndicator: React.FC<RequiredFieldIndicatorProps> = ({
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
     row: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 4,
-    },
-    asterisk: {
-      fontFamily: Fonts.bold,
-      fontSize: 13,
-      color: colors.dangerFg,
-      lineHeight: 18,
+      marginBottom: 14,
     },
     text: {
-      fontFamily: Fonts.regular,
-      fontSize: 13,
+      fontFamily: Fonts.extraBold,
+      fontSize: 11,
       color: colors.dangerFg,
-      lineHeight: 18,
+      letterSpacing: 0.4,
     },
   });
 }

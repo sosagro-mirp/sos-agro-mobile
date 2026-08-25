@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Alert, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { Camera, Images, X } from 'lucide-react-native';
+import { Camera, Images, Trash2, Check, ImageIcon } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import { useTheme } from '../../theme/ThemeProvider';
@@ -97,15 +97,26 @@ export function ImageCaptureInput({ questionId, value, onChange }: Props): React
   if (localUri) {
     return (
       <View style={styles.container}>
-        <Image source={{ uri: localUri }} style={styles.preview} resizeMode="cover" />
+        <View style={styles.card}>
+          <Image source={{ uri: localUri }} style={styles.preview} resizeMode="cover" />
+          <View style={styles.savedFooter}>
+            <Check size={15} color={colors.successFg} strokeWidth={2.6} />
+            <Text style={styles.savedFooterText}>Guardada en el dispositivo</Text>
+            <Text style={styles.savedFooterHint}>Sube al sincronizar</Text>
+          </View>
+        </View>
         <View style={styles.actions}>
-          <TouchableOpacity style={styles.secondaryButton} onPress={pickFromCamera}>
-            <Camera size={16} color={colors.textPrimary} />
-            <Text style={styles.secondaryButtonText}>Reemplazar</Text>
+          <TouchableOpacity style={styles.replaceButton} onPress={pickFromCamera} accessibilityRole="button">
+            <Camera size={17} color={colors.textPrimary} strokeWidth={2.2} />
+            <Text style={styles.replaceButtonText}>Reemplazar</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.secondaryButton} onPress={removeImage}>
-            <X size={16} color={colors.dangerFg} />
-            <Text style={[styles.secondaryButtonText, styles.deleteText]}>Eliminar</Text>
+          <TouchableOpacity
+            style={styles.deleteButton}
+            onPress={removeImage}
+            accessibilityRole="button"
+            accessibilityLabel="Eliminar foto"
+          >
+            <Trash2 size={18} color={colors.dangerFg} strokeWidth={2.2} />
           </TouchableOpacity>
         </View>
       </View>
@@ -114,13 +125,16 @@ export function ImageCaptureInput({ questionId, value, onChange }: Props): React
 
   return (
     <View style={styles.container}>
-      <TouchableOpacity style={styles.primaryButton} onPress={pickFromCamera}>
-        <Camera size={22} color={colors.brandForeground} />
+      <View style={styles.emptyCard}>
+        <ImageIcon size={34} color={colors.textMuted} strokeWidth={1.6} />
+      </View>
+      <TouchableOpacity style={styles.primaryButton} onPress={pickFromCamera} accessibilityRole="button">
+        <Camera size={22} color={colors.brandForeground} strokeWidth={2.2} />
         <Text style={styles.primaryButtonText}>Tomar foto</Text>
       </TouchableOpacity>
-      <TouchableOpacity style={styles.secondaryButton} onPress={pickFromGallery}>
-        <Images size={16} color={colors.textPrimary} />
-        <Text style={styles.secondaryButtonText}>Elegir de galería</Text>
+      <TouchableOpacity style={styles.replaceButton} onPress={pickFromGallery} accessibilityRole="button">
+        <Images size={17} color={colors.textPrimary} strokeWidth={2.2} />
+        <Text style={styles.replaceButtonText}>Elegir de galería</Text>
       </TouchableOpacity>
     </View>
   );
@@ -128,36 +142,68 @@ export function ImageCaptureInput({ questionId, value, onChange }: Props): React
 
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
-    container: { width: '100%', gap: 12 },
+    container: { width: '100%', gap: 10 },
+    card: {
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 12,
+      overflow: 'hidden',
+      backgroundColor: colors.surfaceMuted,
+    },
     preview: {
       width: '100%',
       height: 220,
-      borderRadius: 12,
       backgroundColor: colors.surfaceMuted,
+    },
+    savedFooter: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 9,
+      paddingHorizontal: 13,
+      paddingVertical: 11,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+    },
+    savedFooterText: { flex: 1, fontSize: 11.5, fontWeight: '600', color: colors.successFg },
+    savedFooterHint: { fontSize: 10.5, color: colors.textMuted },
+    emptyCard: {
+      height: 220,
+      borderRadius: 12,
+      backgroundColor: colors.border,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     primaryButton: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: colors.brand,
-      borderRadius: 12,
-      paddingVertical: 16,
-      gap: 10,
+      borderRadius: 11,
+      paddingVertical: 17,
+      gap: 9,
     },
-    primaryButtonText: { color: colors.brandForeground, fontSize: 16, fontWeight: '600' },
+    primaryButtonText: { color: colors.brandForeground, fontSize: 15.5, fontWeight: '800' },
     actions: { flexDirection: 'row', gap: 10 },
-    secondaryButton: {
+    replaceButton: {
       flex: 1,
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
-      borderWidth: 1.5,
+      borderWidth: 1,
       borderColor: colors.borderStrong,
-      borderRadius: 10,
-      paddingVertical: 12,
-      gap: 6,
+      borderRadius: 11,
+      paddingVertical: 15,
+      gap: 8,
     },
-    secondaryButtonText: { fontSize: 14, color: colors.textPrimary },
-    deleteText: { color: colors.dangerFg },
+    replaceButtonText: { fontSize: 13.5, fontWeight: '700', color: colors.textPrimary },
+    deleteButton: {
+      width: 56,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderColor: colors.dangerFg,
+      backgroundColor: colors.dangerBg,
+      borderRadius: 11,
+    },
   });
 }
