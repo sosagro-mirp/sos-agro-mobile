@@ -1,7 +1,8 @@
 import { useMemo } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Check } from "lucide-react-native";
 import { useCampaignSessionStore } from "../../../../../src/store/useCampaignSessionStore";
 import { Fonts } from "../../../../../src/theme/fonts";
 import { useTheme } from "../../../../../src/theme/ThemeProvider";
@@ -22,7 +23,7 @@ export default function CampaignCompletedScreen() {
     <SafeAreaView style={styles.root}>
       <View style={styles.content}>
         <View style={styles.icon}>
-          <Text style={styles.iconText}>✓</Text>
+          <Check size={42} color={colors.successFg} strokeWidth={2.8} />
         </View>
         <Text style={styles.title}>Visita completada</Text>
         <Text style={styles.campaignName}>{campaign?.name ?? ""}</Text>
@@ -30,9 +31,12 @@ export default function CampaignCompletedScreen() {
           Todos los pasos han sido registrados. Los datos se enviarán al servidor
           cuando haya conexión disponible.
         </Text>
-        <Pressable style={styles.button} onPress={handleFinish}>
+      </View>
+
+      <View style={styles.footer}>
+        <TouchableOpacity style={styles.button} onPress={handleFinish} accessibilityRole="button">
           <Text style={styles.buttonText}>Volver al inicio</Text>
-        </Pressable>
+        </TouchableOpacity>
       </View>
     </SafeAreaView>
   );
@@ -45,35 +49,47 @@ function createStyles(colors: ThemeColors) {
       flex: 1,
       justifyContent: "center",
       alignItems: "center",
-      paddingHorizontal: 32,
-      gap: 16,
+      paddingHorizontal: 24,
     },
     icon: {
-      width: 72,
-      height: 72,
-      borderRadius: 36,
-      backgroundColor: colors.brand,
+      width: 88,
+      height: 88,
+      borderRadius: 44,
+      backgroundColor: colors.successBg,
+      borderWidth: 2,
+      borderColor: colors.successFg,
       alignItems: "center",
       justifyContent: "center",
-      marginBottom: 8,
+      marginBottom: 24,
     },
-    iconText: { fontSize: 36, color: colors.brandForeground },
-    title: { fontSize: 26, fontFamily: Fonts.bold, color: colors.textPrimary },
-    campaignName: { fontSize: 15, fontFamily: Fonts.semiBold, color: colors.textMuted },
+    title: {
+      fontSize: 24,
+      fontFamily: Fonts.extraBold,
+      color: colors.textPrimary,
+      letterSpacing: -0.3,
+      marginBottom: 10,
+    },
+    campaignName: { fontSize: 13, fontFamily: Fonts.semiBold, color: colors.textMuted, marginBottom: 16 },
     description: {
-      fontSize: 15,
+      fontSize: 13,
       fontFamily: Fonts.regular,
       color: colors.textMuted,
       textAlign: "center",
-      lineHeight: 22,
+      lineHeight: 20,
+    },
+    footer: {
+      padding: 14,
+      backgroundColor: colors.surface,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
     },
     button: {
+      alignItems: "center",
+      justifyContent: "center",
       backgroundColor: colors.brand,
-      borderRadius: 12,
-      paddingVertical: 18,
-      paddingHorizontal: 48,
-      marginTop: 12,
+      borderRadius: 11,
+      paddingVertical: 17,
     },
-    buttonText: { fontSize: 17, fontFamily: Fonts.bold, color: colors.brandForeground },
+    buttonText: { fontSize: 15.5, fontFamily: Fonts.extraBold, color: colors.brandForeground },
   });
 }
