@@ -225,6 +225,7 @@ function createStyles(colors: ThemeColors) {
       minHeight: 48,
       borderRadius: 11,
       paddingHorizontal: 16,
+      paddingVertical: 14,
     },
     buttonPrimary: { backgroundColor: colors.brand },
     buttonSecondary: { borderWidth: 1, borderColor: colors.borderStrong },
