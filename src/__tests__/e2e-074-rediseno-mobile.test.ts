@@ -158,3 +158,87 @@ describe('spec 74 · Fase 8 — geometría del polígono', () => {
     }
   });
 });
+
+// ─── Fase 10 · Breakpoint de tablet ──────────────────────────────────────────
+
+describe('spec 74 · Fase 10 — breakpoint de tablet', () => {
+  it('clasifica como "phone" por debajo de 720 dp lógicos', () => {
+    const { resolveBreakpoint } = require('../lib/resolveBreakpoint');
+
+    expect(resolveBreakpoint(375)).toBe('phone');
+    expect(resolveBreakpoint(719)).toBe('phone');
+  });
+
+  it('clasifica como "tablet" a partir de 720 dp lógicos, inclusive', () => {
+    const { resolveBreakpoint } = require('../lib/resolveBreakpoint');
+
+    expect(resolveBreakpoint(720)).toBe('tablet');
+    expect(resolveBreakpoint(1024)).toBe('tablet');
+  });
+
+  it('exporta el umbral como constante para que la UI no lo duplique', () => {
+    const { TABLET_BREAKPOINT } = require('../lib/resolveBreakpoint');
+
+    expect(TABLET_BREAKPOINT).toBe(720);
+  });
+});
+
+// ─── Fase 10 · Razón de visibilidad de las condicionales (panel de contexto) ─
+
+describe('spec 74 · Fase 10 — razón de condicionales', () => {
+  const triggerYesNo = {
+    questionId: 'q1',
+    text: '¿Tiene acceso a internet?',
+    isRequired: true,
+    order: 0,
+    type: { typeId: 't1', name: 'yes_no' },
+    options: [],
+  };
+
+  const triggerSingleChoice = {
+    questionId: 'q2',
+    text: '¿Qué tipo de cultivo tiene?',
+    isRequired: true,
+    order: 1,
+    type: { typeId: 't2', name: 'single_choice' },
+    options: [
+      { optionId: 'opt-cafe', text: 'Café', value: 'cafe' },
+      { optionId: 'opt-cacao', text: 'Cacao', value: 'cacao' },
+    ],
+  };
+
+  it('devuelve null si la pregunta no es condicional', () => {
+    const { resolveConditionReason } = require('../lib/resolveConditionReason');
+    const plain = { ...triggerYesNo, questionId: 'q3', conditionQuestionId: null, conditionValue: null };
+
+    expect(resolveConditionReason(plain, [triggerYesNo], {})).toBeNull();
+  });
+
+  it('arma la razón para una condición yes_no', () => {
+    const { resolveConditionReason } = require('../lib/resolveConditionReason');
+    const conditional = {
+      ...triggerYesNo,
+      questionId: 'q4',
+      conditionQuestionId: 'q1',
+      conditionValue: 'true',
+    };
+
+    const reason = resolveConditionReason(conditional, [triggerYesNo, conditional], {});
+    expect(reason).toContain('Sí');
+    expect(reason).toContain('¿Tiene acceso a internet?');
+  });
+
+  it('arma la razón para una condición single_choice, usando el texto de la opción', () => {
+    const { resolveConditionReason } = require('../lib/resolveConditionReason');
+    const conditional = {
+      ...triggerSingleChoice,
+      questionId: 'q5',
+      conditionQuestionId: 'q2',
+      conditionValue: 'opt-cafe',
+    };
+
+    const reason = resolveConditionReason(conditional, [triggerSingleChoice, conditional], {});
+    expect(reason).toContain('Café');
+    expect(reason).toContain('¿Qué tipo de cultivo tiene?');
+  });
+});

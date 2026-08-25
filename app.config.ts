@@ -9,7 +9,14 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     name: 'Sos Agro 4.C',
     slug: 'sosagro-characterization',
     version: '1.0.0',
-    orientation: 'portrait',
+    // Spec 74, Fase 10 (aprobada 2026-08-26): antes 'portrait' bloqueaba
+    // rotación en toda la app. Tablet necesita landscape para el layout de
+    // dos paneles; sin expo-screen-orientation (dependencia nueva que este
+    // spec no puede agregar) no hay forma de bloquear la orientación por
+    // pantalla, así que se permite rotación libre en toda la app y las
+    // pantallas delicadas (captura GPS, preguntas con teclado) se diseñan
+    // para tolerar ambas orientaciones en vez de bloquear una.
+    orientation: 'default',
     icon: './assets/icon.png',
     userInterfaceStyle: 'light',
     scheme: 'sosagro',
@@ -20,7 +27,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       fallbackToCacheTimeout: 0,
     },
     ios: {
-      supportsTablet: false,
+      // Spec 74, Fase 10 — layout de dos paneles en tablet.
+      supportsTablet: true,
       bundleIdentifier: 'co.edu.itm.sosagro.characterization',
     },
     android: {

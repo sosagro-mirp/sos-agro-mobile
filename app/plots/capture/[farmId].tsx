@@ -31,6 +31,7 @@ import { ConfirmSheet } from "../../../src/components/common/ConfirmSheet";
 import { AppText } from "../../../src/components/common/AppText";
 import { PlotSketch } from "../../../src/components/plots/PlotSketch";
 import { polygonAreaHectares } from "../../../src/lib/polygonGeometry";
+import { useBreakpoint } from "../../../src/lib/useBreakpoint";
 import { Fonts } from "../../../src/theme/fonts";
 import { useTheme } from "../../../src/theme/ThemeProvider";
 import type { ThemeColors } from "../../../src/theme/colors";
@@ -62,6 +63,7 @@ export default function CapturePlotScreen() {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { show: showSnackbar } = useSnackbar();
+  const isTablet = useBreakpoint() === "tablet";
 
   const { points, startCapture, addPoint, removeLastPoint, reset } = useFarmPlotCaptureStore();
 
@@ -188,6 +190,43 @@ export default function CapturePlotScreen() {
     );
   }
 
+  const sketchCard = (
+    <View style={styles.sketchCard}>
+      <View style={styles.sketchHeader}>
+        <LayoutGrid size={15} color={colors.textMuted} strokeWidth={2.2} />
+        <Text style={styles.sketchHeaderLabel}>CROQUIS DEL LOTE</Text>
+        <Text style={styles.sketchHeaderArea}>
+          {points.length >= 3 ? `aprox. ${areaHectares.toFixed(1)} ha` : ""}
+        </Text>
+      </View>
+      <View style={isTablet ? styles.sketchBodyLarge : styles.sketchBody}>
+        <PlotSketch points={points} size={isTablet ? "panel" : "capture"} />
+      </View>
+      <View style={styles.sketchFooter}>
+        <Info size={13} color={colors.textMuted} strokeWidth={2.2} />
+        <Text style={styles.sketchFooterText}>
+          Dibujo a escala de los puntos capturados. No requiere conexión ni mapas.
+        </Text>
+      </View>
+    </View>
+  );
+
+  const renderVertexRow = ({ item, index }: { item: PolygonPoint; index: number }) => (
+    <View style={[styles.pointRow, index !== points.length - 1 && styles.pointRowDivider]}>
+      <View style={styles.pointBadge}>
+        <Text style={styles.pointBadgeText}>{index + 1}</Text>
+      </View>
+      <Text style={styles.coordText} numberOfLines={1}>
+        {item.lat.toFixed(6)}, {item.lng.toFixed(6)}
+      </Text>
+      {item.accuracy != null ? (
+        <Text style={[styles.accuracyText, { color: accuracyTone(item.accuracy, colors) }]}>
+          ±{item.accuracy.toFixed(0)} m
+        </Text>
+      ) : null}
+    </View>
+  );
+
   return (
     <SafeAreaView style={styles.root}>
       <View style={styles.header}>
@@ -222,51 +261,41 @@ export default function CapturePlotScreen() {
         </Text>
       </View>
 
-      <FlatList
-        data={points}
-        keyExtractor={(_, index) => String(index)}
-        contentContainerStyle={styles.list}
-        ListHeaderComponent={
-          <View style={styles.sketchCard}>
-            <View style={styles.sketchHeader}>
-              <LayoutGrid size={15} color={colors.textMuted} strokeWidth={2.2} />
-              <Text style={styles.sketchHeaderLabel}>CROQUIS DEL LOTE</Text>
-              <Text style={styles.sketchHeaderArea}>
-                {points.length >= 3 ? `aprox. ${areaHectares.toFixed(1)} ha` : ""}
-              </Text>
-            </View>
-            <View style={styles.sketchBody}>
-              <PlotSketch points={points} size="capture" />
-            </View>
-            <View style={styles.sketchFooter}>
-              <Info size={13} color={colors.textMuted} strokeWidth={2.2} />
-              <Text style={styles.sketchFooterText}>
-                Dibujo a escala de los puntos capturados. No requiere conexión ni mapas.
-              </Text>
-            </View>
+      {isTablet ? (
+        // Lotes en dos paneles (spec 74, Fase 10): croquis grande a la
+        // izquierda, lista de vértices a la derecha (310 px).
+        <View style={styles.tabletRow}>
+          <View style={styles.tabletSketchPanel}>
+            {sketchCard}
           </View>
-        }
-        ListEmptyComponent={null}
-        renderItem={({ item, index }) => (
-          <View style={[styles.pointRow, index !== points.length - 1 && styles.pointRowDivider]}>
-            <View style={styles.pointBadge}>
-              <Text style={styles.pointBadgeText}>{index + 1}</Text>
-            </View>
-            <Text style={styles.coordText} numberOfLines={1}>
-              {item.lat.toFixed(6)}, {item.lng.toFixed(6)}
-            </Text>
-            {item.accuracy != null ? (
-              <Text style={[styles.accuracyText, { color: accuracyTone(item.accuracy, colors) }]}>
-                ±{item.accuracy.toFixed(0)} m
-              </Text>
-            ) : null}
+          <View style={styles.tabletVerticesPanel}>
+            <Text style={styles.verticesLabel}>VÉRTICES</Text>
+            <FlatList
+              data={points}
+              keyExtractor={(_, index) => String(index)}
+              contentContainerStyle={styles.tabletVerticesList}
+              renderItem={renderVertexRow}
+              ListEmptyComponent={
+                <Text style={styles.emptyText}>
+                  Toca &quot;Agregar punto&quot; para capturar el primer vértice del polígono.
+                </Text>
+              }
+            />
           </View>
-        )}
-        ListFooterComponent={points.length > 0 ? <Text style={styles.verticesLabel}>VÉRTICES</Text> : null}
-        ListFooterComponentStyle={styles.verticesLabelWrapper}
-        {...(points.length > 0 ? {} : {})}
-      />
-      {points.length === 0 ? (
+        </View>
+      ) : (
+        <FlatList
+          data={points}
+          keyExtractor={(_, index) => String(index)}
+          contentContainerStyle={styles.list}
+          ListHeaderComponent={sketchCard}
+          ListEmptyComponent={null}
+          renderItem={renderVertexRow}
+          ListFooterComponent={points.length > 0 ? <Text style={styles.verticesLabel}>VÉRTICES</Text> : null}
+          ListFooterComponentStyle={styles.verticesLabelWrapper}
+        />
+      )}
+      {!isTablet && points.length === 0 ? (
         <View style={styles.empty}>
           <Text style={styles.emptyText}>
             Toca &quot;Agregar punto&quot; para capturar el primer vértice del polígono.
@@ -432,6 +461,14 @@ function createStyles(colors: ThemeColors) {
 
     list: { padding: 14, paddingBottom: 170 },
 
+    // Lotes en dos paneles, tablet (spec 74, Fase 10): croquis grande a la
+    // izquierda, lista de vértices a la derecha (310 px).
+    tabletRow: { flex: 1, flexDirection: "row", padding: 14, paddingBottom: 170, gap: 14 },
+    tabletSketchPanel: { flex: 1 },
+    tabletVerticesPanel: { width: 310, flexShrink: 0 },
+    tabletVerticesList: { paddingBottom: 8 },
+    sketchBodyLarge: { minHeight: 320, alignItems: "center", justifyContent: "center", padding: 18 },
+
     sketchCard: {
       borderWidth: 1,
       borderColor: colors.border,
@@ -567,6 +604,12 @@ function createStyles(colors: ThemeColors) {
       paddingTop: 12,
       paddingHorizontal: 18,
       paddingBottom: 20,
+      // Spec 74, Fase 10 — en tablet el overlay ocupa todo el ancho, pero la
+      // tarjeta no: se centra con el mismo tope de 560 px de la columna de
+      // lectura del instrumento, para que NOMBRE/DESCRIPCIÓN no se estiren.
+      maxWidth: 560,
+      width: "100%",
+      alignSelf: "center",
       gap: 6,
     },
     modalHandle: {
