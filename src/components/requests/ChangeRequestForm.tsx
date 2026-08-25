@@ -1,15 +1,7 @@
 import React, { useMemo, useState } from 'react';
-import {
-  View,
-  Text,
-  TextInput,
-  ActivityIndicator,
-  StyleSheet,
-  Alert,
-  Modal,
-  Pressable,
-} from 'react-native';
-import { PrimaryButton } from '../common/PrimaryButton';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
+import { Save, LoaderCircle } from 'lucide-react-native';
+import { useSnackbar } from '../common/Snackbar';
 import { changeRequestStorage } from '../../storage/changeRequestStorage';
 import { useChangeRequestStore } from '../../store/useChangeRequestStore';
 import { Fonts } from '../../theme/fonts';
@@ -18,6 +10,9 @@ import type { ThemeColors } from '../../theme/colors';
 import { generateUUID } from '../../lib/generateLocalId';
 import { SyncQueueService } from '../../sync/SyncQueueService';
 import { logger } from '../../lib/logger';
+
+const MAX_LENGTH = 2000;
+const MIN_LENGTH = 10;
 
 interface Props {
   farmerId?: string;
@@ -28,17 +23,17 @@ interface Props {
 export const ChangeRequestForm: React.FC<Props> = ({ farmerId, farmerName, onSubmitted }) => {
   const [description, setDescription] = useState('');
   const [saving, setSaving] = useState(false);
-  const [showSuccess, setShowSuccess] = useState(false);
   const addRequest = useChangeRequestStore((s) => s.addRequest);
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const { show: showSnackbar } = useSnackbar();
+
+  const trimmedLength = description.trim().length;
+  const canSubmit = trimmedLength >= MIN_LENGTH && !saving;
 
   const handleSubmit = async () => {
+    if (!canSubmit) return;
     const trimmed = description.trim();
-    if (trimmed.length < 10) {
-      Alert.alert('Descripción muy corta', 'Escribe al menos 10 caracteres describiendo el problema.');
-      return;
-    }
 
     setSaving(true);
     try {
@@ -54,7 +49,8 @@ export const ChangeRequestForm: React.FC<Props> = ({ farmerId, farmerName, onSub
       addRequest({ ...entry, status: 'pending_sync' });
 
       setDescription('');
-      setShowSuccess(true);
+      showSnackbar({ message: 'Solicitud guardada. Se enviará al servidor cuando haya conexión.', variant: 'success' });
+      onSubmitted?.();
       SyncQueueService.processAll().catch((err) =>
         logger.error('[ChangeRequestForm] processAll failed', err),
       );
@@ -63,31 +59,8 @@ export const ChangeRequestForm: React.FC<Props> = ({ farmerId, farmerName, onSub
     }
   };
 
-  const handleSuccessDismiss = () => {
-    setShowSuccess(false);
-    onSubmitted?.();
-  };
-
   return (
-    <View style={styles.container}>
-      <Modal
-        visible={showSuccess}
-        transparent
-        animationType="fade"
-        statusBarTranslucent
-      >
-        <View style={styles.overlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Solicitud guardada</Text>
-            <Text style={styles.modalBody}>
-              Se enviará al servidor cuando haya conexión.
-            </Text>
-            <Pressable style={styles.modalButton} onPress={handleSuccessDismiss}>
-              <Text style={styles.modalButtonText}>Entendido</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
+    <View style={styles.card}>
       <Text style={styles.title}>Reportar problema</Text>
 
       {farmerName && (
@@ -102,91 +75,88 @@ export const ChangeRequestForm: React.FC<Props> = ({ farmerId, farmerName, onSub
         numberOfLines={5}
         value={description}
         onChangeText={setDescription}
-        maxLength={2000}
+        maxLength={MAX_LENGTH}
         textAlignVertical="top"
       />
-      <Text style={styles.counter}>{description.length}/2000</Text>
+      <View style={styles.counterRow}>
+        <Text style={styles.minHint}>Mínimo {MIN_LENGTH} caracteres</Text>
+        <Text style={styles.counter}>{description.length} / {MAX_LENGTH}</Text>
+      </View>
 
-      {saving ? (
-        <ActivityIndicator color={colors.brand} />
-      ) : (
-        <PrimaryButton
-          label="Guardar solicitud"
-          onPress={handleSubmit}
-          disabled={description.trim().length < 10}
-        />
-      )}
+      <TouchableOpacity
+        style={[styles.button, !canSubmit && styles.buttonDisabled]}
+        onPress={handleSubmit}
+        disabled={!canSubmit}
+        accessibilityRole="button"
+      >
+        {saving ? (
+          <LoaderCircle size={17} color={colors.brandForeground} />
+        ) : (
+          <>
+            <Save size={17} color={colors.brandForeground} strokeWidth={2.2} />
+            <Text style={styles.buttonText}>Guardar solicitud</Text>
+          </>
+        )}
+      </TouchableOpacity>
     </View>
   );
 };
 
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
-    container: {
-      gap: 12,
+    card: {
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 12,
+      backgroundColor: colors.surface,
+      padding: 14,
+      gap: 9,
     },
     title: {
-      fontFamily: Fonts.semiBold,
-      fontSize: 18,
+      fontFamily: Fonts.extraBold,
+      fontSize: 19,
       color: colors.textPrimary,
+      letterSpacing: -0.3,
+      marginBottom: 5,
     },
     farmerLabel: {
       fontFamily: Fonts.regular,
-      fontSize: 14,
+      fontSize: 13,
       color: colors.textMuted,
     },
     input: {
       borderWidth: 1,
-      borderColor: colors.borderStrong,
-      borderRadius: 8,
-      padding: 12,
+      borderColor: colors.border,
+      borderRadius: 10,
+      padding: 13,
+      backgroundColor: colors.surfaceMuted,
       fontFamily: Fonts.regular,
-      fontSize: 15,
+      fontSize: 13.5,
       color: colors.textPrimary,
-      minHeight: 120,
+      lineHeight: 20,
+      minHeight: 100,
     },
-    counter: {
-      fontFamily: Fonts.regular,
-      fontSize: 12,
-      color: colors.textMuted,
-      textAlign: 'right',
+    counterRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 5,
     },
-
-    overlay: {
-      flex: 1,
-      backgroundColor: 'rgba(0,0,0,0.5)',
+    minHint: { fontFamily: Fonts.regular, fontSize: 10.5, color: colors.textMuted },
+    counter: { fontFamily: Fonts.bold, fontSize: 10.5, color: colors.textMuted },
+    button: {
+      flexDirection: 'row',
+      alignItems: 'center',
       justifyContent: 'center',
-      alignItems: 'center',
-      padding: 24,
-    },
-    modalCard: {
-      width: '100%',
-      backgroundColor: colors.surface,
-      borderRadius: 16,
-      padding: 24,
-      gap: 12,
-    },
-    modalTitle: {
-      fontSize: 18,
-      fontFamily: Fonts.bold,
-      color: colors.textPrimary,
-    },
-    modalBody: {
-      fontSize: 15,
-      fontFamily: Fonts.regular,
-      color: colors.textPrimary,
-      lineHeight: 22,
-    },
-    modalButton: {
+      gap: 9,
       backgroundColor: colors.brand,
-      borderRadius: 12,
+      borderRadius: 11,
       paddingVertical: 16,
-      alignItems: 'center',
-      marginTop: 4,
     },
-    modalButtonText: {
-      fontSize: 15,
-      fontFamily: Fonts.semiBold,
+    buttonDisabled: { backgroundColor: colors.textMuted },
+    buttonText: {
+      fontSize: 14.5,
+      fontFamily: Fonts.extraBold,
       color: colors.brandForeground,
     },
   });
