@@ -323,8 +323,8 @@ function createStyles(colors: ThemeColors) {
     },
     headerTitleWrapper: { flex: 1, minWidth: 0, alignItems: "center" },
     headerTitle: {
-      fontSize: 13.5,
-      fontFamily: Fonts.bold,
+      fontSize: 16,
+      fontFamily: Fonts.extraBold,
       color: colors.textPrimary,
       textAlign: "center",
     },
@@ -344,7 +344,7 @@ function createStyles(colors: ThemeColors) {
       backgroundColor: colors.brand,
     },
     chromeBody: {
-      paddingHorizontal: 14,
+      paddingHorizontal: 20,
       paddingVertical: 9,
     },
     chromeRow: {
@@ -410,7 +410,7 @@ function createStyles(colors: ThemeColors) {
     footer: {
       flexDirection: "row",
       gap: 10,
-      paddingHorizontal: 14,
+      paddingHorizontal: 20,
       paddingVertical: 12,
       backgroundColor: colors.surface,
       borderTopWidth: 1,
