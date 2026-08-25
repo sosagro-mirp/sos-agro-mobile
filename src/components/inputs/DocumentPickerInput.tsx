@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { FolderOpen, FileText, X } from 'lucide-react-native';
+import { FolderOpen, FileText, Trash2 } from 'lucide-react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import { useTheme } from '../../theme/ThemeProvider';
@@ -55,17 +55,21 @@ export function DocumentPickerInput({ questionId, value, filename, onChange }: P
     return (
       <View style={styles.container}>
         <View style={styles.fileCard}>
-          <FileText size={28} color={colors.brand} />
+          <FileText size={26} color={colors.brand} strokeWidth={2} />
           <Text style={styles.filename} numberOfLines={2}>{localFilename ?? 'documento.pdf'}</Text>
         </View>
         <View style={styles.actions}>
-          <TouchableOpacity style={styles.secondaryButton} onPress={pickDocument}>
-            <FolderOpen size={16} color={colors.textPrimary} />
+          <TouchableOpacity style={styles.secondaryButton} onPress={pickDocument} accessibilityRole="button">
+            <FolderOpen size={17} color={colors.textPrimary} strokeWidth={2.2} />
             <Text style={styles.secondaryButtonText}>Reemplazar</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.secondaryButton} onPress={removeDocument}>
-            <X size={16} color={colors.dangerFg} />
-            <Text style={[styles.secondaryButtonText, styles.deleteText]}>Eliminar</Text>
+          <TouchableOpacity
+            style={styles.deleteButton}
+            onPress={removeDocument}
+            accessibilityRole="button"
+            accessibilityLabel="Eliminar documento"
+          >
+            <Trash2 size={18} color={colors.dangerFg} strokeWidth={2.2} />
           </TouchableOpacity>
         </View>
       </View>
@@ -74,8 +78,8 @@ export function DocumentPickerInput({ questionId, value, filename, onChange }: P
 
   return (
     <View style={styles.container}>
-      <TouchableOpacity style={styles.primaryButton} onPress={pickDocument}>
-        <FolderOpen size={22} color={colors.brandForeground} />
+      <TouchableOpacity style={styles.primaryButton} onPress={pickDocument} accessibilityRole="button">
+        <FolderOpen size={22} color={colors.brandForeground} strokeWidth={2.2} />
         <Text style={styles.primaryButtonText}>Seleccionar PDF</Text>
       </TouchableOpacity>
     </View>
@@ -88,36 +92,45 @@ function createStyles(colors: ThemeColors) {
     fileCard: {
       flexDirection: 'row',
       alignItems: 'center',
-      borderWidth: 2,
-      borderColor: colors.brand,
-      borderRadius: 12,
-      padding: 16,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 11,
+      backgroundColor: colors.surfaceMuted,
+      padding: 14,
       gap: 12,
     },
-    filename: { flex: 1, fontSize: 14, color: colors.textPrimary },
+    filename: { flex: 1, fontSize: 13.5, fontWeight: '600', color: colors.textPrimary },
     primaryButton: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: colors.brand,
-      borderRadius: 12,
-      paddingVertical: 16,
-      gap: 10,
+      borderRadius: 11,
+      paddingVertical: 17,
+      gap: 9,
     },
-    primaryButtonText: { color: colors.brandForeground, fontSize: 16, fontWeight: '600' },
+    primaryButtonText: { color: colors.brandForeground, fontSize: 15.5, fontWeight: '800' },
     actions: { flexDirection: 'row', gap: 10 },
     secondaryButton: {
       flex: 1,
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
-      borderWidth: 1.5,
+      borderWidth: 1,
       borderColor: colors.borderStrong,
-      borderRadius: 10,
-      paddingVertical: 12,
-      gap: 6,
+      borderRadius: 11,
+      paddingVertical: 15,
+      gap: 8,
     },
-    secondaryButtonText: { fontSize: 14, color: colors.textPrimary },
-    deleteText: { color: colors.dangerFg },
+    secondaryButtonText: { fontSize: 13.5, fontWeight: '700', color: colors.textPrimary },
+    deleteButton: {
+      width: 56,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderColor: colors.dangerFg,
+      backgroundColor: colors.dangerBg,
+      borderRadius: 11,
+    },
   });
 }
