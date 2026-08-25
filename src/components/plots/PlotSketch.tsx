@@ -4,12 +4,16 @@ import Svg, { Rect, Polygon, Circle, Text as SvgText, Defs, Pattern, Path } from
 import { useTheme } from "../../theme/ThemeProvider";
 import { projectPolygon, type LatLngPoint } from "../../lib/polygonGeometry";
 
-export type PlotSketchSize = "thumbnail" | "capture" | "sheet";
+export type PlotSketchSize = "thumbnail" | "capture" | "sheet" | "panel";
 
 const DIMENSIONS: Record<PlotSketchSize, { width: number; height: number; margin: number; showGrid: boolean; showLabels: boolean }> = {
   thumbnail: { width: 56, height: 56, margin: 6, showGrid: false, showLabels: false },
   capture: { width: 200, height: 150, margin: 14, showGrid: true, showLabels: true },
   sheet: { width: 200, height: 150, margin: 14, showGrid: true, showLabels: true },
+  // Spec 74, Fase 10 — croquis "grande" del panel izquierdo de Lotes en
+  // tablet. No estaba en las "tres tamaños" originales de la Fase 8; se
+  // agrega acá porque el layout de dos paneles lo requiere.
+  panel: { width: 380, height: 280, margin: 20, showGrid: true, showLabels: true },
 };
 
 interface PlotSketchProps {

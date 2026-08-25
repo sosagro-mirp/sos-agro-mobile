@@ -13,9 +13,12 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Check, ChevronLeft, ArrowRight, List, X } from "lucide-react-native";
 import { useInstrumentSurveyStore } from "../../store/useInstrumentSurveyStore";
+import { useCampaignSessionStore } from "../../store/useCampaignSessionStore";
 import { OfflineBanner } from "../network/OfflineBanner";
 import { QuestionContainer } from "./QuestionContainer";
 import { QuestionRenderer } from "./QuestionRenderer";
+import { SectionNavPanel } from "./SectionNavPanel";
+import { RespondentContextPanel } from "./RespondentContextPanel";
 import { AppText } from "../common/AppText";
 import { ConfirmSheet } from "../common/ConfirmSheet";
 import { SecondaryButton } from "../common/SecondaryButton";
@@ -23,6 +26,9 @@ import { Fonts } from "../../theme/fonts";
 import { useTheme } from "../../theme/ThemeProvider";
 import type { ThemeColors } from "../../theme/colors";
 import { OPTION_SEARCH_THRESHOLD } from "../../lib/optionSearch";
+import { useBreakpoint } from "../../lib/useBreakpoint";
+import { INSTRUMENT_PANELS_MIN_WIDTH } from "../../lib/resolveBreakpoint";
+import { resolveConditionReason } from "../../lib/resolveConditionReason";
 import type { InstrumentDraftAnswer } from "../../types";
 
 const SEARCHABLE_TYPES = new Set(["single_choice", "multiple_choice"]);
@@ -40,15 +46,23 @@ export const QuestionScreen: React.FC<QuestionScreenProps> = ({
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  // Umbral propio, más exigente que el general de 720dp: por debajo de
+  // INSTRUMENT_PANELS_MIN_WIDTH los tres paneles fijos comprimen la columna
+  // de lectura a un ancho inutilizable (hallazgo TC-074-87, tablet en
+  // portrait) — se degrada a una sola columna en vez de mostrarlos apretados.
+  const isTablet = useBreakpoint(INSTRUMENT_PANELS_MIN_WIDTH) === "tablet";
 
   const answers = useInstrumentSurveyStore((s) => s.answers);
   const currentIndex = useInstrumentSurveyStore((s) => s.currentIndex);
   const setAnswer = useInstrumentSurveyStore((s) => s.setAnswer);
   const goToNext = useInstrumentSurveyStore((s) => s.goToNext);
   const goToPrev = useInstrumentSurveyStore((s) => s.goToPrev);
+  const goToIndex = useInstrumentSurveyStore((s) => s.goToIndex);
   const canAdvance = useInstrumentSurveyStore((s) => s.canAdvance);
   const visibleQuestions = useInstrumentSurveyStore((s) => s.visibleQuestions);
   const savedQuestionId = useInstrumentSurveyStore((s) => s.savedQuestionId);
+  const surveyInstrumentName = useInstrumentSurveyStore((s) => s.instrumentName);
+  const farmerName = useCampaignSessionStore((s) => s.farmerName);
 
   const visible = visibleQuestions();
   const total = visible.length;
@@ -120,6 +134,21 @@ export const QuestionScreen: React.FC<QuestionScreenProps> = ({
   const progress = total > 0 ? Math.min((currentIndex + 1) / total, 1) : 0;
   const progressPercent = `${Math.round(progress * 100)}%`;
 
+  // Panel izquierdo (tablet, spec 74 Fase 10): preguntas de la sección
+  // actual, no de todo el instrumento — es la adaptación a Variante A.
+  const sectionQuestions = visible.filter((item) => item.sectionId === currentItem.sectionId);
+  const handleJumpTo = (questionId: string) => {
+    const targetIndex = visible.findIndex((item) => item.question.questionId === questionId);
+    if (targetIndex === -1 || targetIndex === currentIndex) return;
+    goToIndex(targetIndex);
+    router.replace(`/instrument/${instrumentId}/question/${targetIndex}`);
+  };
+  const conditionReason = resolveConditionReason(
+    currentItem.question,
+    visible.map((item) => item.question),
+    answers,
+  );
+
   // Cuando la pregunta tiene buscador (más opciones que el umbral), el
   // FlatList interno de la lista de opciones debe ser el único contenedor de
   // scroll — anidarlo dentro del ScrollView externo rompe la virtualización
@@ -139,19 +168,18 @@ export const QuestionScreen: React.FC<QuestionScreenProps> = ({
     </QuestionContainer>
   );
 
-  return (
-    <SafeAreaView style={styles.root} edges={["top", "bottom"]}>
-      <OfflineBanner />
-
-      <KeyboardAvoidingView
-        style={styles.kavContainer}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        keyboardVerticalOffset={Platform.OS === "android" ? -24 : 0}
-      >
-        {/* 1. Header: X de salida + marca + acción de índice (reservada,
-            deshabilitada hasta que exista una pantalla de índice real —
-            Fase 9, Variante B) */}
-        <View style={styles.header}>
+  // Panel izquierdo / centro / derecho solo en tablet (spec 74, Fase 10). En
+  // teléfono el layout queda exactamente igual que antes de esta fase.
+  const questionColumn = (
+    <KeyboardAvoidingView
+      style={[styles.kavContainer, isTablet && styles.kavContainerTablet]}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={Platform.OS === "android" ? -24 : 0}
+    >
+      {/* 1. Header: X de salida + marca + acción de índice (reservada,
+          deshabilitada hasta que exista una pantalla de índice real —
+          Fase 9, Variante B) */}
+      <View style={styles.header}>
           <TouchableOpacity
             onPress={() => setShowExitConfirm(true)}
             style={styles.headerSlot}
@@ -242,7 +270,34 @@ export const QuestionScreen: React.FC<QuestionScreenProps> = ({
             />
           </TouchableOpacity>
         </View>
-      </KeyboardAvoidingView>
+    </KeyboardAvoidingView>
+  );
+
+  return (
+    <SafeAreaView style={styles.root} edges={["top", "bottom"]}>
+      <OfflineBanner />
+
+      <View style={[styles.body, isTablet && styles.bodyTablet]}>
+        {isTablet ? (
+          <SectionNavPanel
+            sectionName={currentItem.sectionName}
+            questions={sectionQuestions}
+            currentQuestionId={currentItem.question.questionId}
+            answers={answers}
+            onSelect={handleJumpTo}
+          />
+        ) : null}
+
+        {questionColumn}
+
+        {isTablet ? (
+          <RespondentContextPanel
+            farmerName={farmerName}
+            instrumentName={surveyInstrumentName}
+            conditionReason={conditionReason}
+          />
+        ) : null}
+      </View>
 
       {/* Confirmación de salida — bottom sheet compartido (spec 74, Fase 1),
           reemplaza el modal propio que tenía esta pantalla. No es una acción
@@ -281,8 +336,25 @@ function createStyles(colors: ThemeColors) {
       flex: 1,
       backgroundColor: colors.surfaceMuted,
     },
+    // Fila de tres columnas en tablet (spec 74, Fase 10): panel de
+    // navegación + columna de lectura + panel de contexto. En teléfono es
+    // un `flex: 1` normal — `questionColumn` es el único hijo.
+    body: {
+      flex: 1,
+    },
+    bodyTablet: {
+      flexDirection: "row",
+    },
     kavContainer: {
       flex: 1,
+    },
+    // La columna de lectura no se estira a todo el ancho en tablet — 560 px
+    // máx., centrada entre los dos paneles (criterio 9 del spec: ningún
+    // input se estira a todo el ancho).
+    kavContainerTablet: {
+      maxWidth: 560,
+      alignSelf: "center",
+      width: "100%",
     },
     emptyState: {
       flex: 1,
