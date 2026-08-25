@@ -8,7 +8,7 @@ import {
   MessageSquare,
   RefreshCw,
 } from "lucide-react-native";
-import { Pressable, StyleSheet, Text, View, type TextStyle } from "react-native";
+import { Pressable, StyleSheet, Text, useWindowDimensions, View, type TextStyle } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuthStore } from "../../src/store/useAuthStore";
 import { useSyncStatusStore } from "../../src/store/useSyncStatusStore";
@@ -21,10 +21,20 @@ import { ThemeToggle } from "../../src/components/common/ThemeToggle";
 import { resolveTabBarStyle, TAB_BAR_PADDING_TOP } from "../../src/lib/resolveTabBarStyle";
 import { useMemo, useRef } from "react";
 
+// Pantallas angostas (spec 74, Fase 3 — a pedido del usuario): por debajo de
+// este ancho el texto "Salir" se oculta y el botón queda solo-ícono, para
+// dejarle más espacio a la píldora de conexión y al nombre del usuario. El
+// ícono conserva accessibilityLabel, así que no se pierde el texto para
+// lectores de pantalla — no es una simplificación del copy visible en
+// pantallas normales, que sigue completo.
+const HEADER_COMPACT_BREAKPOINT = 360;
+
 function TabsHeader() {
   const { user, logout } = useAuthStore();
   const { isOnline, pendingCount } = useSyncStatusStore();
   const { colors, effectiveTheme } = useTheme();
+  const { width } = useWindowDimensions();
+  const isCompact = width < HEADER_COMPACT_BREAKPOINT;
   const styles = useMemo(() => createStyles(colors, effectiveTheme), [colors, effectiveTheme]);
   const router = useRouter();
 
@@ -44,15 +54,23 @@ function TabsHeader() {
 
   return (
     <SafeAreaView edges={["top"]} style={styles.headerContainer}>
-      <View style={styles.header}>
+      <View style={[styles.header, isCompact && styles.headerCompact]}>
         <Pressable style={styles.headerLeft} onPress={handleTitleTap} accessibilityRole="text">
-          <Text style={styles.appName}>Sos Agro 4.C</Text>
+          <Text style={styles.appName} numberOfLines={1} ellipsizeMode="tail">
+            Sos Agro 4.C
+          </Text>
           {user?.name ? (
             <AppText style={styles.userName} numberOfLines={1}>{user.name}</AppText>
           ) : null}
         </Pressable>
-        <View style={styles.headerRight}>
-          <View style={[styles.statusPill, !isOnline && styles.statusPillOffline]}>
+        <View style={[styles.headerRight, isCompact && styles.headerRightCompact]}>
+          <View
+            style={[
+              styles.statusPill,
+              !isOnline && styles.statusPillOffline,
+              isCompact && styles.statusPillCompact,
+            ]}
+          >
             <View style={[styles.dot, isOnline ? styles.dotOnline : styles.dotOffline]} />
             <AppText style={[styles.statusText, !isOnline && styles.statusTextOffline]}>
               {isOnline ? "En línea" : "Sin conexión"}
@@ -61,9 +79,14 @@ function TabsHeader() {
           <View style={styles.themeToggleWrapper}>
             <ThemeToggle size={16} color={colors.headerFg} />
           </View>
-          <Pressable onPress={logout} style={styles.logoutBtn} accessibilityRole="button">
+          <Pressable
+            onPress={logout}
+            style={[styles.logoutBtn, isCompact && styles.logoutBtnCompact]}
+            accessibilityRole="button"
+            accessibilityLabel="Cerrar sesión"
+          >
             <LogOut size={15} color={colors.headerFg} />
-            <AppText style={styles.logoutText}>Salir</AppText>
+            {isCompact ? null : <AppText style={styles.logoutText}>Salir</AppText>}
           </Pressable>
         </View>
       </View>
@@ -245,8 +268,15 @@ function createStyles(colors: ThemeColors, effectiveTheme: EffectiveTheme) {
       paddingHorizontal: 20,
       paddingVertical: 12,
     },
+    headerCompact: {
+      paddingHorizontal: 14,
+    },
     headerLeft: {
       flexShrink: 1,
+      // Sin esto, un flex item con contenido de texto no encoge por debajo de
+      // su ancho intrínseco (comportamiento por defecto de RN/web): el título
+      // empujaba al resto del header en vez de truncarse.
+      minWidth: 0,
     },
     appName: {
       fontSize: 18,
@@ -264,11 +294,19 @@ function createStyles(colors: ThemeColors, effectiveTheme: EffectiveTheme) {
       flexDirection: "row",
       alignItems: "center",
       gap: 10,
-      // Fixed size: the connection-status pill and "Salir" are operationally
-      // critical in the field and must stay fully visible even when the
-      // left-side username is long or the system font scale is high (spec 24).
-      // Only headerLeft (and userName inside it) shrinks/truncates.
+      // Fixed size: the connection-status pill is operationally critical in
+      // the field and must stay fully visible even when the left-side
+      // username is long or the system font scale is high (spec 24). "Salir"
+      // stays icon-only below HEADER_COMPACT_BREAKPOINT (spec 74, Fase 3) to
+      // free up space for it instead of shrinking. Only headerLeft (and
+      // userName inside it) shrinks/truncates.
       flexShrink: 0,
+    },
+    // Pantallas angostas (spec 74, Fase 3): el gap entre píldora/toggle/salir
+    // se reduce, no desaparece — sigue habiendo separación visual, solo menos
+    // ancho perdido en el espaciado que en el contenido.
+    headerRightCompact: {
+      gap: 6,
     },
     // Spec 74, Fase 2 — la píldora se tiñe de ámbar cuando está offline, en
     // vez de solo cambiar el color del punto: es el nivel 1 de la jerarquía
@@ -284,6 +322,9 @@ function createStyles(colors: ThemeColors, effectiveTheme: EffectiveTheme) {
       paddingHorizontal: 10,
       paddingVertical: 5,
       borderRadius: 20,
+    },
+    statusPillCompact: {
+      paddingHorizontal: 7,
     },
     statusPillOffline: {
       backgroundColor: colors.warningBg,
@@ -323,6 +364,14 @@ function createStyles(colors: ThemeColors, effectiveTheme: EffectiveTheme) {
       borderRadius: 9,
       borderWidth: 1,
       borderColor: overlayBorder,
+    },
+    // Solo-ícono en pantallas angostas (< HEADER_COMPACT_BREAKPOINT): sin
+    // texto no hace falta el padding horizontal amplio, así queda cuadrado
+    // como themeToggleWrapper en vez de un rectángulo con espacio vacío.
+    logoutBtnCompact: {
+      width: 36,
+      paddingHorizontal: 0,
+      justifyContent: "center",
     },
     logoutText: {
       fontSize: 12,
