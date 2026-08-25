@@ -30,6 +30,8 @@ import {
   type MediaUploadEntry,
 } from "../../../src/storage/mediaUploadQueueStorage";
 import { surveyDraftStore } from "../../../src/storage/surveyDraftStore";
+import { instrumentCacheStorage } from "../../../src/storage/instrumentCache";
+import { farmerCacheStorage } from "../../../src/storage/farmerCache";
 import { NetworkMonitor } from "../../../src/sync/NetworkMonitor";
 import { MediaUploadService } from "../../../src/sync/MediaUploadService";
 import { Fonts } from "../../../src/theme/fonts";
@@ -41,6 +43,32 @@ function attachmentIcon(mimeType: string) {
   if (mimeType.startsWith("image/")) return ImageIcon;
   if (mimeType.startsWith("audio/")) return Mic;
   return FileText;
+}
+
+interface EntryIdentity {
+  instrumentName: string | null;
+  farmerName: string | null;
+}
+
+// Los errores de validación y los adjuntos sin subir se identifican por
+// instrumento + agricultor + hora (spec 74, Fase 7) — el `surveyId` técnico
+// queda relegado al pie de la tarjeta, no como título. `SyncQueueEntry` y
+// `MediaUploadEntry` solo guardan el `surveyId`; hay que resolverlo contra
+// el borrador (mismo patrón que `drafts/index.tsx`) para llegar al nombre
+// real de instrumento y agricultor.
+async function resolveEntryIdentity(surveyId: string): Promise<EntryIdentity> {
+  const draft = await surveyDraftStore.loadDraft(surveyId).catch(() => null);
+  if (!draft) return { instrumentName: null, farmerName: null };
+
+  const [instrument, farmer] = await Promise.all([
+    instrumentCacheStorage.get(draft.instrumentId).catch(() => null),
+    draft.farmerId ? farmerCacheStorage.get(draft.farmerId).catch(() => null) : Promise.resolve(null),
+  ]);
+
+  return {
+    instrumentName: instrument?.name ?? null,
+    farmerName: farmer?.name ?? null,
+  };
 }
 
 function formatSize(bytes: number | null): string {
@@ -92,6 +120,7 @@ export default function SyncScreen() {
 
   const [failedEntries, setFailedEntries] = useState<SyncQueueEntry[]>([]);
   const [failedMedia, setFailedMedia] = useState<MediaUploadEntry[]>([]);
+  const [identities, setIdentities] = useState<Record<string, EntryIdentity>>({});
   const [isSyncing, setIsSyncing] = useState(false);
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [retryingMediaId, setRetryingMediaId] = useState<string | null>(null);
@@ -106,6 +135,10 @@ export default function SyncScreen() {
     setFailedEntries(failed);
     const failedMediaEntries = await mediaUploadQueueStorage.listFailed();
     setFailedMedia(failedMediaEntries);
+
+    const surveyIds = [...new Set([...failed.map((e) => e.surveyId), ...failedMediaEntries.map((e) => e.surveyId)])];
+    const resolved = await Promise.all(surveyIds.map((id) => resolveEntryIdentity(id)));
+    setIdentities(Object.fromEntries(surveyIds.map((id, i) => [id, resolved[i]])));
   };
 
   useEffect(() => {
@@ -268,12 +301,20 @@ export default function SyncScreen() {
                 )}
               </Pressable>
             </View>
-            {failedEntries.map((entry) => (
+            {failedEntries.map((entry) => {
+              const identity = identities[entry.surveyId];
+              const who = [identity?.instrumentName, identity?.farmerName].filter(Boolean).join(" · ");
+              const when = (entry.lastAttemptAt ?? entry.createdAt).toLocaleString("es-CO", {
+                dateStyle: "short",
+                timeStyle: "short",
+              });
+              return (
               <View key={entry.id} style={styles.failedCard}>
                 <View style={styles.failedCardBody}>
                   <Text style={styles.failedId} numberOfLines={1}>
-                    {entry.surveyId}
+                    {who || "Instrumento no disponible"}
                   </Text>
+                  <Text style={styles.failedWhen}>{when}</Text>
                   {entry.errorDetail ? (
                     <Text style={styles.failedError}>{entry.errorDetail}</Text>
                   ) : null}
@@ -299,7 +340,8 @@ export default function SyncScreen() {
                   </Pressable>
                 </View>
               </View>
-            ))}
+              );
+            })}
           </View>
         ) : null}
 
@@ -321,6 +363,7 @@ export default function SyncScreen() {
             <View style={styles.attachmentsBox}>
               {failedMedia.map((entry, index) => {
                 const Icon = attachmentIcon(entry.mimeType);
+                const identity = identities[entry.surveyId];
                 return (
                   <View
                     key={entry.id}
@@ -335,7 +378,7 @@ export default function SyncScreen() {
                         {entry.originalFilename ?? entry.mimeType}
                       </Text>
                       <Text style={styles.attachmentMeta} numberOfLines={1}>
-                        {entry.surveyId}
+                        {identity?.farmerName ?? identity?.instrumentName ?? "Sin identificar"}
                       </Text>
                     </View>
                     <Text style={styles.attachmentSize}>{formatSize(entry.fileSizeBytes)}</Text>
@@ -470,7 +513,8 @@ function createStyles(colors: ThemeColors) {
     },
     failedCardBody: { padding: 13, paddingBottom: 9, gap: 4 },
     failedId: { fontSize: 13, fontFamily: Fonts.extraBold, color: colors.textPrimary },
-    failedError: { fontSize: 12, fontFamily: Fonts.medium, color: colors.dangerFg, lineHeight: 17 },
+    failedWhen: { fontSize: 11, fontFamily: Fonts.regular, color: colors.textMuted, marginTop: 2 },
+    failedError: { fontSize: 12, fontFamily: Fonts.medium, color: colors.dangerFg, lineHeight: 17, marginTop: 6 },
     failedFooter: {
       flexDirection: "row",
       alignItems: "center",
