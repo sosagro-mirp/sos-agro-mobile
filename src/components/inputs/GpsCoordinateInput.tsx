@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
+  Animated,
+  Easing,
   StyleSheet,
   Text,
   TextInput,
@@ -8,7 +9,7 @@ import {
   View,
 } from "react-native";
 import * as Location from "expo-location";
-import { MapPin } from "lucide-react-native";
+import { MapPin, Navigation, LoaderCircle, Info } from "lucide-react-native";
 import { Fonts } from "../../theme/fonts";
 import { useTheme } from "../../theme/ThemeProvider";
 import type { ThemeColors } from "../../theme/colors";
@@ -39,6 +40,35 @@ function getCurrentPositionWithTimeout(
   });
 }
 
+// Ícono girando con `Animated` en vez de `ActivityIndicator` (spec 74, mapa
+// de reemplazo — `LoaderCircle` reemplaza todo `ActivityIndicator`). Copia
+// local del mismo patrón que `login.tsx`: no hay un componente compartido
+// para esto todavía y esta fase no toca `login.tsx` (ya mergeado).
+function SpinningLoader({ size, color }: { size: number; color: string }) {
+  const rotation = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.timing(rotation, {
+        toValue: 1,
+        duration: 900,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      }),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [rotation]);
+
+  const spin = rotation.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
+
+  return (
+    <Animated.View style={{ transform: [{ rotate: spin }] }}>
+      <LoaderCircle size={size} color={color} />
+    </Animated.View>
+  );
+}
+
 interface Props {
   questionId: string;
   fieldType: "latitude" | "longitude";
@@ -63,6 +93,8 @@ export function GpsCoordinateInput({
 
   function handleTextChange(text: string): void {
     setRaw(text);
+    // Escribir a mano invalida la marca AUTOMÁTICO — vuelve a idle.
+    setGpsState("idle");
     if (text === "" || text === "-") {
       onChange({ questionId });
       return;
@@ -124,13 +156,21 @@ export function GpsCoordinateInput({
   }
 
   const isRequesting = gpsState === "requesting";
-  const buttonLabel =
-    gpsState === "obtained" ? "Actualizar GPS" : "Usar GPS";
+  const buttonLabel = gpsState === "obtained" ? "Actualizar GPS" : "Usar GPS";
 
   return (
     <View style={styles.container}>
+      {gpsState === "obtained" && (
+        <View style={styles.autoRow}>
+          <View style={styles.autoPill}>
+            <Navigation size={11} color={colors.infoFg} strokeWidth={2.8} />
+            <Text style={styles.autoPillText}>AUTOMÁTICO</Text>
+          </View>
+        </View>
+      )}
+
       <TextInput
-        style={[styles.input, !isRequesting && styles.inputActive]}
+        style={styles.input}
         value={raw}
         onChangeText={handleTextChange}
         keyboardType="decimal-pad"
@@ -140,21 +180,27 @@ export function GpsCoordinateInput({
         editable={!isRequesting}
       />
 
-      <TouchableOpacity
-        style={[styles.gpsButton, isRequesting && styles.gpsButtonDisabled]}
-        onPress={handleGpsPress}
-        disabled={isRequesting}
-        activeOpacity={0.7}
-      >
-        {isRequesting ? (
-          <ActivityIndicator size="small" color={colors.brandForeground} />
-        ) : (
-          <View style={styles.gpsButtonContent}>
-            <MapPin size={16} color={colors.brandForeground} />
-            <Text style={styles.gpsButtonText}>{buttonLabel}</Text>
+      {isRequesting ? (
+        <View style={styles.searchingCard}>
+          <SpinningLoader size={20} color={colors.brandSubtleFg} />
+          <View style={styles.searchingText}>
+            <Text style={styles.searchingTitle}>Buscando señal GPS…</Text>
+            <Text style={styles.searchingHint}>
+              Puede tardar unos segundos según la visibilidad al cielo
+            </Text>
           </View>
-        )}
-      </TouchableOpacity>
+        </View>
+      ) : (
+        <TouchableOpacity
+          style={styles.gpsButton}
+          onPress={handleGpsPress}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+        >
+          <MapPin size={16} color={colors.brandForeground} strokeWidth={2.2} />
+          <Text style={styles.gpsButtonText}>{buttonLabel}</Text>
+        </TouchableOpacity>
+      )}
 
       {gpsState === "obtained" && accuracy !== null && (
         <Text style={styles.accuracyText}>Precisión: ±{Math.round(accuracy)} m</Text>
@@ -162,6 +208,15 @@ export function GpsCoordinateInput({
 
       {gpsState === "error" && (
         <Text style={styles.errorText}>{errorMessage}</Text>
+      )}
+
+      {!isRequesting && (
+        <View style={styles.hintBanner}>
+          <Info size={15} color={colors.textMuted} strokeWidth={2.2} />
+          <Text style={styles.hintBannerText}>
+            Salí a cielo abierto para mejorar la precisión. Podés escribir las coordenadas a mano.
+          </Text>
+        </View>
       )}
     </View>
   );
@@ -171,55 +226,101 @@ function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
     container: {
       width: "100%",
-      gap: 8,
+      gap: 10,
     },
-    input: {
-      fontFamily: Fonts.regular,
-      fontSize: 18,
-      lineHeight: 26,
-      color: colors.textPrimary,
-      backgroundColor: colors.surface,
-      borderWidth: 2,
-      borderColor: colors.borderStrong,
-      borderRadius: 12,
-      paddingHorizontal: 16,
-      paddingVertical: 0,
-      height: 56,
-      minHeight: 56,
+    autoRow: {
+      flexDirection: "row",
+      justifyContent: "flex-end",
     },
-    inputActive: {
-      borderColor: colors.borderStrong,
-    },
-    gpsButton: {
-      backgroundColor: colors.brand,
-      borderRadius: 12,
-      height: 48,
-      alignItems: "center",
-      justifyContent: "center",
-      paddingHorizontal: 16,
-    },
-    gpsButtonDisabled: {
-      backgroundColor: colors.textMuted,
-    },
-    gpsButtonContent: {
+    autoPill: {
       flexDirection: "row",
       alignItems: "center",
-      gap: 8,
+      gap: 4,
+      backgroundColor: colors.infoBg,
+      borderRadius: 99,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
     },
-    gpsButtonText: {
+    autoPillText: {
+      fontFamily: Fonts.extraBold,
+      fontSize: 9.5,
+      color: colors.infoFg,
+      letterSpacing: 0.4,
+    },
+    input: {
       fontFamily: Fonts.semiBold,
       fontSize: 15,
+      color: colors.textPrimary,
+      backgroundColor: colors.surfaceMuted,
+      borderWidth: 1,
+      borderColor: colors.borderStrong,
+      borderRadius: 10,
+      paddingHorizontal: 14,
+      height: 48,
+    },
+    gpsButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 8,
+      backgroundColor: colors.brand,
+      borderRadius: 10,
+      height: 48,
+    },
+    gpsButtonText: {
+      fontFamily: Fonts.bold,
+      fontSize: 13.5,
       color: colors.brandForeground,
+    },
+    searchingCard: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 11,
+      borderWidth: 1,
+      borderColor: colors.brand,
+      borderRadius: 11,
+      backgroundColor: colors.brandSubtleBg,
+      paddingHorizontal: 14,
+      paddingVertical: 15,
+    },
+    searchingText: { flex: 1, minWidth: 0 },
+    searchingTitle: {
+      fontFamily: Fonts.bold,
+      fontSize: 13.5,
+      color: colors.brandSubtleFg,
+      marginBottom: 3,
+    },
+    searchingHint: {
+      fontFamily: Fonts.regular,
+      fontSize: 11,
+      color: colors.brandSubtleFg,
+      opacity: 0.85,
     },
     accuracyText: {
       fontFamily: Fonts.regular,
-      fontSize: 13,
+      fontSize: 11.5,
       color: colors.textMuted,
     },
     errorText: {
       fontFamily: Fonts.regular,
-      fontSize: 13,
+      fontSize: 11.5,
       color: colors.dangerFg,
+    },
+    hintBanner: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 9,
+      backgroundColor: colors.surfaceMuted,
+      borderRadius: 9,
+      paddingHorizontal: 12,
+      paddingVertical: 11,
+    },
+    hintBannerText: {
+      flex: 1,
+      fontFamily: Fonts.regular,
+      fontSize: 11.5,
+      lineHeight: 16,
+      color: colors.textMuted,
     },
   });
 }

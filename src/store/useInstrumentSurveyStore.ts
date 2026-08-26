@@ -26,6 +26,13 @@ interface InstrumentSurveyState {
   answers: Record<string, InstrumentDraftAnswer>;
   currentIndex: number;
   isSubmitting: boolean;
+  // Spec 74, Fase 4 — id de la pregunta cuya última respuesta ya terminó de
+  // persistirse en SQLite (tras el debounce), para pintar la ficha «Guardado»
+  // del chrome. `null` mientras no hay nada guardado para la pregunta actual
+  // o mientras el guardado sigue en el debounce. Se limpia al editar de
+  // nuevo esa misma pregunta (una edición fresca invalida el guardado
+  // anterior hasta que el próximo debounce complete).
+  savedQuestionId: string | null;
 
   initializeSurvey: (params: {
     surveyId: string;
@@ -71,6 +78,7 @@ export const useInstrumentSurveyStore = create<InstrumentSurveyState>((set, get)
   answers: {},
   currentIndex: 0,
   isSubmitting: false,
+  savedQuestionId: null,
 
   initializeSurvey({ surveyId, instrumentId, instrumentName, sections, campaignSessionId, stepOrder, restoredAnswers }) {
     const flattenedQuestions = flattenSections(sections);
@@ -84,21 +92,26 @@ export const useInstrumentSurveyStore = create<InstrumentSurveyState>((set, get)
       answers: restoredAnswers ?? {},
       currentIndex: 0,
       isSubmitting: false,
+      savedQuestionId: null,
     });
   },
 
   setAnswer(questionId, answer) {
     const { surveyId, answers } = get();
     const updated = { ...answers, [questionId]: answer };
-    set({ answers: updated });
+    // Una edición fresca invalida la ficha «Guardado» hasta que el próximo
+    // debounce complete — evita mostrarla desactualizada mientras se sigue
+    // escribiendo.
+    set({ answers: updated, savedQuestionId: null });
 
     if (!surveyId) return;
 
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
-      surveyDraftStore.saveAnswer(surveyId, questionId, answer).catch((err) =>
-        logger.error('[Survey] saveAnswer failed', err),
-      );
+      surveyDraftStore
+        .saveAnswer(surveyId, questionId, answer)
+        .then(() => set({ savedQuestionId: questionId }))
+        .catch((err) => logger.error('[Survey] saveAnswer failed', err));
     }, DEBOUNCE_MS);
   },
 
@@ -209,6 +222,7 @@ export const useInstrumentSurveyStore = create<InstrumentSurveyState>((set, get)
       answers: {},
       currentIndex: 0,
       isSubmitting: false,
+      savedQuestionId: null,
     });
   },
 }));

@@ -5,19 +5,28 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  TouchableOpacity,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { farmPlotStore, type FarmPlotDraft } from "../../../../src/storage/farmPlotStore";
-import { getFarmPlotsByFarm, type FarmPlotResponse } from "../../../../src/api/farmPlots";
-import { useSyncStatusStore } from "../../../../src/store/useSyncStatusStore";
-import { Fonts } from "../../../../src/theme/fonts";
-import { useTheme } from "../../../../src/theme/ThemeProvider";
-import type { ThemeColors } from "../../../../src/theme/colors";
+import { ChevronLeft, Plus, RefreshCw, WifiOff } from "lucide-react-native";
+import { farmPlotStore, type FarmPlotDraft } from "../../../src/storage/farmPlotStore";
+import { getFarmPlotsByFarm, type FarmPlotResponse } from "../../../src/api/farmPlots";
+import { useSyncStatusStore } from "../../../src/store/useSyncStatusStore";
+import { StatusBadge } from "../../../src/components/common/StatusBadge";
+import { AppText } from "../../../src/components/common/AppText";
+import { PlotSketch } from "../../../src/components/plots/PlotSketch";
+import { Fonts } from "../../../src/theme/fonts";
+import { useTheme } from "../../../src/theme/ThemeProvider";
+import type { ThemeColors } from "../../../src/theme/colors";
 
 export default function FarmPlotsScreen() {
-  const { farmId, farmName } = useLocalSearchParams<{ farmId: string; farmName?: string }>();
+  const { farmId, farmName, farmerName } = useLocalSearchParams<{
+    farmId: string;
+    farmName?: string;
+    farmerName?: string;
+  }>();
   const router = useRouter();
   const { isOnline } = useSyncStatusStore();
   const { colors } = useTheme();
@@ -31,11 +40,10 @@ export default function FarmPlotsScreen() {
     setIsLoading(true);
     setError(null);
     try {
-      // Load from SQLite first (works offline)
+      // Carga desde SQLite primero — funciona sin conexión.
       const local = await farmPlotStore.loadDraftsByFarm(farmId);
       setPlots(local);
 
-      // If online, fetch from backend and upsert synced ones
       if (isOnline) {
         const remote: FarmPlotResponse[] = await getFarmPlotsByFarm(farmId);
         for (const r of remote) {
@@ -46,7 +54,7 @@ export default function FarmPlotsScreen() {
             description: r.description,
             area: r.area,
             polygon: r.polygon,
-            status: 'synced',
+            status: "synced",
             capturedOffline: r.capturedOffline,
             createdAt: new Date(r.createdAt),
             updatedAt: new Date(r.updatedAt),
@@ -67,27 +75,31 @@ export default function FarmPlotsScreen() {
   return (
     <SafeAreaView style={styles.root}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} style={styles.backBtn} accessibilityRole="button">
-          <Text style={styles.backText}>← Volver</Text>
-        </Pressable>
+        <TouchableOpacity onPress={() => router.back()} style={styles.headerSlot} accessibilityRole="button" accessibilityLabel="Volver">
+          <ChevronLeft size={20} color={colors.textPrimary} />
+        </TouchableOpacity>
         <View style={styles.headerCenter}>
-          <Text style={styles.title} numberOfLines={1}>
+          <AppText style={styles.title} numberOfLines={1}>
             {farmName ?? "Lotes de la finca"}
-          </Text>
+          </AppText>
+          {farmerName ? (
+            <Text style={styles.subtitle} numberOfLines={1}>{farmerName}</Text>
+          ) : null}
         </View>
-        <Pressable
+        <TouchableOpacity
           onPress={load}
           disabled={!isOnline || isLoading}
+          style={styles.headerSlot}
+          accessibilityRole="button"
           accessibilityLabel="Actualizar lotes"
         >
-          <Text style={[styles.refreshBtn, (!isOnline || isLoading) && styles.refreshDisabled]}>
-            Actualizar
-          </Text>
-        </Pressable>
+          <RefreshCw size={18} color={!isOnline || isLoading ? colors.textMuted : colors.brand} />
+        </TouchableOpacity>
       </View>
 
       {!isOnline ? (
         <View style={styles.offlineBanner}>
+          <WifiOff size={14} color={colors.warningFg} strokeWidth={2.4} />
           <Text style={styles.offlineText}>Sin conexión — mostrando lotes guardados localmente</Text>
         </View>
       ) : null}
@@ -120,13 +132,14 @@ export default function FarmPlotsScreen() {
           style={styles.captureBtn}
           onPress={() =>
             router.push({
-              pathname: "/(tabs)/plots/capture/[farmId]",
+              pathname: "/plots/capture/[farmId]",
               params: { farmId, farmName: farmName ?? "" },
             })
           }
           accessibilityRole="button"
         >
-          <Text style={styles.captureBtnText}>+ Capturar nuevo lote</Text>
+          <Plus size={18} color={colors.brandForeground} strokeWidth={2.6} />
+          <Text style={styles.captureBtnText}>Capturar nuevo lote</Text>
         </Pressable>
       </View>
     </SafeAreaView>
@@ -137,27 +150,29 @@ function PlotRow({ plot }: { plot: FarmPlotDraft }) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const pointCount = plot.polygon.points.length;
-  const isSynced = plot.status === 'synced';
+  const isSynced = plot.status === "synced";
 
   return (
     <View style={styles.card}>
-      <View style={styles.cardTop}>
-        <Text style={styles.plotName}>{plot.name}</Text>
-        <View style={[styles.badge, isSynced ? styles.badgeSynced : styles.badgeDraft]}>
-          <Text style={isSynced ? styles.badgeSyncedText : styles.badgeDraftText}>
-            {isSynced ? "Sincronizado" : "Borrador"}
-          </Text>
-        </View>
+      <View style={styles.sketchWrap}>
+        <PlotSketch points={plot.polygon.points} size="thumbnail" />
       </View>
-      {plot.description ? (
-        <Text style={styles.plotDesc} numberOfLines={1}>{plot.description}</Text>
-      ) : null}
-      <View style={styles.cardMeta}>
-        <Text style={styles.metaText}>{pointCount} punto{pointCount !== 1 ? "s" : ""}</Text>
-        {plot.area ? (
-          <Text style={styles.metaText}>{plot.area.toFixed(2)} ha</Text>
+      <View style={styles.cardBody}>
+        <View style={styles.cardTop}>
+          <Text style={styles.plotName} numberOfLines={1}>{plot.name}</Text>
+          <StatusBadge
+            kind={isSynced ? "synced" : "pending"}
+            label={isSynced ? "Sincronizado" : "Borrador"}
+          />
+        </View>
+        {plot.description ? (
+          <Text style={styles.plotDesc} numberOfLines={1}>{plot.description}</Text>
         ) : null}
-        <Text style={styles.metaText}>{plot.createdAt.toLocaleDateString("es-CO")}</Text>
+        <View style={styles.cardMeta}>
+          <Text style={styles.metaText}>{pointCount} punto{pointCount !== 1 ? "s" : ""}</Text>
+          {plot.area ? <Text style={styles.metaText}>{plot.area.toFixed(2)} ha</Text> : null}
+          <Text style={styles.metaText}>{plot.createdAt.toLocaleDateString("es-CO")}</Text>
+        </View>
       </View>
     </View>
   );
@@ -170,21 +185,23 @@ function createStyles(colors: ThemeColors) {
     header: {
       flexDirection: "row",
       alignItems: "center",
-      paddingHorizontal: 16,
-      paddingVertical: 12,
+      gap: 8,
+      paddingHorizontal: 12,
+      paddingVertical: 11,
       backgroundColor: colors.surface,
       borderBottomWidth: 1,
       borderBottomColor: colors.border,
-      gap: 8,
     },
-    backBtn: { paddingVertical: 4, paddingRight: 4 },
-    backText: { fontSize: 14, fontFamily: Fonts.medium, color: colors.brand },
-    headerCenter: { flex: 1 },
-    title: { fontSize: 16, fontFamily: Fonts.bold, color: colors.textPrimary },
-    refreshBtn: { fontSize: 14, fontFamily: Fonts.semiBold, color: colors.brand },
-    refreshDisabled: { color: colors.textMuted },
+    headerSlot: { width: 40, height: 40, alignItems: "center", justifyContent: "center", flexShrink: 0 },
+    headerCenter: { flex: 1, alignItems: "center" },
+    title: { fontSize: 15, fontFamily: Fonts.extraBold, color: colors.textPrimary, textAlign: "center" },
+    subtitle: { fontSize: 11.5, fontFamily: Fonts.regular, color: colors.textMuted, textAlign: "center", marginTop: 1 },
 
     offlineBanner: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 7,
+      justifyContent: "center",
       backgroundColor: colors.warningBg,
       paddingHorizontal: 20,
       paddingVertical: 8,
@@ -211,29 +228,35 @@ function createStyles(colors: ThemeColors) {
     emptyDesc: { fontSize: 13, fontFamily: Fonts.regular, color: colors.textMuted, textAlign: "center" },
 
     card: {
+      flexDirection: "row",
+      gap: 12,
       backgroundColor: colors.surface,
       borderRadius: 12,
-      padding: 16,
+      padding: 12,
       borderWidth: 1,
       borderColor: colors.border,
-      gap: 6,
     },
+    sketchWrap: {
+      width: 56,
+      height: 56,
+      borderRadius: 8,
+      overflow: "hidden",
+      backgroundColor: colors.surfaceMuted,
+      alignItems: "center",
+      justifyContent: "center",
+      flexShrink: 0,
+    },
+    cardBody: { flex: 1, gap: 5 },
     cardTop: {
       flexDirection: "row",
       justifyContent: "space-between",
       alignItems: "flex-start",
       gap: 8,
     },
-    plotName: { flex: 1, fontSize: 15, fontFamily: Fonts.semiBold, color: colors.textPrimary },
-    plotDesc: { fontSize: 13, fontFamily: Fonts.regular, color: colors.textMuted },
+    plotName: { flex: 1, fontSize: 14.5, fontFamily: Fonts.bold, color: colors.textPrimary },
+    plotDesc: { fontSize: 12.5, fontFamily: Fonts.regular, color: colors.textMuted },
     cardMeta: { flexDirection: "row", gap: 12, marginTop: 2 },
-    metaText: { fontSize: 12, fontFamily: Fonts.regular, color: colors.textMuted },
-
-    badge: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
-    badgeSynced: { backgroundColor: colors.successBg },
-    badgeSyncedText: { fontSize: 11, fontFamily: Fonts.semiBold, color: colors.successFg },
-    badgeDraft: { backgroundColor: colors.warningBg },
-    badgeDraftText: { fontSize: 11, fontFamily: Fonts.semiBold, color: colors.warningFg },
+    metaText: { fontSize: 11.5, fontFamily: Fonts.regular, color: colors.textMuted },
 
     footer: {
       position: "absolute",
@@ -246,11 +269,14 @@ function createStyles(colors: ThemeColors) {
       borderTopColor: colors.border,
     },
     captureBtn: {
+      flexDirection: "row",
+      gap: 8,
       backgroundColor: colors.brand,
       borderRadius: 12,
       paddingVertical: 16,
       alignItems: "center",
+      justifyContent: "center",
     },
-    captureBtnText: { fontSize: 16, fontFamily: Fonts.semiBold, color: colors.brandForeground },
+    captureBtnText: { fontSize: 15, fontFamily: Fonts.extraBold, color: colors.brandForeground },
   });
 }

@@ -4,12 +4,26 @@ export default ({ config }: ConfigContext): ExpoConfig => {
   const [major, minor, patch] = (config.version ?? '1.0.0').split('.').map(Number);
   const versionCode = major * 10000 + minor * 100 + patch;
 
+  // Spec 75: los builds release (preview/production) bloquean HTTP sin cifrar
+  // por defecto en Android. Solo se habilita cleartext cuando el propio
+  // EXPO_PUBLIC_API_BASE_URL del build es http:// (backend de desarrollo en
+  // LAN para pruebas manuales) — production/preview reales siempre usan
+  // https://sosagroapi.up.railway.app, así que nunca activan esto.
+  const usesCleartextTraffic = (process.env.EXPO_PUBLIC_API_BASE_URL ?? '').startsWith('http://');
+
   return {
     ...config,
     name: 'Sos Agro 4.C',
     slug: 'sosagro-characterization',
     version: '1.0.0',
-    orientation: 'portrait',
+    // Spec 74, Fase 10 (aprobada 2026-08-26): antes 'portrait' bloqueaba
+    // rotación en toda la app. Tablet necesita landscape para el layout de
+    // dos paneles; sin expo-screen-orientation (dependencia nueva que este
+    // spec no puede agregar) no hay forma de bloquear la orientación por
+    // pantalla, así que se permite rotación libre en toda la app y las
+    // pantallas delicadas (captura GPS, preguntas con teclado) se diseñan
+    // para tolerar ambas orientaciones en vez de bloquear una.
+    orientation: 'default',
     icon: './assets/icon.png',
     userInterfaceStyle: 'light',
     scheme: 'sosagro',
@@ -20,7 +34,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       fallbackToCacheTimeout: 0,
     },
     ios: {
-      supportsTablet: false,
+      // Spec 74, Fase 10 — layout de dos paneles en tablet.
+      supportsTablet: true,
       bundleIdentifier: 'co.edu.itm.sosagro.characterization',
     },
     android: {
@@ -79,6 +94,12 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         {
           organization: 'instituto-tecnologico-metropol',
           project: 'sosagro-mobile',
+        },
+      ],
+      [
+        'expo-build-properties',
+        {
+          android: { usesCleartextTraffic },
         },
       ],
     ],

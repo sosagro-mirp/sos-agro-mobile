@@ -22,6 +22,16 @@ export interface ThemeColors {
   warningFg: string;
   infoBg: string;
   infoFg: string;
+  /** Chrome del header de la app (spec 74) — distinto de `brand`: en oscuro
+   * deja de ser amarillo institucional para evitar el amarillo-sobre-amarillo
+   * que obligó a derivar overlays especiales en el spec 63. */
+  headerBg: string;
+  headerFg: string;
+  headerSub: string;
+  headerPill: string;
+  headerBorder: string;
+  /** Fondo de los skeletons de carga (spec 74). */
+  skeleton: string;
 }
 
 /** Verde institucional (#1B6B3A) — mismo valor que app.config.ts, ver DESIGN.md. */
@@ -47,6 +57,12 @@ export const lightColors: ThemeColors = {
   warningFg: "#92400E",
   infoBg: "#DBEAFE",
   infoFg: "#1D4ED8",
+  headerBg: "#1B6B3A",
+  headerFg: "#FFFFFF",
+  headerSub: "rgba(255,255,255,.72)",
+  headerPill: "rgba(255,255,255,.16)",
+  headerBorder: "rgba(255,255,255,.32)",
+  skeleton: "#EFF1F4",
 };
 
 /** Verde → amarillo en oscuro, mismo criterio que la web (spec 63). */
@@ -72,6 +88,15 @@ export const darkColors: ThemeColors = {
   warningFg: "#FBBF24",
   infoBg: "#172554",
   infoFg: "#60A5FA",
+  // Spec 74, decisión 10: en oscuro el header deja de ser el amarillo de
+  // marca y pasa a surfaceMuted con borde — elimina el amarillo sobre
+  // amarillo y los overlays derivados que el spec 63 tuvo que inventar.
+  headerBg: "#1E293B",
+  headerFg: "#F1F5F9",
+  headerSub: "#94A3B8",
+  headerPill: "rgba(241,245,249,.08)",
+  headerBorder: "#334155",
+  skeleton: "#1E293B",
 };
 
 export function getColors(theme: EffectiveTheme): ThemeColors {

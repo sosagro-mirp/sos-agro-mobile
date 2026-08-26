@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react";
 import {
-  ActivityIndicator,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -9,7 +8,10 @@ import {
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { CircleAlert, Check, ArrowRight, ChevronLeft, LoaderCircle } from "lucide-react-native";
 import { useInstrumentSurveyStore } from "../../../src/store/useInstrumentSurveyStore";
+import { isAnswerComplete } from "../../../src/lib/isAnswerComplete";
+import { AppText } from "../../../src/components/common/AppText";
 import { Fonts } from "../../../src/theme/fonts";
 import { useTheme } from "../../../src/theme/ThemeProvider";
 import type { ThemeColors } from "../../../src/theme/colors";
@@ -35,7 +37,18 @@ export default function ReviewScreen() {
     ({ question }) => answers[question.questionId] !== undefined
   ).length;
 
+  // Decisión pendiente #2 del spec 74 (2026-08-25): "Enviar encuesta" se
+  // bloquea mientras falte alguna obligatoria — antes no se bloqueaba nunca.
+  // `isAnswerComplete` ya es la misma función que usa `canAdvance()` en el
+  // flujo de pregunta, así que el criterio de "completa" no diverge entre
+  // pantallas.
+  const missingCount = visible.filter(
+    ({ question }) => !isAnswerComplete(question, answers[question.questionId]),
+  ).length;
+  const canSubmit = missingCount === 0 && !isSubmitting;
+
   const handleSubmit = async () => {
+    if (!canSubmit) return;
     setError(null);
     const result = await enqueueSubmission();
     if (result.outcome === "error") {
@@ -52,52 +65,92 @@ export default function ReviewScreen() {
   return (
     <SafeAreaView style={styles.root}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()}>
-          <Text style={styles.back}>← Última pregunta</Text>
+        <Pressable
+          onPress={() => router.back()}
+          style={styles.headerSlot}
+          accessibilityRole="button"
+          accessibilityLabel="Volver a la última pregunta"
+          hitSlop={8}
+        >
+          <ChevronLeft size={20} color={colors.textPrimary} />
         </Pressable>
-        <Text style={styles.headerTitle}>Revisión</Text>
-        <View style={{ width: 80 }} />
+        <View style={styles.headerTitleWrapper}>
+          <AppText style={styles.headerTitle} numberOfLines={1}>
+            Revisión
+          </AppText>
+          <AppText style={styles.headerSubtitle} numberOfLines={1}>
+            Última pregunta
+          </AppText>
+        </View>
+        <View style={styles.headerSlot} />
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.instrumentName}>{instrumentName}</Text>
-        <Text style={styles.summary}>
-          {answeredCount} de {visible.length} preguntas respondidas
-        </Text>
 
-        {visible.map(({ question, sectionName }, index) => {
-          const answer = answers[question.questionId];
-          const hasAnswer = answer !== undefined;
+        <View style={[styles.summaryBanner, missingCount === 0 && styles.summaryBannerOk]}>
+          {missingCount === 0 ? (
+            <Check size={19} color={colors.successFg} strokeWidth={2.4} />
+          ) : (
+            <CircleAlert size={19} color={colors.dangerFg} strokeWidth={2.4} />
+          )}
+          <View style={styles.summaryTextWrapper}>
+            <Text style={[styles.summaryTitle, missingCount === 0 && styles.summaryTitleOk]}>
+              {answeredCount} de {visible.length} respondidas
+            </Text>
+            <Text style={[styles.summarySub, missingCount === 0 && styles.summarySubOk]}>
+              {missingCount === 0
+                ? "Todas las obligatorias están completas"
+                : `Falta${missingCount !== 1 ? "n" : ""} ${missingCount} obligatoria${missingCount !== 1 ? "s" : ""} para poder enviar`}
+            </Text>
+          </View>
+        </View>
 
-          return (
-            <Pressable
-              key={question.questionId}
-              style={({ pressed }) => [
-                styles.questionRow,
-                !hasAnswer && styles.questionRowUnanswered,
-                pressed && styles.questionRowPressed,
-              ]}
-              onPress={() => handleEdit(index)}
-            >
-              <View style={styles.questionMeta}>
-                <Text style={styles.sectionLabel}>{sectionName}</Text>
-                {question.isRequired && !hasAnswer && (
-                  <Text style={styles.requiredBadge}>Requerida</Text>
-                )}
-              </View>
-              <Text style={styles.questionText} numberOfLines={2}>
-                {question.text}
-              </Text>
-              <Text
-                style={[styles.answerText, !hasAnswer && styles.answerTextEmpty]}
-                numberOfLines={1}
+        <View style={styles.cards}>
+          {visible.map(({ question, sectionName }, index) => {
+            const answer = answers[question.questionId];
+            const missing = !isAnswerComplete(question, answer);
+            const hasAnswer = answer !== undefined;
+
+            return (
+              <Pressable
+                key={question.questionId}
+                style={[styles.card, missing && styles.cardMissing]}
+                onPress={() => handleEdit(index)}
+                accessibilityRole="button"
               >
-                {formatAnswer(answer)}
-              </Text>
-              <Text style={styles.editHint}>Toca para editar →</Text>
-            </Pressable>
-          );
-        })}
+                <View style={styles.cardHeader}>
+                  <Text style={styles.sectionLabel} numberOfLines={1}>
+                    {sectionName?.toUpperCase()}
+                  </Text>
+                  {missing && (
+                    <View style={styles.requiredBadge}>
+                      <Text style={styles.requiredBadgeText}>REQUERIDA</Text>
+                    </View>
+                  )}
+                </View>
+                <Text style={styles.questionText} numberOfLines={3}>
+                  {question.text}
+                </Text>
+                <View style={styles.answerRow}>
+                  {hasAnswer ? (
+                    <Check size={15} color={colors.successFg} strokeWidth={2.6} />
+                  ) : (
+                    <CircleAlert size={15} color={colors.dangerFg} strokeWidth={2.4} />
+                  )}
+                  <Text
+                    style={[styles.answerText, !hasAnswer && styles.answerTextEmpty]}
+                    numberOfLines={1}
+                  >
+                    {formatAnswer(answer)}
+                  </Text>
+                  <Text style={styles.editHint}>Editar</Text>
+                  <ArrowRight size={14} color={colors.brand} strokeWidth={2.6} />
+                </View>
+              </Pressable>
+            );
+          })}
+        </View>
       </ScrollView>
 
       {error ? (
@@ -108,14 +161,17 @@ export default function ReviewScreen() {
 
       <View style={styles.footer}>
         <Pressable
-          style={[styles.button, isSubmitting && styles.buttonDisabled]}
+          style={[styles.button, !canSubmit && styles.buttonDisabled]}
           onPress={handleSubmit}
-          disabled={isSubmitting}
+          disabled={!canSubmit}
+          accessibilityRole="button"
         >
           {isSubmitting ? (
-            <ActivityIndicator color={colors.brandForeground} />
+            <LoaderCircle size={18} color={colors.brandForeground} />
           ) : (
-            <Text style={styles.buttonText}>Enviar encuesta</Text>
+            <Text style={[styles.buttonText, missingCount > 0 && styles.buttonTextDisabled]}>
+              Enviar encuesta
+            </Text>
           )}
         </Pressable>
       </View>
@@ -141,52 +197,86 @@ function createStyles(colors: ThemeColors) {
     header: {
       flexDirection: "row",
       alignItems: "center",
-      justifyContent: "space-between",
-      paddingHorizontal: 20,
-      paddingVertical: 16,
+      gap: 12,
+      paddingHorizontal: 12,
+      paddingVertical: 11,
       backgroundColor: colors.surface,
       borderBottomWidth: 1,
       borderBottomColor: colors.border,
     },
-    back: { fontSize: 14, fontFamily: Fonts.regular, color: colors.brand },
-    headerTitle: { fontSize: 17, fontFamily: Fonts.bold, color: colors.textPrimary },
-    content: { padding: 20, gap: 12 },
-    instrumentName: { fontSize: 20, fontFamily: Fonts.bold, color: colors.textPrimary },
-    summary: { fontSize: 14, fontFamily: Fonts.regular, color: colors.textMuted, marginBottom: 4 },
-    questionRow: {
-      backgroundColor: colors.surface,
-      borderRadius: 10,
-      padding: 14,
-      borderWidth: 1,
-      borderColor: colors.border,
-      gap: 4,
+    headerSlot: {
+      width: 48,
+      height: 48,
+      alignItems: "center",
+      justifyContent: "center",
+      flexShrink: 0,
     },
-    questionRowUnanswered: {
+    headerTitleWrapper: { flex: 1, minWidth: 0, alignItems: "center" },
+    headerTitle: { fontSize: 13.5, fontFamily: Fonts.bold, color: colors.textPrimary, textAlign: "center" },
+    headerSubtitle: {
+      fontSize: 10.5,
+      fontFamily: Fonts.regular,
+      color: colors.textMuted,
+      marginTop: 2,
+      textAlign: "center",
+    },
+    content: { padding: 14, paddingTop: 16 },
+    instrumentName: {
+      fontSize: 19,
+      fontFamily: Fonts.extraBold,
+      color: colors.textPrimary,
+      letterSpacing: -0.3,
+      marginBottom: 16,
+    },
+    summaryBanner: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 11,
+      borderWidth: 1,
       borderColor: colors.dangerFg,
       backgroundColor: colors.dangerBg,
+      borderRadius: 11,
+      padding: 14,
+      marginBottom: 16,
     },
-    questionRowPressed: { opacity: 0.8 },
-    questionMeta: {
-      flexDirection: "row",
-      justifyContent: "space-between",
-      alignItems: "center",
+    summaryBannerOk: { borderColor: colors.successFg, backgroundColor: colors.successBg },
+    summaryTextWrapper: { flex: 1, minWidth: 0 },
+    summaryTitle: { fontSize: 13.5, fontFamily: Fonts.extraBold, color: colors.dangerFg, marginBottom: 2 },
+    summaryTitleOk: { color: colors.successFg },
+    summarySub: { fontSize: 11.5, color: colors.dangerFg, opacity: 0.9, lineHeight: 16 },
+    summarySubOk: { color: colors.successFg },
+    cards: { gap: 11 },
+    card: {
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      padding: 14,
     },
-    sectionLabel: { fontSize: 11, fontFamily: Fonts.regular, color: colors.textMuted },
+    cardMissing: { borderColor: colors.dangerFg, backgroundColor: colors.dangerBg },
+    cardHeader: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 },
+    sectionLabel: { flex: 1, fontSize: 9.5, fontFamily: Fonts.extraBold, color: colors.textMuted, letterSpacing: 0.6 },
     requiredBadge: {
-      fontSize: 11,
-      fontFamily: Fonts.semiBold,
-      color: colors.dangerFg,
-      backgroundColor: colors.dangerBg,
-      paddingHorizontal: 6,
-      paddingVertical: 2,
-      borderRadius: 4,
+      backgroundColor: colors.dangerFg,
+      borderRadius: 99,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
     },
-    questionText: { fontSize: 14, fontFamily: Fonts.semiBold, color: colors.textPrimary },
-    answerText: { fontSize: 14, fontFamily: Fonts.regular, color: colors.brand },
-    answerTextEmpty: { color: colors.textMuted, fontStyle: "italic" },
-    editHint: { fontSize: 11, fontFamily: Fonts.regular, color: colors.textMuted, textAlign: "right" },
+    requiredBadgeText: { fontSize: 9.5, fontFamily: Fonts.extraBold, color: colors.brandForeground },
+    questionText: { fontSize: 13.5, fontFamily: Fonts.medium, color: colors.textPrimary, lineHeight: 19, marginBottom: 9 },
+    answerRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 9,
+      paddingTop: 9,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+    },
+    answerText: { flex: 1, fontSize: 13.5, fontFamily: Fonts.bold, color: colors.successFg },
+    answerTextEmpty: { color: colors.dangerFg },
+    editHint: { fontSize: 11, fontFamily: Fonts.bold, color: colors.brand },
     errorBox: {
-      marginHorizontal: 20,
+      marginHorizontal: 14,
       marginBottom: 8,
       padding: 12,
       backgroundColor: colors.dangerBg,
@@ -196,18 +286,22 @@ function createStyles(colors: ThemeColors) {
     },
     errorText: { fontSize: 14, fontFamily: Fonts.regular, color: colors.dangerFg },
     footer: {
-      padding: 20,
+      padding: 14,
       backgroundColor: colors.surface,
       borderTopWidth: 1,
       borderTopColor: colors.border,
     },
     button: {
-      backgroundColor: colors.brand,
-      borderRadius: 12,
-      paddingVertical: 18,
+      flexDirection: "row",
       alignItems: "center",
+      justifyContent: "center",
+      gap: 9,
+      backgroundColor: colors.brand,
+      borderRadius: 11,
+      paddingVertical: 17,
     },
-    buttonDisabled: { backgroundColor: colors.textMuted },
-    buttonText: { fontSize: 17, fontFamily: Fonts.bold, color: colors.brandForeground },
+    buttonDisabled: { backgroundColor: colors.surfaceMuted, borderWidth: 1, borderColor: colors.borderStrong },
+    buttonText: { fontSize: 15.5, fontFamily: Fonts.extraBold, color: colors.brandForeground },
+    buttonTextDisabled: { color: colors.textMuted },
   });
 }

@@ -22,6 +22,7 @@ import { initSentry, captureError } from "../src/lib/sentry";
 import { logger } from "../src/lib/logger";
 import { ChangeRequestBanner } from "../src/components/requests/ChangeRequestBanner";
 import { ThemeProvider, useTheme } from "../src/theme/ThemeProvider";
+import { SnackbarProvider } from "../src/components/common/Snackbar";
 
 initSentry();
 
@@ -57,6 +58,37 @@ function AuthGuard() {
   }, [user, isRestoring]);
 
   return null;
+}
+
+// Mismo motivo que `SplashGate`: `RootLayout` renderiza `<ThemeProvider>`,
+// así que no puede leer `useTheme()` en su propio cuerpo (el provider todavía
+// no montó). Vive dentro de `<ThemeProvider>` solo para poder aplicar
+// `contentStyle` al Stack — sin esto, cada transición entre pantallas (ej.
+// pregunta → pregunta, spec 74 Fase 4) mostraba un flash del blanco por
+// defecto de `react-native-screens` antes de que el fondo real de cada
+// pantalla se pintara, mucho más visible en tema oscuro.
+function AppStack() {
+  const { colors } = useTheme();
+
+  return (
+    <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.surfaceMuted } }}>
+      <Stack.Screen name="login" />
+      <Stack.Screen name="index" />
+      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      <Stack.Screen name="campaign/[id]/pre-survey" />
+      <Stack.Screen name="campaign/[id]/session/[sessionId]/orchestrator" />
+      <Stack.Screen name="campaign/[id]/session/[sessionId]/completed" />
+      <Stack.Screen name="instrument/[id]/download" />
+      <Stack.Screen name="instrument/[id]/start" />
+      <Stack.Screen
+        name="instrument/[id]/question/[index]"
+        options={{ animation: "none" }}
+      />
+      <Stack.Screen name="instrument/[id]/review" />
+      <Stack.Screen name="instrument/[id]/completed" />
+      <Stack.Screen name="dev/logs" />
+    </Stack>
+  );
 }
 
 // Oculta el splash solo cuando fuentes, DB, sesión Y tema están listos. Vive
@@ -141,26 +173,12 @@ export default function RootLayout() {
   return (
     <ThemeProvider>
       <QueryClientProvider client={queryClient}>
-        <SplashGate ready={fontsLoaded && !isRestoring && dbReady} />
-        <AuthGuard />
-        <ChangeRequestBanner />
-        <Stack screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="login" />
-          <Stack.Screen name="index" />
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen name="campaign/[id]/pre-survey" />
-          <Stack.Screen name="campaign/[id]/session/[sessionId]/orchestrator" />
-          <Stack.Screen name="campaign/[id]/session/[sessionId]/completed" />
-          <Stack.Screen name="instrument/[id]/download" />
-          <Stack.Screen name="instrument/[id]/start" />
-          <Stack.Screen
-            name="instrument/[id]/question/[index]"
-            options={{ animation: "none" }}
-          />
-          <Stack.Screen name="instrument/[id]/review" />
-          <Stack.Screen name="instrument/[id]/completed" />
-          <Stack.Screen name="dev/logs" />
-        </Stack>
+        <SnackbarProvider>
+          <SplashGate ready={fontsLoaded && !isRestoring && dbReady} />
+          <AuthGuard />
+          <ChangeRequestBanner />
+          <AppStack />
+        </SnackbarProvider>
       </QueryClientProvider>
     </ThemeProvider>
   );

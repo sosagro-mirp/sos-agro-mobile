@@ -87,9 +87,9 @@ function createStyles(colors: ThemeColors) {
     },
     description: {
       fontFamily: Fonts.regular,
-      fontSize: 13,
+      fontSize: 12,
       color: colors.textMuted,
-      lineHeight: 18,
+      lineHeight: 17,
     },
     footer: {
       flexDirection: "row",

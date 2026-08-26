@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap');
+  body{margin:0;font-family:'JetBrains Mono',ui-monospace,monospace;background:#0c0c0e;color:#e4e4e7;}
+  a{color:#a3e635;}
+  a:hover{color:#d9f99d;}
+  ::selection{background:#3f3f46;color:#fafafa;}
+  .frame{border-radius:26px;overflow:hidden;border:1px solid #3f3f46;box-shadow:0 18px 50px rgba(0,0,0,.5);}
+  .tbl th{text-align:left;font-size:10.5px;letter-spacing:.07em;color:#71717a;font-weight:700;padding:9px 12px;border-bottom:1px solid #3f3f46;white-space:nowrap;}
+  .tbl td{font-size:11.5px;color:#d4d4d8;padding:9px 12px;border-bottom:1px solid #27272a;vertical-align:top;line-height:1.5;}
+  .sw{width:100%;height:38px;border-radius:6px;border:1px solid rgba(255,255,255,.14);}
+</style>
+</helmet>
+
+<div style="min-height:100vh;background:#0c0c0e;">
+
+  <!-- ===== CONTROL BAR ===== -->
+  <div style="position:sticky;top:0;z-index:80;background:#0c0c0e;border-bottom:1px solid #27272a;padding:11px 18px;display:flex;align-items:center;gap:18px;flex-wrap:wrap;">
+    <div style="font-size:11px;color:#a1a1aa;font-weight:800;letter-spacing:.07em;white-space:nowrap;">SOSAGRO 4.C · APP DE CAMPO</div>
+    <div style="display:flex;gap:4px;flex-wrap:wrap;">
+      <sc-for list="{{ screenTabs }}" as="s" hint-placeholder-count="15">
+        <button onClick="{{ s.onClick }}" style="cursor:pointer;font-family:inherit;font-size:11px;padding:6px 11px;border-radius:4px;border:1px solid {{ s.bd }};background:{{ s.bg }};color:{{ s.fg }};white-space:nowrap;font-weight:{{ s.fw }};">{{ s.label }}</button>
+      </sc-for>
+    </div>
+  </div>
+
+  <!-- ===== STATE BAR ===== -->
+  <sc-if value="{{ hasStates }}" hint-placeholder-val="{{ true }}">
+    <div style="position:sticky;top:44px;z-index:79;background:#141417;border-bottom:1px solid #27272a;padding:9px 18px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+      <span style="font-size:10px;color:#71717a;font-weight:700;letter-spacing:.08em;white-space:nowrap;">ESTADO</span>
+      <div style="display:flex;gap:4px;flex-wrap:wrap;">
+        <sc-for list="{{ stateTabs }}" as="v" hint-placeholder-count="4">
+          <button onClick="{{ v.onClick }}" style="cursor:pointer;font-family:inherit;font-size:11px;padding:5px 11px;border-radius:99px;border:1px solid {{ v.bd }};background:{{ v.bg }};color:{{ v.fg }};white-space:nowrap;">{{ v.label }}</button>
+        </sc-for>
+      </div>
+      <sc-if value="{{ showPendingToggle }}" hint-placeholder-val="{{ false }}">
+        <button onClick="{{ togglePending }}" style="cursor:pointer;font-family:inherit;font-size:11px;padding:5px 11px;border-radius:99px;border:1px solid {{ pendBd }};background:{{ pendBg }};color:{{ pendFg }};white-space:nowrap;margin-left:auto;">Banda de pendientes: {{ pendLabel }}</button>
+      </sc-if>
+    </div>
+  </sc-if>
+
+  <div style="padding:34px 18px 70px;">
+
+    <!-- ===== PHONE PAIR ===== -->
+    <sc-if value="{{ isPhone }}" hint-placeholder-val="{{ true }}">
+      <div style="max-width:900px;margin:0 auto;">
+        <div style="margin-bottom:22px;">
+          <div style="font-size:19px;font-weight:800;color:#fafafa;letter-spacing:-.01em;margin-bottom:6px;">{{ title }}</div>
+          <div style="font-size:12.5px;color:#a1a1aa;line-height:1.6;max-width:640px;">{{ subtitle }}</div>
+        </div>
+        <div style="display:flex;gap:30px;flex-wrap:wrap;justify-content:center;">
+          <div>
+            <div style="font-size:10px;color:#71717a;font-weight:800;letter-spacing:.1em;margin-bottom:10px;text-align:center;">MODO CLARO</div>
+            <div class="frame">
+              <dc-import name="SosAgro Mobile Screen" theme="light" screen="{{ screen }}" state="{{ state }}" pending="{{ pending }}" hint-size="390px,844px"></dc-import>
+            </div>
+          </div>
+          <div>
+            <div style="font-size:10px;color:#71717a;font-weight:800;letter-spacing:.1em;margin-bottom:10px;text-align:center;">MODO OSCURO</div>
+            <div class="frame">
+              <dc-import name="SosAgro Mobile Screen" theme="dark" screen="{{ screen }}" state="{{ state }}" pending="{{ pending }}" hint-size="390px,844px"></dc-import>
+            </div>
+          </div>
+        </div>
+        <sc-if value="{{ hasNote }}" hint-placeholder-val="{{ false }}">
+          <div style="max-width:760px;margin:30px auto 0;border:1px solid #27272a;border-left:3px solid #a3e635;border-radius:6px;background:#141417;padding:16px 18px;">
+            <div style="font-size:10px;font-weight:800;color:#a3e635;letter-spacing:.09em;margin-bottom:9px;">{{ noteLabel }}</div>
+            <div style="font-size:12.5px;color:#d4d4d8;line-height:1.7;">{{ note }}</div>
+          </div>
+        </sc-if>
+      </div>
+    </sc-if>
+
+    <!-- ===== TABLET: INSTRUMENTO ===== -->
+    <sc-if value="{{ isTabletA }}" hint-placeholder-val="{{ false }}">
+      <div style="max-width:1240px;margin:0 auto;">
+        <div style="margin-bottom:22px;">
+          <div style="display:inline-flex;align-items:center;gap:8px;background:#422006;border:1px solid #a16207;border-radius:99px;padding:5px 12px;margin-bottom:12px;">
+            <span style="font-size:10px;font-weight:800;color:#fde047;letter-spacing:.06em;">AMPLIACIÓN DE ALCANCE</span>
+          </div>
+          <div style="font-size:19px;font-weight:800;color:#fafafa;letter-spacing:-.01em;margin-bottom:6px;">Tablet · Instrumento en dos paneles</div>
+          <div style="font-size:12.5px;color:#a1a1aa;line-height:1.6;max-width:700px;">Landscape 1024×768. El índice de secciones pasa a panel fijo izquierdo; la pregunta vive en una columna de lectura de 560 px máx., centrada. El ancho sobrante muestra el contexto del encuestado, no inputs estirados.</div>
+        </div>
+        <div class="frame" style="width:1024px;max-width:100%;height:700px;background:#FFFFFF;color:#111827;display:flex;flex-direction:column;">
+          <div style="flex-shrink:0;height:26px;background:#1B6B3A;color:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 16px;font-size:10.5px;font-weight:700;">
+            <span>9:41</span><span>Sos Agro 4.C · Camilo Duarte</span><span>En línea · 64%</span>
+          </div>
+          <div style="flex:1;min-height:0;display:flex;">
+            <div style="width:280px;flex-shrink:0;border-right:1px solid #E5E7EB;background:#F9FAFB;display:flex;flex-direction:column;">
+              <div style="padding:16px 16px 12px;border-bottom:1px solid #E5E7EB;">
+                <div style="font-size:9.5px;font-weight:800;color:#6B7280;letter-spacing:.09em;margin-bottom:7px;">INSTRUMENTO</div>
+                <div style="font-size:13px;font-weight:800;color:#111827;line-height:1.35;margin-bottom:10px;">Caracterización — Café v2.1</div>
+                <div style="height:5px;background:#E5E7EB;border-radius:99px;overflow:hidden;"><div style="height:100%;width:39%;background:#1B6B3A;"></div></div>
+                <div style="font-size:10.5px;color:#6B7280;margin-top:7px;">32 de 83 respondidas</div>
+              </div>
+              <div style="flex:1;overflow:hidden;padding:10px;">
+                <sc-for list="{{ tabletSections }}" as="s" hint-placeholder-count="3">
+                  <div style="border-radius:9px;background:{{ s.bg }};padding:11px 12px;margin-bottom:6px;">
+                    <div style="display:flex;align-items:center;gap:9px;margin-bottom:8px;">
+                      <div style="width:22px;height:22px;border-radius:6px;background:{{ s.badgeBg }};color:{{ s.badgeFg }};display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;flex-shrink:0;">{{ s.n }}</div>
+                      <span style="font-size:12px;font-weight:{{ s.fw }};color:#111827;flex:1;line-height:1.3;">{{ s.name }}</span>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                      <div style="flex:1;height:4px;background:#E5E7EB;border-radius:99px;overflow:hidden;"><div style="height:100%;width:{{ s.pct }}%;background:{{ s.bar }};"></div></div>
+                      <span style="font-size:9.5px;color:#6B7280;font-weight:700;white-space:nowrap;">{{ s.meta }}</span>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="flex-shrink:0;padding:12px;border-top:1px solid #E5E7EB;">
+                <div style="display:flex;align-items:center;gap:8px;background:#FEF3C7;border-radius:8px;padding:10px 11px;">
+                  <span style="width:7px;height:7px;border-radius:99px;background:#92400E;flex-shrink:0;"></span>
+                  <span style="font-size:10.5px;font-weight:700;color:#92400E;line-height:1.4;">4 encuestas pendientes</span>
+                </div>
+              </div>
+            </div>
+            <div style="flex:1;min-width:0;display:flex;flex-direction:column;">
+              <div style="flex-shrink:0;background:#F9FAFB;border-bottom:1px solid #E5E7EB;">
+                <div style="height:3px;background:#1B6B3A;"></div>
+                <div style="display:flex;align-items:center;gap:12px;padding:11px 24px;">
+                  <span style="font-size:10px;font-weight:800;color:#1B6B3A;letter-spacing:.09em;flex:1;">SEC. 2 · MANEJO AGRONÓMICO · PREGUNTA 11 DE 14</span>
+                  <div style="display:flex;align-items:center;gap:5px;">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#16A34A" stroke-width="2.8" stroke-linecap="round"><path d="M20 6 9 17l-5-5"></path></svg>
+                    <span style="font-size:10px;font-weight:700;color:#16A34A;">Guardado</span>
+                  </div>
+                </div>
+              </div>
+              <div style="flex:1;min-height:0;display:flex;overflow:hidden;">
+                <div style="flex:1;min-width:0;padding:30px 24px;display:flex;justify-content:center;">
+                  <div style="width:100%;max-width:560px;">
+                    <div style="font-size:19px;font-weight:700;color:#111827;line-height:1.4;margin-bottom:7px;">¿Qué dosis de fertilizante aplica por hectárea?</div>
+                    <div style="font-size:11px;font-weight:800;color:#DC2626;margin-bottom:18px;">* REQUERIDO</div>
+                    <div style="display:flex;flex-direction:column;gap:9px;">
+                      <sc-for list="{{ tabletOpts }}" as="o" hint-placeholder-count="4">
+                        <div style="min-height:56px;display:flex;align-items:center;gap:13px;padding:15px 16px;border:1px solid {{ o.bd }};border-left:{{ o.lb }} solid {{ o.lbc }};border-radius:11px;background:{{ o.bg }};">
+                          <div style="width:22px;height:22px;border-radius:99px;border:2px solid {{ o.rc }};display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                            <sc-if value="{{ o.on }}" hint-placeholder-val="{{ false }}">
+                              <div style="width:11px;height:11px;border-radius:99px;background:#1B6B3A;"></div>
+                            </sc-if>
+                          </div>
+                          <span style="font-size:14.5px;font-weight:{{ o.fw }};color:{{ o.fg }};">{{ o.label }}</span>
+                        </div>
+                      </sc-for>
+                    </div>
+                  </div>
+                </div>
+                <div style="width:250px;flex-shrink:0;border-left:1px solid #E5E7EB;background:#F9FAFB;padding:20px 16px;">
+                  <div style="font-size:9.5px;font-weight:800;color:#6B7280;letter-spacing:.09em;margin-bottom:12px;">ENCUESTADO</div>
+                  <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+                    <div style="width:36px;height:36px;border-radius:9px;background:#F0FDF4;color:#1B6B3A;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;flex-shrink:0;">MR</div>
+                    <div style="min-width:0;">
+                      <div style="font-size:12px;font-weight:700;color:#111827;line-height:1.3;">María Restrepo V.</div>
+                      <div style="font-size:10px;color:#6B7280;margin-top:2px;">CC 43.221.908</div>
+                    </div>
+                  </div>
+                  <div style="height:1px;background:#E5E7EB;margin-bottom:16px;"></div>
+                  <div style="font-size:9.5px;font-weight:800;color:#6B7280;letter-spacing:.09em;margin-bottom:11px;">CONTEXTO</div>
+                  <div style="display:flex;flex-direction:column;gap:11px;">
+                    <sc-for list="{{ tabletContext }}" as="c" hint-placeholder-count="3">
+                      <div>
+                        <div style="font-size:10px;color:#6B7280;margin-bottom:3px;">{{ c.label }}</div>
+                        <div style="font-size:12px;font-weight:600;color:#111827;line-height:1.35;">{{ c.value }}</div>
+                      </div>
+                    </sc-for>
+                  </div>
+                  <div style="display:flex;align-items:flex-start;gap:8px;background:#DBEAFE;border-radius:8px;padding:10px 11px;margin-top:18px;">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#1D4ED8" stroke-width="2.2" stroke-linecap="round" style="flex-shrink:0;margin-top:1px;"><line x1="6" x2="6" y1="3" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg>
+                    <span style="font-size:10px;color:#1D4ED8;font-weight:600;line-height:1.45;">Visible porque «¿Aplica fertilización?» = Sí</span>
+                  </div>
+                </div>
+              </div>
+              <div style="flex-shrink:0;display:flex;justify-content:center;gap:12px;padding:14px 24px;border-top:1px solid #E5E7EB;background:#FFFFFF;">
+                <div style="width:100%;max-width:560px;display:flex;gap:12px;">
+                  <div style="min-height:48px;width:130px;display:flex;align-items:center;justify-content:center;gap:8px;border:1px solid #D1D5DB;border-radius:11px;color:#111827;font-size:13.5px;font-weight:700;">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m15 18-6-6 6-6"></path></svg>
+                    Anterior
+                  </div>
+                  <div style="min-height:48px;flex:1;display:flex;align-items:center;justify-content:center;gap:9px;background:#1B6B3A;color:#fff;border-radius:11px;font-size:15px;font-weight:800;">
+                    Siguiente
+                    <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path></svg>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- ===== TABLET: LOTES ===== -->
+    <sc-if value="{{ isTabletB }}" hint-placeholder-val="{{ false }}">
+      <div style="max-width:1240px;margin:0 auto;">
+        <div style="margin-bottom:22px;">
+          <div style="display:inline-flex;align-items:center;gap:8px;background:#422006;border:1px solid #a16207;border-radius:99px;padding:5px 12px;margin-bottom:12px;">
+            <span style="font-size:10px;font-weight:800;color:#fde047;letter-spacing:.06em;">AMPLIACIÓN DE ALCANCE</span>
+          </div>
+          <div style="font-size:19px;font-weight:800;color:#fafafa;letter-spacing:-.01em;margin-bottom:6px;">Tablet · Captura de lote en dos paneles (modo oscuro)</div>
+          <div style="font-size:12.5px;color:#a1a1aa;line-height:1.6;max-width:700px;">El croquis del polígono ocupa el panel grande y crece con cada punto; la lista de vértices queda a la derecha. Es la pantalla que más gana con el ancho extra.</div>
+        </div>
+        <div class="frame" style="width:1024px;max-width:100%;height:700px;background:#0F172A;color:#F1F5F9;display:flex;flex-direction:column;">
+          <div style="flex-shrink:0;height:26px;background:#1E293B;color:#F1F5F9;display:flex;align-items:center;justify-content:space-between;padding:0 16px;font-size:10.5px;font-weight:700;border-bottom:1px solid #334155;">
+            <span>9:41</span><span>Capturar lote · Finca La Esperanza</span><span>Sin conexión · 64%</span>
+          </div>
+          <div style="flex-shrink:0;display:flex;align-items:center;gap:11px;background:#052E16;border-bottom:1px solid #4ADE80;padding:11px 20px;">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#4ADE80" stroke-width="2.6" stroke-linecap="round"><path d="M20 6 9 17l-5-5"></path></svg>
+            <span style="font-size:12.5px;font-weight:700;color:#4ADE80;flex:1;">5 puntos capturados — listo para cerrar el polígono</span>
+            <span style="font-size:11.5px;font-weight:700;color:#4ADE80;">aprox. 1.8 ha</span>
+          </div>
+          <div style="flex:1;min-height:0;display:flex;">
+            <div style="flex:1;min-width:0;padding:22px;display:flex;flex-direction:column;">
+              <div style="flex:1;min-height:0;border:1px solid #334155;border-radius:14px;background:#1E293B;padding:22px;display:flex;align-items:center;justify-content:center;">
+                <svg width="100%" height="100%" viewBox="0 0 200 150" style="max-height:100%;">
+                  <defs>
+                    <pattern id="tgrid" width="16" height="16" patternUnits="userSpaceOnUse">
+                      <path d="M16 0 L0 0 0 16" fill="none" stroke="#334155" stroke-width="1"></path>
+                    </pattern>
+                  </defs>
+                  <rect x="0" y="0" width="200" height="150" fill="url(#tgrid)"></rect>
+                  <polygon points="30,118 58,40 136,26 172,92 104,132" fill="#422006" stroke="#FDE047" stroke-width="2" stroke-linejoin="round"></polygon>
+                  <sc-for list="{{ tabletVertexDots }}" as="v" hint-placeholder-count="5">
+                    <circle cx="{{ v.x }}" cy="{{ v.y }}" r="4.5" fill="#FDE047" stroke="#0F172A" stroke-width="2"></circle>
+                  </sc-for>
+                  {{ tabletVertexLabels }}
+                </svg>
+              </div>
+              <div style="flex-shrink:0;display:flex;gap:12px;margin-top:18px;">
+                <div style="min-height:48px;flex:1;display:flex;align-items:center;justify-content:center;gap:9px;border:1px solid #64748B;border-radius:11px;color:#F1F5F9;font-size:14px;font-weight:700;">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg>
+                  Agregar punto GPS
+                </div>
+                <div style="min-height:48px;width:56px;display:flex;align-items:center;justify-content:center;border:1px solid #F87171;background:#450A0A;border-radius:11px;color:#F87171;">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M9 14 4 9l5-5"></path><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"></path></svg>
+                </div>
+                <div style="min-height:48px;flex:1.3;display:flex;align-items:center;justify-content:center;gap:9px;background:#FDE047;color:#0F172A;border-radius:11px;font-size:14.5px;font-weight:800;">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M20 6 9 17l-5-5"></path></svg>
+                  Cerrar y guardar
+                </div>
+              </div>
+            </div>
+            <div style="width:310px;flex-shrink:0;border-left:1px solid #334155;background:#0F172A;display:flex;flex-direction:column;">
+              <div style="flex-shrink:0;padding:16px 18px 12px;border-bottom:1px solid #334155;">
+                <div style="font-size:9.5px;font-weight:800;color:#94A3B8;letter-spacing:.09em;">VÉRTICES CAPTURADOS</div>
+              </div>
+              <div style="flex:1;overflow:hidden;">
+                <sc-for list="{{ tabletVertices }}" as="v" hint-placeholder-count="5">
+                  <div style="display:flex;align-items:center;gap:11px;padding:13px 18px;border-bottom:1px solid #1E293B;">
+                    <div style="width:24px;height:24px;border-radius:99px;background:#FDE047;color:#0F172A;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex-shrink:0;">{{ v.n }}</div>
+                    <div style="flex:1;min-width:0;">
+                      <div style="font-size:11.5px;font-weight:600;color:#F1F5F9;">{{ v.coord }}</div>
+                      <div style="font-size:10px;color:#94A3B8;margin-top:2px;">{{ v.time }}</div>
+                    </div>
+                    <span style="font-size:10.5px;font-weight:700;color:{{ v.accFg }};white-space:nowrap;">{{ v.acc }}</span>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="flex-shrink:0;padding:14px 18px;border-top:1px solid #334155;">
+                <div style="display:flex;align-items:flex-start;gap:9px;background:#1E293B;border-radius:9px;padding:11px 12px;">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94A3B8" stroke-width="2.2" stroke-linecap="round" style="flex-shrink:0;margin-top:1px;"><path d="M12 16v-4"></path><path d="M12 8h.01"></path><circle cx="12" cy="12" r="10"></circle></svg>
+                  <span style="font-size:10.5px;color:#94A3B8;line-height:1.5;">Croquis a escala, sin conexión ni mapas externos.</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- ===== HOJA DE SISTEMA ===== -->
+    <sc-if value="{{ isSistema }}" hint-placeholder-val="{{ false }}">
+      <div style="max-width:1080px;margin:0 auto;">
+        <div style="font-size:22px;font-weight:800;color:#fafafa;letter-spacing:-.02em;margin-bottom:8px;">Hoja de sistema</div>
+        <div style="font-size:12.5px;color:#a1a1aa;line-height:1.6;margin-bottom:34px;max-width:640px;">Escalas, tokens y decisiones aplicadas en los mockups. Todo derivado de la spec 63 compartida con el panel web.</div>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:22px;margin-bottom:34px;">
+          <div style="border:1px solid #27272a;border-radius:10px;background:#141417;overflow:hidden;">
+            <div style="padding:13px 16px;border-bottom:1px solid #27272a;font-size:12px;font-weight:800;color:#fafafa;">Tipografía · JetBrains Mono</div>
+            <div style="padding:16px;">
+              <sc-for list="{{ typeScale }}" as="ty" hint-placeholder-count="7">
+                <div style="display:flex;align-items:baseline;gap:14px;padding:9px 0;border-bottom:1px solid #1f1f23;">
+                  <span style="font-size:{{ ty.px }}px;font-weight:{{ ty.w }};color:#fafafa;flex:1;line-height:1.2;">{{ ty.sample }}</span>
+                  <span style="font-size:10.5px;color:#71717a;white-space:nowrap;">{{ ty.spec }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+
+          <div style="border:1px solid #27272a;border-radius:10px;background:#141417;overflow:hidden;">
+            <div style="padding:13px 16px;border-bottom:1px solid #27272a;font-size:12px;font-weight:800;color:#fafafa;">Espaciado, radios y alturas</div>
+            <div style="padding:16px;">
+              <sc-for list="{{ metrics }}" as="m" hint-placeholder-count="8">
+                <div style="display:flex;justify-content:space-between;gap:14px;padding:8px 0;border-bottom:1px solid #1f1f23;">
+                  <span style="font-size:11.5px;color:#d4d4d8;">{{ m.label }}</span>
+                  <span style="font-size:11.5px;font-weight:700;color:#a3e635;white-space:nowrap;">{{ m.value }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+
+        <div style="border:1px solid #27272a;border-radius:10px;background:#141417;overflow:hidden;margin-bottom:34px;">
+          <div style="padding:13px 16px;border-bottom:1px solid #27272a;font-size:12px;font-weight:800;color:#fafafa;">Paleta · claro / oscuro</div>
+          <div style="padding:16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;">
+            <sc-for list="{{ palette }}" as="p" hint-placeholder-count="10">
+              <div>
+                <div style="display:flex;gap:0;border-radius:6px;overflow:hidden;border:1px solid rgba(255,255,255,.14);margin-bottom:7px;">
+                  <div style="flex:1;height:38px;background:{{ p.light }};"></div>
+                  <div style="flex:1;height:38px;background:{{ p.dark }};"></div>
+                </div>
+                <div style="font-size:11px;font-weight:700;color:#e4e4e7;margin-bottom:3px;">{{ p.name }}</div>
+                <div style="font-size:9.5px;color:#71717a;">{{ p.light }} · {{ p.dark }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+
+        <div style="border:1px solid #27272a;border-radius:10px;background:#141417;overflow:hidden;margin-bottom:34px;">
+          <div style="padding:13px 16px;border-bottom:1px solid #27272a;font-size:12px;font-weight:800;color:#fafafa;">Reemplazo de emojis y glifos por íconos lucide</div>
+          <table class="tbl" style="width:100%;border-collapse:collapse;">
+            <thead><tr><th style="width:70px;">Antes</th><th style="width:180px;">Ícono lucide</th><th style="width:90px;">Tamaño</th><th>Dónde</th></tr></thead>
+            <tbody>
+              <sc-for list="{{ iconMap }}" as="im" hint-placeholder-count="9">
+                <tr>
+                  <td style="font-size:15px;text-align:center;">{{ im.before }}</td>
+                  <td style="color:#a3e635;font-weight:700;">{{ im.after }}</td>
+                  <td style="color:#71717a;">{{ im.size }}</td>
+                  <td>{{ im.where }}</td>
+                </tr>
+              </sc-for>
+            </tbody>
+          </table>
+        </div>
+
+        <div style="border:1px solid #27272a;border-radius:10px;background:#141417;overflow:hidden;margin-bottom:34px;">
+          <div style="padding:13px 16px;border-bottom:1px solid #27272a;font-size:12px;font-weight:800;color:#fafafa;">Las 10 inconsistencias · resolución</div>
+          <table class="tbl" style="width:100%;border-collapse:collapse;">
+            <thead><tr><th style="width:36px;">#</th><th style="width:230px;">Deuda</th><th>Solución aplicada</th></tr></thead>
+            <tbody>
+              <sc-for list="{{ debts }}" as="d" hint-placeholder-count="10">
+                <tr>
+                  <td style="color:#a3e635;font-weight:800;">{{ d.n }}</td>
+                  <td style="color:#fafafa;font-weight:600;">{{ d.what }}</td>
+                  <td>{{ d.fix }}</td>
+                </tr>
+              </sc-for>
+            </tbody>
+          </table>
+        </div>
+
+        <div style="border:1px solid #a3e635;border-radius:10px;background:#141417;overflow:hidden;">
+          <div style="padding:14px 18px;border-bottom:1px solid #3f3f46;background:#1a1f14;">
+            <div style="font-size:12.5px;font-weight:800;color:#a3e635;letter-spacing:.03em;">RECOMENDACIÓN: VARIANTE B, CON EL MODO FOCO DE A</div>
+          </div>
+          <div style="padding:20px 18px;">
+            <div style="font-size:13px;color:#e4e4e7;line-height:1.8;margin-bottom:20px;">Recomiendo la Variante B. Con 83 preguntas, el wizard obliga a 83 transiciones de pantalla y a 83 decisiones de «¿ya la respondí?» sin poder mirar atrás: el encuestador pierde el hilo de la conversación con el agricultor y no puede volver sin recorrer todo. La sección por pantalla mantiene 8 a 14 preguntas visibles a la vez, que es la unidad real en la que se habla en campo (primero identificamos el lote, después hablamos de fertilización), permite corregir una respuesta anterior sin salir, y reduce la navegación de 83 pasos a 3. Las preguntas que sí necesitan la pantalla completa —audio, foto, GPS, listas de cientos de municipios— entran al modo foco de A, que además resuelve la limitación de Android: solo una pantalla pesada montada a la vez. El costo es que las condicionales aparecen y desaparecen dentro de una lista que el encuestador está mirando, así que hay que anunciarlo explícitamente (el banner «Apareció porque respondiste Sí arriba») y no reordenar nunca lo que ya está en pantalla.</div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;">
+              <sc-for list="{{ variantCompare }}" as="vc" hint-placeholder-count="2">
+                <div style="border:1px solid #27272a;border-radius:8px;padding:15px;">
+                  <div style="font-size:12px;font-weight:800;color:#fafafa;margin-bottom:11px;">{{ vc.name }}</div>
+                  <div style="display:flex;flex-direction:column;gap:9px;">
+                    <div style="display:flex;gap:9px;">
+                      <span style="font-size:10px;font-weight:800;color:#4ade80;flex-shrink:0;width:38px;">GANA</span>
+                      <span style="font-size:11.5px;color:#d4d4d8;line-height:1.6;flex:1;">{{ vc.pro }}</span>
+                    </div>
+                    <div style="display:flex;gap:9px;">
+                      <span style="font-size:10px;font-weight:800;color:#f87171;flex-shrink:0;width:38px;">PIERDE</span>
+                      <span style="font-size:11.5px;color:#d4d4d8;line-height:1.6;flex:1;">{{ vc.con }}</span>
+                    </div>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = { screen: 'login', st: {}, pending: true };
+
+  renderVals() {
+    const S = this.state;
+    const screen = S.screen;
+
+    const defs = [
+      { k: 'login', label: 'Login', states: [], title: 'Login',
+        sub: 'Fondo de marca a sangre, tarjeta elevada con los campos. Agregué el toggle de tema acá: si el encuestador arranca la jornada al sol, necesita poder pasar a claro antes de escribir la contraseña.',
+        noteLabel: 'DECISIÓN', note: 'El toggle de tema sube al login (hoy no está). El pie recuerda que las respuestas viven en el dispositivo, que es la principal duda del personal nuevo en campo.' },
+      { k: 'campanas', label: 'Campañas', states: ['datos', 'descargando', 'sin-conexion', 'vacio', 'cargando'], title: 'Shell + Campañas',
+        sub: 'Header de marca con píldora de conexión, toggle y Salir en tamaño fijo; banda ámbar de pendientes debajo; tab bar de 5. Cambiá el estado arriba para ver descarga, sin conexión, vacío y skeleton.',
+        noteLabel: 'TAB BAR DE 5', note: 'Mantuve las 5 pestañas con etiqueta (nada se elimina) y sólo abrevié «Sincronización» a «Sync» y «Solicitudes» a «Reportes», que caben en 9.5 px sin truncar a fontScale 130%. La única insignia numérica va en Borradores; el resto del estado de cola vive en la banda ámbar y en la pestaña Sync, no repetido en cada ícono.' },
+      { k: 'pre', label: 'Pre-encuesta', states: ['vacio', 'resultados', 'sin-resultados'], title: 'Pre-encuesta · identificar al encuestado',
+        sub: 'Buscador con autofocus y borde de acento, nota de búsqueda local cuando está offline, hasta 5 resultados, y «+ Nuevo encuestado» sólo cuando la búsqueda no devuelve nada.',
+        noteLabel: 'JERARQUÍA', note: 'La opción de crear un encuestado nuevo es la única acción con borde punteado de acento en toda la app: es una acción que crea datos, y debe distinguirse de elegir a alguien que ya existe.' },
+      { k: 'inicio', label: 'Instrumento · inicio', states: [], title: 'Instrumento · pantalla de inicio',
+        sub: 'Badge de paso, nombre y versión, contadores de secciones y preguntas, contenido del instrumento y «Comenzar» fijo abajo.',
+        noteLabel: '', note: '' },
+      { k: 'varA', label: 'Pregunta · Variante A', states: ['opcion', 'cumplimiento', 'imagen', 'gps'], title: 'Variante A · wizard refinado',
+        sub: 'Una pregunta por pantalla. Fusioné banda de sección, contador, indicador de guardado y barra de progreso en un solo bloque de 52 px (antes eran tres bloques separados), liberando altura para el input. Footer con «Siguiente» dominante y «Anterior» reducido a ícono.',
+        noteLabel: 'GANA / PIERDE EN CAMPO', note: 'Gana: cero ambigüedad sobre qué responder, tolera fontScale alto, y el pulgar siempre encuentra Siguiente en el mismo lugar. Pierde: 83 transiciones por visita, imposible revisar lo anterior sin retroceder de a una, y el encuestador pierde el hilo de la conversación cuando el agricultor se adelanta a una pregunta posterior.' },
+      { k: 'varB', label: 'Pregunta · Variante B', states: ['seccion', 'foco', 'indice'], title: 'Variante B · sección por pantalla',
+        sub: 'La unidad de navegación es la sección. Preguntas simples se responden inline en tarjetas; las complejas (audio, foto, GPS, listas largas) abren el modo foco. El índice de secciones está siempre a un toque desde el header.',
+        noteLabel: 'CÓMO SE RESUELVEN LOS TRES PUNTOS DIFÍCILES', note: 'Condicionales: la pregunta revelada entra al final del bloque visible con un banner azul «Apareció porque respondiste Sí arriba» y nunca se reordena lo que ya está en pantalla. Validación: «Siguiente sección» queda deshabilitada con el conteo exacto de obligatorias faltantes sobre el botón, y las tarjetas pendientes llevan borde rojo. Pantalla pesada única: las preguntas de audio, imagen, GPS y listas virtualizadas nunca se montan inline — abren el modo foco, que es una sola pantalla por vez, así que se conserva el patrón replace y no hay riesgo de TransactionTooLargeException.' },
+      { k: 'revision', label: 'Revisión', states: ['lista', 'completada'], title: 'Revisión y encuesta completada',
+        sub: 'Tarjeta por pregunta con sección, respuesta formateada y acción de editar; las obligatorias sin responder van en rojo con badge REQUERIDA y bloquean el envío.',
+        noteLabel: 'AUTOGUARDADO', note: 'El estado de guardado se comunica en tres lugares y sólo en tres: el chip «Guardado» del header de pregunta (aparece 1.5 s tras el debounce y se queda), el resumen de la pantalla de completada, y la banda de pendientes del shell. No hay toast por respuesta: 83 toasts por visita serían ruido.' },
+      { k: 'orq', label: 'Orquestador', states: ['transicion', 'error', 'duplicado', 'documento'], title: 'Orquestador entre pasos',
+        sub: 'Transición con progreso real del paso, error a pantalla completa con ícono lucide en contenedor (no emoji gigante), y los dos modales de decisión como bottom sheets.',
+        noteLabel: 'JERARQUÍA DE ACCIONES DESTRUCTIVAS', note: 'En los dos modales críticos el camino seguro es el botón sólido de acento arriba, el neutro va con borde, y la acción destructiva queda separada por un divisor, en rojo sobre fondo rojo suave, y con el número explícito de lo que se pierde («Sobrescribir las 64 respuestas»). Nunca es el botón más prominente ni está a distancia de pulgar del seguro. «Es la misma persona» se muestra deshabilitada con la etiqueta REQUIERE CONEXIÓN en lugar de ocultarse, para que el encuestador entienda por qué no puede.' },
+      { k: 'borradores', label: 'Borradores', states: ['datos', 'modal', 'vacio'], title: 'Borradores',
+        sub: 'Tarjetas con instrumento, agricultor, conteo y hora; «Continuar» y papelera separados en una fila de acciones de 48 dp cada uno.',
+        noteLabel: 'ACCIONES DESTRUCTIVAS', note: '«Limpiar todo» dejó de ser texto rojo suelto al mismo nivel que «Actualizar»: ahora es un botón con borde y fondo rojo suave, con el mismo tratamiento en Borradores y en Sincronización. Toda destrucción pasa por el bottom sheet de confirmación, que nombra lo que se pierde en cantidad y en persona.' },
+      { k: 'sync', label: 'Sincronización', states: ['todo', 'pendientes', 'errores'], title: 'Sincronización',
+        sub: 'Tarjeta de estado, tres contadores grandes, y las secciones de errores de validación y adjuntos sin subir.',
+        noteLabel: 'IDS TÉCNICOS Y LENGUAJE DE COLA', note: 'Las tarjetas de error ahora se identifican por instrumento + agricultor + hora, y el id queda abajo en 9.5 px como dato secundario. El lenguaje de estado es único en toda la app: ámbar = pendiente (reloj), verde = sincronizado (check), rojo = con error (círculo de alerta), ámbar con clip = adjunto sin subir. Los contadores en cero se apagan a neutro para que el ojo vaya solo a lo que requiere acción.' },
+      { k: 'solicitudes', label: 'Solicitudes', states: [], title: 'Solicitudes de cambio',
+        sub: 'Formulario con contador en vivo y mínimo de caracteres explícito, más la lista con los tres estados (Pendiente, Abierta, Resuelta).',
+        noteLabel: '', note: '' },
+      { k: 'lotes', label: 'Lotes', states: ['busqueda', 'lista', 'captura', 'sheet'], title: 'Lotes · captura de polígonos',
+        sub: 'Búsqueda bloqueada sin conexión, lotes de la finca con croquis en miniatura, y la captura con el croquis vectorial propuesto.',
+        noteLabel: 'CROQUIS DEL POLÍGONO (NUEVO)', note: 'Los vértices se proyectan a un SVG autoescalado sobre una grilla, con el polígono relleno, los puntos numerados y el área aproximada calculada por la fórmula del área de Gauss. Es geometría local: no necesita conexión, ni tiles, ni mapas externos. Aparece en tres lugares: miniatura de 56 px en la lista de lotes, panel grande durante la captura, y en el bottom sheet de guardado. Resuelve el problema real de que hoy el encuestador valida una forma mirando una lista de números.' },
+      { k: 'tabletA', label: 'Tablet · Instrumento', states: [], title: 'Tablet' },
+      { k: 'tabletB', label: 'Tablet · Lotes', states: [], title: 'Tablet' },
+      { k: 'sistema', label: 'Hoja de sistema', states: [], title: 'Sistema' }
+    ];
+
+    const cur = defs.find(d => d.k === screen) || defs[0];
+    const screenTabs = defs.map(d => {
+      const on = d.k === screen;
+      return {
+        label: d.label,
+        bg: on ? '#fafafa' : 'transparent',
+        fg: on ? '#0c0c0e' : '#a1a1aa',
+        bd: on ? '#fafafa' : '#3f3f46',
+        fw: on ? '700' : '400',
+        onClick: () => this.setState({ screen: d.k })
+      };
+    });
+
+    const curState = S.st[screen] || (cur.states[0] || '');
+    const stateTabs = cur.states.map(v => {
+      const on = v === curState;
+      return {
+        label: v,
+        bg: on ? '#a3e635' : 'transparent',
+        fg: on ? '#0c0c0e' : '#71717a',
+        bd: on ? '#a3e635' : '#3f3f46',
+        onClick: () => this.setState(st => ({ st: { ...st.st, [screen]: v } }))
+      };
+    });
+
+    const isTablet = screen === 'tabletA' || screen === 'tabletB';
+
+    return {
+      screen, state: curState,
+      screenTabs, stateTabs,
+      hasStates: cur.states.length > 0,
+      title: cur.title, subtitle: cur.sub || '',
+      hasNote: !!cur.note, noteLabel: cur.noteLabel || 'NOTA', note: cur.note || '',
+      isPhone: !isTablet && screen !== 'sistema',
+      isTabletA: screen === 'tabletA',
+      isTabletB: screen === 'tabletB',
+      isSistema: screen === 'sistema',
+
+      pending: S.pending,
+      showPendingToggle: screen === 'campanas',
+      pendLabel: S.pending ? 'visible' : 'oculta',
+      pendBg: S.pending ? '#a3e635' : 'transparent',
+      pendFg: S.pending ? '#0c0c0e' : '#71717a',
+      pendBd: S.pending ? '#a3e635' : '#3f3f46',
+      togglePending: () => this.setState(st => ({ pending: !st.pending })),
+
+      tabletSections: [
+        { n: '1', name: 'Identificación de la unidad', pct: 100, meta: '8/8', done: true },
+        { n: '2', name: 'Manejo agronómico', pct: 64, meta: '9/14', current: true },
+        { n: '3', name: 'Cosecha y postcosecha', pct: 0, meta: '0/11' }
+      ].map(s => ({
+        ...s,
+        bg: s.current ? '#F0FDF4' : 'transparent',
+        badgeBg: s.done ? '#F0FDF4' : s.current ? '#1B6B3A' : '#E5E7EB',
+        badgeFg: s.done ? '#16A34A' : s.current ? '#FFFFFF' : '#6B7280',
+        fw: s.current ? '800' : '600',
+        bar: s.done ? '#16A34A' : '#1B6B3A'
+      })),
+      tabletOpts: [
+        { label: 'Menos de 100 kg/ha', on: false },
+        { label: 'Entre 100 y 300 kg/ha', on: true },
+        { label: 'Más de 300 kg/ha', on: false },
+        { label: 'Otra dosis', on: false }
+      ].map(o => ({
+        ...o,
+        bd: o.on ? '#1B6B3A' : '#E5E7EB',
+        lb: o.on ? '4px' : '1px',
+        lbc: o.on ? '#1B6B3A' : '#E5E7EB',
+        bg: o.on ? '#F0FDF4' : '#FFFFFF',
+        rc: o.on ? '#1B6B3A' : '#D1D5DB',
+        fw: o.on ? '700' : '500',
+        fg: o.on ? '#1B6B3A' : '#111827'
+      })),
+      tabletContext: [
+        { label: 'Finca', value: 'La Esperanza · Andes' },
+        { label: 'Campaña', value: 'Café — Antioquia 2026' },
+        { label: 'Paso', value: '1 de 3' }
+      ],
+      tabletVertexDots: [[30, 118], [58, 40], [136, 26], [172, 92], [104, 132]].map((p, i) => ({
+        x: p[0], y: p[1], n: i + 1
+      })),
+      tabletVertexLabels: React.createElement('g', null,
+        [[30, 118], [58, 40], [136, 26], [172, 92], [104, 132]].map((p, i) =>
+          React.createElement('text', {
+            key: i, x: p[0] + 8, y: p[1] - 7,
+            fontFamily: 'JetBrains Mono, monospace', fontSize: 8, fontWeight: 700, fill: '#94A3B8'
+          }, String(i + 1)))),
+      tabletVertices: [
+        { n: 1, coord: '5.658214, -75.878903', time: '10:04:12', acc: '±4 m', accFg: '#4ADE80' },
+        { n: 2, coord: '5.658902, -75.878410', time: '10:05:48', acc: '±5 m', accFg: '#4ADE80' },
+        { n: 3, coord: '5.659488, -75.877602', time: '10:07:31', acc: '±6 m', accFg: '#4ADE80' },
+        { n: 4, coord: '5.659101, -75.876944', time: '10:09:02', acc: '±11 m', accFg: '#FBBF24' },
+        { n: 5, coord: '5.658402, -75.877388', time: '10:11:17', acc: '±5 m', accFg: '#4ADE80' }
+      ],
+
+      typeScale: [
+        { sample: 'Encuesta completada', px: 24, w: 800, spec: '24 / 800 · éxito' },
+        { sample: '¿Quién es el encuestado?', px: 20, w: 800, spec: '20 / 800 · título' },
+        { sample: 'Campañas', px: 19, w: 800, spec: '19 / 800 · pantalla' },
+        { sample: '¿Aplica fertilización?', px: 17, w: 700, spec: '17 / 700 · pregunta' },
+        { sample: 'Entre 100 y 300 kg/ha', px: 14.5, w: 500, spec: '14.5 / 500 · opción' },
+        { sample: 'Doc: 43.221.908 · Finca La Esperanza', px: 11.5, w: 400, spec: '11.5 / 400 · meta' },
+        { sample: 'SEC. 2 · MANEJO AGRONÓMICO', px: 10, w: 800, spec: '10 / 800 · etiqueta' }
+      ],
+      metrics: [
+        { label: 'Grilla base', value: 'múltiplos de 4' },
+        { label: 'Padding de pantalla', value: '14 px' },
+        { label: 'Altura mínima de control', value: '48 dp' },
+        { label: 'Fila de opción de respuesta', value: '56 dp' },
+        { label: 'Botón primario', value: '17 px vertical' },
+        { label: 'Radio · tarjeta / botón', value: '12 / 11 px' },
+        { label: 'Radio · bottom sheet', value: '20 px arriba' },
+        { label: 'Radio · badge y píldora', value: '99 px' },
+        { label: 'Chrome de pregunta (Var. A)', value: '52 px total' },
+        { label: 'Columna de lectura en tablet', value: '560 px máx.' },
+        { label: 'Breakpoint de tablet', value: '≥ 720 dp lógicos' }
+      ],
+      palette: [
+        { name: 'background', light: '#FFFFFF', dark: '#0F172A' },
+        { name: 'surfaceMuted', light: '#F9FAFB', dark: '#1E293B' },
+        { name: 'textPrimary', light: '#111827', dark: '#F1F5F9' },
+        { name: 'textMuted', light: '#6B7280', dark: '#94A3B8' },
+        { name: 'border', light: '#E5E7EB', dark: '#334155' },
+        { name: 'brand', light: '#1B6B3A', dark: '#FDE047' },
+        { name: 'brandSubtle', light: '#F0FDF4', dark: '#422006' },
+        { name: 'success', light: '#16A34A', dark: '#4ADE80' },
+        { name: 'danger', light: '#DC2626', dark: '#F87171' },
+        { name: 'warning', light: '#92400E', dark: '#FBBF24' },
+        { name: 'info', light: '#1D4ED8', dark: '#60A5FA' }
+      ],
+      iconMap: [
+        { before: '📡', after: 'WifiOff', size: '24 / 36', where: 'Estados de sin conexión a pantalla completa y banners' },
+        { before: '⚠️', after: 'TriangleAlert', size: '36', where: 'Errores del orquestador a pantalla completa' },
+        { before: '⚠️', after: 'CircleAlert', size: '16 / 20', where: 'Alertas inline, obligatorias sin responder, errores de sync' },
+        { before: '✓', after: 'Check', size: '16 / 20 / 42', where: 'Guardado, sincronizado, caché lista, encuesta completada' },
+        { before: '✕ / ×', after: 'X', size: '20', where: 'Salir de la encuesta, cerrar índice, quitar chip de opción múltiple' },
+        { before: '→', after: 'ArrowRight', size: '18 / 19', where: '«Siguiente», «Continuar», «Toca para editar»' },
+        { before: '←', after: 'ChevronLeft', size: '20 / 21', where: 'Header de retroceso y botón «Anterior»' },
+        { before: '+', after: 'Plus', size: '18 / 20', where: 'Nuevo encuestado, agregar punto GPS, capturar lote' },
+        { before: '🗑', after: 'Trash2', size: '18', where: 'Borrar borrador, quitar foto, limpiar cola' },
+        { before: '—', after: 'LoaderCircle', size: '16 / 42', where: 'Reemplaza todo ActivityIndicator y texto «Cargando…»' }
+      ],
+      debts: [
+        { n: '1', what: 'Diálogos mezclados con Alert.alert()', fix: 'Un único bottom sheet de confirmación con theming, jerarquía fija (destructiva separada por divisor, en rojo suave) y el dato de lo que se pierde en el cuerpo. Reemplaza también los alerts de GPS, permisos y descarte de puntos.' },
+        { n: '2', what: 'Sin sistema de mensajes efímeros', fix: 'Snackbar de 3 s anclada sobre el footer de navegación (nunca encima), con variantes éxito / error / info y una sola acción opcional. No se usa durante la encuesta: ahí el feedback es el chip «Guardado» persistente.' },
+        { n: '3', what: 'Emojis y glifos como iconografía', fix: 'Todo a lucide-react-native, con la tabla de reemplazo de arriba y tres tamaños: 16 inline, 20 standalone, 24 en CTA (36 y 42 sólo en estados a pantalla completa).' },
+        { n: '4', what: 'Cuatro banners de «sin conexión» distintos', fix: 'Una sola jerarquía en tres niveles: la píldora del header dice el estado permanente; un banner ámbar por pantalla sólo cuando la falta de red limita algo de esa pantalla; y en el momento de la acción bloqueada, el control aparece deshabilitado con la etiqueta REQUIERE CONEXIÓN. Nunca los tres a la vez para el mismo hecho.' },
+        { n: '5', what: 'Estados de carga inconsistentes', fix: 'Skeletons de tarjeta con shimmer en campañas, borradores y lotes; LoaderCircle centrado con texto y progreso real en transiciones a pantalla completa; spinner de 16 px inline en la fila que está trabajando.' },
+        { n: '6', what: 'Estados vacíos desalineados', fix: 'Plantilla única: contenedor de 60 px con ícono lucide de 26 px, título de 15–16 / 800, explicación de 12.5 px en dos líneas, y acción sugerida sólo cuando existe una acción posible. Mismo espaciado en las cinco pantallas.' },
+        { n: '7', what: 'Destructivas como texto rojo plano', fix: 'Toda acción destructiva es un contenedor: borde rojo, fondo danger suave, ícono lucide y label. Nunca comparte tratamiento con acciones neutras como «Actualizar».' },
+        { n: '8', what: 'Ids técnicos en la interfaz', fix: 'La tarjeta de error se identifica por instrumento + agricultor + hora; el id queda como línea secundaria de 9.5 px, copiable al tocar, para soporte.' },
+        { n: '9', what: 'Sin jerarquía de «pendiente»', fix: 'Un solo léxico visual: ámbar + Clock = pendiente, verde + Check = sincronizado, rojo + CircleAlert = con error, ámbar + Paperclip = adjunto sin subir. Los contadores en cero se apagan a neutro.' },
+        { n: '10', what: 'Header de marca en modo oscuro', fix: 'En oscuro el header deja de ser verde de marca y pasa a surfaceMuted (#1E293B) con borde. Elimina el amarillo sobre amarillo y los overlays derivados; el verde institucional se reserva para bloques fijos de marca, no para chrome.' }
+      ],
+      variantCompare: [
+        { name: 'Variante A · wizard refinado', pro: 'Cero ambigüedad, tolera fontScale alto sin cortar nada, y el pulgar encuentra «Siguiente» siempre en el mismo píxel. Es la más fácil de usar con una mano y con guantes.', con: '83 transiciones por visita, no se puede revisar lo anterior sin retroceder de a una, y se rompe el hilo cuando el agricultor se adelanta a una pregunta posterior.' },
+        { name: 'Variante B · sección por pantalla', pro: 'La navegación baja de 83 pasos a 3, la sección coincide con la unidad real de conversación en campo, y se puede corregir una respuesta anterior sin salir de la pantalla.', con: 'Requiere scroll (menos previsible con una mano), y las condicionales que aparecen dentro de una lista visible hay que anunciarlas explícitamente para no desorientar.' }
+      ]
+    };
+  }
+}
+
+</script>
+</body>
+</html>

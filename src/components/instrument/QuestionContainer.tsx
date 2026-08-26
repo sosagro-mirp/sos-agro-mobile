@@ -27,7 +27,17 @@ export const QuestionContainer: React.FC<QuestionContainerProps> = ({
     <View style={[styles.container, fillHeight && styles.fill]}>
       <Text style={styles.questionText}>{question.text}</Text>
       <RequiredFieldIndicator required={question.isRequired} />
-      <View style={[styles.inputWrapper, fillHeight && styles.fill]}>{children}</View>
+      <View
+        style={[
+          // Sin la ficha REQUERIDO no hay nada que ya deje el gap de 14 px
+          // antes del input — se lo damos acá para no duplicar espacio
+          // cuando sí está presente (su propio marginBottom ya lo cubre).
+          !question.isRequired && styles.inputWrapperGap,
+          fillHeight && styles.fill,
+        ]}
+      >
+        {children}
+      </View>
     </View>
   );
 };
@@ -41,14 +51,14 @@ function createStyles(colors: ThemeColors) {
       flex: 1,
     },
     questionText: {
-      fontFamily: Fonts.semiBold,
-      fontSize: 18,
+      fontFamily: Fonts.bold,
+      fontSize: 17,
       color: colors.textPrimary,
-      marginBottom: 6,
-      lineHeight: 26,
+      marginBottom: 7,
+      lineHeight: 24,
     },
-    inputWrapper: {
-      marginTop: 12,
+    inputWrapperGap: {
+      marginTop: 14,
     },
   });
 }

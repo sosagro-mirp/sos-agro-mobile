@@ -1,7 +1,8 @@
 import { useMemo } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, TouchableOpacity, View, type DimensionValue } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Check, ArrowRight, TriangleAlert } from "lucide-react-native";
 import { useInstrumentSurveyStore } from "../../../src/store/useInstrumentSurveyStore";
 import { useCampaignSessionStore } from "../../../src/store/useCampaignSessionStore";
 import { advanceWithinCampaign } from "../../../src/lib/campaignNavigation";
@@ -12,12 +13,16 @@ import type { ThemeColors } from "../../../src/theme/colors";
 export default function InstrumentCompletedScreen() {
   const router = useRouter();
   const { instrumentName, campaignSessionId, reset } = useInstrumentSurveyStore();
-  const { campaign, currentStep, sessionId, markStepCompleted } =
+  const { campaign, currentStep, sessionId, farmerName, markStepCompleted } =
     useCampaignSessionStore();
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
   const isInsideCampaign = Boolean(campaignSessionId && campaign);
+  const completedSteps = currentStep ? currentStep.completedCount + 1 : 0;
+  const progressPercent = currentStep
+    ? `${Math.round((completedSteps / currentStep.totalSteps) * 100)}%`
+    : "0%";
 
   const handleContinue = () => {
     reset();
@@ -41,26 +46,52 @@ export default function InstrumentCompletedScreen() {
     <SafeAreaView style={styles.root}>
       <View style={styles.content}>
         <View style={styles.icon}>
-          <Text style={styles.iconText}>✓</Text>
+          <Check size={42} color={colors.successFg} strokeWidth={2.8} />
         </View>
         <Text style={styles.title}>Encuesta completada</Text>
-        <Text style={styles.subtitle}>{instrumentName}</Text>
-
-        {isInsideCampaign && currentStep ? (
-          <Text style={styles.progress}>
-            Paso {currentStep.completedCount + 1} de {currentStep.totalSteps}
-          </Text>
-        ) : null}
-
-        <Text style={styles.description}>
-          Las respuestas se enviarán al servidor cuando haya conexión.
+        <Text style={styles.subtitle}>
+          {instrumentName}
+          {farmerName ? `\n${farmerName}` : ""}
         </Text>
 
-        <Pressable style={styles.button} onPress={handleContinue}>
+        {isInsideCampaign && currentStep ? (
+          <View style={styles.progressCard}>
+            <View style={styles.progressHeader}>
+              <Text style={styles.progressLabel} numberOfLines={1}>
+                {campaign?.name?.toUpperCase()}
+              </Text>
+              <Text style={styles.progressCount}>
+                {completedSteps} de {currentStep.totalSteps}
+              </Text>
+            </View>
+            <View style={styles.progressTrack}>
+              <View style={[styles.progressFill, { width: progressPercent as DimensionValue }]} />
+            </View>
+          </View>
+        ) : null}
+
+        <View style={styles.offlineBanner}>
+          <TriangleAlert size={16} color={colors.warningFg} strokeWidth={2.2} />
+          <Text style={styles.offlineBannerText}>
+            Guardada en el dispositivo. Se envía sola al recuperar conexión.
+          </Text>
+        </View>
+      </View>
+
+      {/* Desviación del mockup: el diseño muestra "Siguiente paso" +
+          "Volver al inicio" siempre juntos. Se conserva el único botón
+          condicional que ya existía — agregar "Volver al inicio" dentro de
+          una campaña activa introduciría una acción nueva (abandonar la
+          campaña a mitad de un paso) que este spec no pidió ni aprobó. */}
+      <View style={styles.footer}>
+        <TouchableOpacity style={styles.button} onPress={handleContinue} accessibilityRole="button">
           <Text style={styles.buttonText}>
             {isInsideCampaign ? "Siguiente paso" : "Volver al inicio"}
           </Text>
-        </Pressable>
+          {isInsideCampaign && (
+            <ArrowRight size={19} color={colors.brandForeground} strokeWidth={2.6} />
+          )}
+        </TouchableOpacity>
       </View>
     </SafeAreaView>
   );
@@ -73,36 +104,85 @@ function createStyles(colors: ThemeColors) {
       flex: 1,
       justifyContent: "center",
       alignItems: "center",
-      paddingHorizontal: 32,
-      gap: 14,
+      paddingHorizontal: 24,
     },
     icon: {
-      width: 72,
-      height: 72,
-      borderRadius: 36,
-      backgroundColor: colors.brand,
+      width: 88,
+      height: 88,
+      borderRadius: 44,
+      backgroundColor: colors.successBg,
+      borderWidth: 2,
+      borderColor: colors.successFg,
       alignItems: "center",
       justifyContent: "center",
-      marginBottom: 8,
+      marginBottom: 24,
     },
-    iconText: { fontSize: 36, color: colors.brandForeground },
-    title: { fontSize: 24, fontFamily: Fonts.bold, color: colors.textPrimary },
-    subtitle: { fontSize: 15, fontFamily: Fonts.semiBold, color: colors.textMuted },
-    progress: { fontSize: 13, fontFamily: Fonts.regular, color: colors.brand },
-    description: {
-      fontSize: 14,
+    title: {
+      fontSize: 24,
+      fontFamily: Fonts.extraBold,
+      color: colors.textPrimary,
+      letterSpacing: -0.3,
+      marginBottom: 10,
+    },
+    subtitle: {
+      fontSize: 13,
       fontFamily: Fonts.regular,
       color: colors.textMuted,
       textAlign: "center",
       lineHeight: 20,
+      marginBottom: 24,
+    },
+    progressCard: {
+      width: "100%",
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      padding: 16,
+      marginBottom: 16,
+    },
+    progressHeader: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "baseline",
+      marginBottom: 9,
+      gap: 8,
+    },
+    progressLabel: { flex: 1, fontSize: 11.5, fontFamily: Fonts.bold, color: colors.textMuted },
+    progressCount: { fontSize: 12, fontFamily: Fonts.extraBold, color: colors.textPrimary },
+    progressTrack: {
+      height: 6,
+      backgroundColor: colors.border,
+      borderRadius: 99,
+      overflow: "hidden",
+    },
+    progressFill: { height: 6, backgroundColor: colors.brand, borderRadius: 99 },
+    offlineBanner: {
+      width: "100%",
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 9,
+      backgroundColor: colors.warningBg,
+      borderRadius: 10,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+    },
+    offlineBannerText: { flex: 1, fontSize: 11.5, fontFamily: Fonts.semiBold, color: colors.warningFg, lineHeight: 16 },
+    footer: {
+      padding: 14,
+      backgroundColor: colors.surface,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
     },
     button: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 9,
       backgroundColor: colors.brand,
-      borderRadius: 12,
-      paddingVertical: 18,
-      paddingHorizontal: 48,
-      marginTop: 12,
+      borderRadius: 11,
+      paddingVertical: 17,
     },
-    buttonText: { fontSize: 17, fontFamily: Fonts.bold, color: colors.brandForeground },
+    buttonText: { fontSize: 15.5, fontFamily: Fonts.extraBold, color: colors.brandForeground },
   });
 }

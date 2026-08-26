@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { Mic, Square, Play, X } from 'lucide-react-native';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Mic, Square, Play, Trash2, Check } from 'lucide-react-native';
 import {
   AudioModule,
   RecordingPresets,
@@ -10,6 +10,7 @@ import {
   useAudioRecorderState,
 } from 'expo-audio';
 import * as FileSystem from 'expo-file-system/legacy';
+import { useSnackbar } from '../common/Snackbar';
 import { useTheme } from '../../theme/ThemeProvider';
 import type { ThemeColors } from '../../theme/colors';
 import type { InstrumentDraftAnswer } from '../../types/instrument';
@@ -33,6 +34,7 @@ export function VoiceRecordingInput({ questionId, value, onChange }: Props): Rea
   const [state, setState] = useState<RecordingState>(value ? 'recorded' : 'idle');
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const { show: showSnackbar } = useSnackbar();
   const autoStoppedRef = useRef(false);
   const isRecordingRef = useRef(false);
 
@@ -106,7 +108,7 @@ export function VoiceRecordingInput({ questionId, value, onChange }: Props): Rea
     if (duration >= MAX_DURATION_SECONDS && !autoStoppedRef.current) {
       autoStoppedRef.current = true;
       finishRecording().catch(() => {
-        Alert.alert('Error', 'No se pudo guardar la grabación.');
+        showSnackbar({ message: 'No se pudo guardar la grabación.', variant: 'error' });
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -116,7 +118,7 @@ export function VoiceRecordingInput({ questionId, value, onChange }: Props): Rea
     try {
       const { granted } = await AudioModule.requestRecordingPermissionsAsync();
       if (!granted) {
-        Alert.alert('Permiso requerido', 'SOSAgro necesita acceso al micrófono para grabar audio.');
+        showSnackbar({ message: 'SOSAgro necesita acceso al micrófono para grabar audio.', variant: 'error' });
         return;
       }
 
@@ -127,7 +129,7 @@ export function VoiceRecordingInput({ questionId, value, onChange }: Props): Rea
       recorder.record();
       setState('recording');
     } catch {
-      Alert.alert('Error', 'No se pudo iniciar la grabación.');
+      showSnackbar({ message: 'No se pudo iniciar la grabación.', variant: 'error' });
     }
   }
 
@@ -135,7 +137,7 @@ export function VoiceRecordingInput({ questionId, value, onChange }: Props): Rea
     try {
       await finishRecording();
     } catch {
-      Alert.alert('Error', 'No se pudo guardar la grabación.');
+      showSnackbar({ message: 'No se pudo guardar la grabación.', variant: 'error' });
     }
   }
 
@@ -145,7 +147,7 @@ export function VoiceRecordingInput({ questionId, value, onChange }: Props): Rea
       await player.seekTo(0);
       player.play();
     } catch {
-      Alert.alert('Error', 'No se pudo reproducir la grabación.');
+      showSnackbar({ message: 'No se pudo reproducir la grabación.', variant: 'error' });
     }
   }
 
@@ -184,17 +186,22 @@ export function VoiceRecordingInput({ questionId, value, onChange }: Props): Rea
   return (
     <View style={styles.container}>
       <View style={styles.recordedCard}>
+        <Check size={15} color={colors.successFg} strokeWidth={2.6} />
         <Text style={styles.recordedLabel}>Grabación lista</Text>
-        <View style={styles.actions}>
-          <TouchableOpacity style={styles.secondaryButton} onPress={playPreview}>
-            <Play size={16} color={colors.textPrimary} />
-            <Text style={styles.secondaryButtonText}>Reproducir</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.secondaryButton} onPress={deleteRecording}>
-            <X size={16} color={colors.dangerFg} />
-            <Text style={[styles.secondaryButtonText, styles.deleteText]}>Eliminar</Text>
-          </TouchableOpacity>
-        </View>
+      </View>
+      <View style={styles.actions}>
+        <TouchableOpacity style={styles.secondaryButton} onPress={playPreview} accessibilityRole="button">
+          <Play size={17} color={colors.textPrimary} strokeWidth={2.2} />
+          <Text style={styles.secondaryButtonText}>Reproducir</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.deleteButton}
+          onPress={deleteRecording}
+          accessibilityRole="button"
+          accessibilityLabel="Eliminar grabación"
+        >
+          <Trash2 size={18} color={colors.dangerFg} strokeWidth={2.2} />
+        </TouchableOpacity>
       </View>
     </View>
   );
@@ -208,12 +215,12 @@ function createStyles(colors: ThemeColors) {
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: colors.brand,
-      borderRadius: 12,
-      paddingVertical: 16,
-      gap: 10,
+      borderRadius: 11,
+      paddingVertical: 17,
+      gap: 9,
     },
     stopButton: { backgroundColor: colors.dangerFg },
-    recordButtonText: { color: colors.brandForeground, fontSize: 16, fontWeight: '600' },
+    recordButtonText: { color: colors.brandForeground, fontSize: 15.5, fontWeight: '800' },
     recordingBadge: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -228,26 +235,38 @@ function createStyles(colors: ThemeColors) {
     },
     recordingText: { fontSize: 15, color: colors.dangerFg, fontWeight: '500' },
     recordedCard: {
-      borderWidth: 2,
-      borderColor: colors.brand,
-      borderRadius: 12,
-      padding: 16,
-      gap: 12,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 9,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 11,
+      backgroundColor: colors.surfaceMuted,
+      paddingHorizontal: 13,
+      paddingVertical: 12,
     },
-    recordedLabel: { fontSize: 15, color: colors.brand, fontWeight: '600' },
+    recordedLabel: { fontSize: 13.5, color: colors.successFg, fontWeight: '700' },
     actions: { flexDirection: 'row', gap: 10 },
     secondaryButton: {
       flex: 1,
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
-      borderWidth: 1.5,
+      borderWidth: 1,
       borderColor: colors.borderStrong,
-      borderRadius: 8,
-      paddingVertical: 10,
-      gap: 6,
+      borderRadius: 11,
+      paddingVertical: 15,
+      gap: 8,
     },
-    secondaryButtonText: { fontSize: 14, color: colors.textPrimary },
-    deleteText: { color: colors.dangerFg },
+    secondaryButtonText: { fontSize: 13.5, fontWeight: '700', color: colors.textPrimary },
+    deleteButton: {
+      width: 56,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderColor: colors.dangerFg,
+      backgroundColor: colors.dangerBg,
+      borderRadius: 11,
+    },
   });
 }

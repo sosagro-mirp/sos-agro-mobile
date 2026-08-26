@@ -1,5 +1,6 @@
 import React, { useMemo } from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Check } from "lucide-react-native";
 import { Fonts } from "../../theme/fonts";
 import { useTheme } from "../../theme/ThemeProvider";
 import type { ThemeColors } from "../../theme/colors";
@@ -73,19 +74,19 @@ export function ComplianceInput({
                 { backgroundColor: selected ? complianceColor.indicator : colors.borderStrong },
               ]}
             />
-            <View style={[styles.radio, selected && { borderColor: complianceColor.border }]}>
-              {selected && (
-                <View style={[styles.radioDot, { backgroundColor: complianceColor.border }]} />
-              )}
-            </View>
             <Text
               style={[
                 styles.label,
-                selected && { fontFamily: Fonts.semiBold, color: colors.textPrimary },
+                selected && { fontFamily: Fonts.bold, color: colors.textPrimary },
               ]}
             >
               {option.text}
             </Text>
+            <View style={[styles.radio, selected && { borderColor: complianceColor.border }]}>
+              {selected && (
+                <Check size={13} color={complianceColor.border} strokeWidth={3.4} />
+              )}
+            </View>
           </TouchableOpacity>
         );
       })}
@@ -103,41 +104,36 @@ function createStyles(colors: ThemeColors) {
       flexDirection: "row",
       alignItems: "center",
       minHeight: 56,
-      paddingHorizontal: 16,
-      paddingVertical: 10,
-      borderWidth: 2,
-      borderRadius: 12,
-      gap: 12,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      borderWidth: 1,
+      borderRadius: 11,
+      gap: 13,
     },
     rowUnselected: {
       backgroundColor: colors.surface,
-      borderColor: colors.borderStrong,
+      borderColor: colors.border,
     },
     indicator: {
-      width: 12,
-      height: 12,
-      borderRadius: 6,
+      width: 13,
+      height: 13,
+      borderRadius: 7,
       flexShrink: 0,
     },
     radio: {
-      width: 24,
-      height: 24,
-      borderRadius: 12,
+      width: 22,
+      height: 22,
+      borderRadius: 11,
       borderWidth: 2,
       borderColor: colors.textMuted,
       alignItems: "center",
       justifyContent: "center",
       flexShrink: 0,
     },
-    radioDot: {
-      width: 12,
-      height: 12,
-      borderRadius: 6,
-    },
     label: {
-      fontFamily: Fonts.regular,
-      fontSize: 18,
-      lineHeight: 24,
+      fontFamily: Fonts.medium,
+      fontSize: 14.5,
+      lineHeight: 20,
       color: colors.textPrimary,
       flex: 1,
     },

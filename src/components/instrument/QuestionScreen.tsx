@@ -5,24 +5,30 @@ import {
   ScrollView,
   StyleSheet,
   TouchableOpacity,
-  Modal,
-  Pressable,
   KeyboardAvoidingView,
   Platform,
+  type DimensionValue,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
+import { Check, ChevronLeft, ArrowRight, List, X } from "lucide-react-native";
 import { useInstrumentSurveyStore } from "../../store/useInstrumentSurveyStore";
+import { useCampaignSessionStore } from "../../store/useCampaignSessionStore";
 import { OfflineBanner } from "../network/OfflineBanner";
-import { ProgressBar } from "./ProgressBar";
 import { QuestionContainer } from "./QuestionContainer";
 import { QuestionRenderer } from "./QuestionRenderer";
-import { PrimaryButton } from "../common/PrimaryButton";
+import { SectionNavPanel } from "./SectionNavPanel";
+import { RespondentContextPanel } from "./RespondentContextPanel";
+import { AppText } from "../common/AppText";
+import { ConfirmSheet } from "../common/ConfirmSheet";
 import { SecondaryButton } from "../common/SecondaryButton";
 import { Fonts } from "../../theme/fonts";
 import { useTheme } from "../../theme/ThemeProvider";
 import type { ThemeColors } from "../../theme/colors";
 import { OPTION_SEARCH_THRESHOLD } from "../../lib/optionSearch";
+import { useBreakpoint } from "../../lib/useBreakpoint";
+import { INSTRUMENT_PANELS_MIN_WIDTH } from "../../lib/resolveBreakpoint";
+import { resolveConditionReason } from "../../lib/resolveConditionReason";
 import type { InstrumentDraftAnswer } from "../../types";
 
 const SEARCHABLE_TYPES = new Set(["single_choice", "multiple_choice"]);
@@ -40,14 +46,23 @@ export const QuestionScreen: React.FC<QuestionScreenProps> = ({
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  // Umbral propio, más exigente que el general de 720dp: por debajo de
+  // INSTRUMENT_PANELS_MIN_WIDTH los tres paneles fijos comprimen la columna
+  // de lectura a un ancho inutilizable (hallazgo TC-074-87, tablet en
+  // portrait) — se degrada a una sola columna en vez de mostrarlos apretados.
+  const isTablet = useBreakpoint(INSTRUMENT_PANELS_MIN_WIDTH) === "tablet";
 
   const answers = useInstrumentSurveyStore((s) => s.answers);
   const currentIndex = useInstrumentSurveyStore((s) => s.currentIndex);
   const setAnswer = useInstrumentSurveyStore((s) => s.setAnswer);
   const goToNext = useInstrumentSurveyStore((s) => s.goToNext);
   const goToPrev = useInstrumentSurveyStore((s) => s.goToPrev);
+  const goToIndex = useInstrumentSurveyStore((s) => s.goToIndex);
   const canAdvance = useInstrumentSurveyStore((s) => s.canAdvance);
   const visibleQuestions = useInstrumentSurveyStore((s) => s.visibleQuestions);
+  const savedQuestionId = useInstrumentSurveyStore((s) => s.savedQuestionId);
+  const surveyInstrumentName = useInstrumentSurveyStore((s) => s.instrumentName);
+  const farmerName = useCampaignSessionStore((s) => s.farmerName);
 
   const visible = visibleQuestions();
   const total = visible.length;
@@ -115,6 +130,24 @@ export const QuestionScreen: React.FC<QuestionScreenProps> = ({
   }
 
   const currentAnswer = answers[currentItem.question.questionId];
+  const isSaved = savedQuestionId === currentItem.question.questionId;
+  const progress = total > 0 ? Math.min((currentIndex + 1) / total, 1) : 0;
+  const progressPercent = `${Math.round(progress * 100)}%`;
+
+  // Panel izquierdo (tablet, spec 74 Fase 10): preguntas de la sección
+  // actual, no de todo el instrumento — es la adaptación a Variante A.
+  const sectionQuestions = visible.filter((item) => item.sectionId === currentItem.sectionId);
+  const handleJumpTo = (questionId: string) => {
+    const targetIndex = visible.findIndex((item) => item.question.questionId === questionId);
+    if (targetIndex === -1 || targetIndex === currentIndex) return;
+    goToIndex(targetIndex);
+    router.replace(`/instrument/${instrumentId}/question/${targetIndex}`);
+  };
+  const conditionReason = resolveConditionReason(
+    currentItem.question,
+    visible.map((item) => item.question),
+    answers,
+  );
 
   // Cuando la pregunta tiene buscador (más opciones que el umbral), el
   // FlatList interno de la lista de opciones debe ser el único contenedor de
@@ -135,37 +168,59 @@ export const QuestionScreen: React.FC<QuestionScreenProps> = ({
     </QuestionContainer>
   );
 
-  return (
-    <SafeAreaView style={styles.root} edges={["top", "bottom"]}>
-      <OfflineBanner />
-
-      <KeyboardAvoidingView
-        style={styles.kavContainer}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        keyboardVerticalOffset={Platform.OS === "android" ? -24 : 0}
-      >
-        {/* 1. Header: marca + botón salir */}
-        <View style={styles.header}>
-          <View style={styles.brand}>
-            <Text style={styles.brandTitle}>SosAgro 4.C</Text>
-            <Text style={styles.brandSubtitle}>Plataforma de Caracterización Agrícola</Text>
-          </View>
+  // Panel izquierdo / centro / derecho solo en tablet (spec 74, Fase 10). En
+  // teléfono el layout queda exactamente igual que antes de esta fase.
+  const questionColumn = (
+    <KeyboardAvoidingView
+      style={[styles.kavContainer, isTablet && styles.kavContainerTablet]}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={Platform.OS === "android" ? -24 : 0}
+    >
+      {/* 1. Header: X de salida + marca + acción de índice (reservada,
+          deshabilitada hasta que exista una pantalla de índice real —
+          Fase 9, Variante B) */}
+      <View style={styles.header}>
           <TouchableOpacity
             onPress={() => setShowExitConfirm(true)}
-            style={styles.exitButton}
+            style={styles.headerSlot}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             accessibilityLabel="Salir de la encuesta"
+            accessibilityRole="button"
           >
-            <Text style={styles.exitIcon}>✕</Text>
+            <X size={20} color={colors.textPrimary} />
           </TouchableOpacity>
+          <View style={styles.headerTitleWrapper}>
+            <AppText style={styles.headerTitle} numberOfLines={1}>
+              Sos Agro 4.C
+            </AppText>
+          </View>
+          <View style={[styles.headerSlot, styles.headerSlotDisabled]}>
+            <List size={19} color={colors.textMuted} />
+          </View>
         </View>
 
-        {/* 2. Sección */}
-        <View style={styles.sectionCard}>
-          <View style={styles.sectionAccent} />
-          <Text style={styles.sectionName} numberOfLines={2}>
-            {currentItem.sectionName}
-          </Text>
+        {/* 2. Chrome fusionado: sección + contador + ficha «Guardado» + progreso */}
+        <View style={styles.chrome}>
+          <View style={styles.chromeAccent} />
+          <View style={styles.chromeBody}>
+            <View style={styles.chromeRow}>
+              <AppText style={styles.sectionName} numberOfLines={1}>
+                {currentItem.sectionName?.toUpperCase()}
+              </AppText>
+              <Text style={styles.counter}>
+                {currentIndex + 1} / {total}
+              </Text>
+              {isSaved ? (
+                <View style={styles.savedChip}>
+                  <Check size={13} color={colors.successFg} strokeWidth={2.8} />
+                  <Text style={styles.savedChipText}>Guardado</Text>
+                </View>
+              ) : null}
+            </View>
+            <View style={styles.progressTrack}>
+              <View style={[styles.progressFill, { width: progressPercent as DimensionValue }]} />
+            </View>
+          </View>
         </View>
 
         {/* 3. Pregunta + input */}
@@ -184,62 +239,91 @@ export const QuestionScreen: React.FC<QuestionScreenProps> = ({
           </ScrollView>
         )}
 
-        {/* 4. Barra de progreso */}
-        <View style={styles.progressContainer}>
-          <ProgressBar current={currentIndex + 1} total={total} />
-        </View>
-
-        {/* 5. Footer: navegación */}
+        {/* 4. Footer: navegación */}
         <View style={styles.footer}>
           {!isFirst && (
-            <View style={styles.prevButtonWrapper}>
-              <SecondaryButton label="Anterior" onPress={handlePrev} />
-            </View>
+            <TouchableOpacity
+              onPress={handlePrev}
+              style={styles.prevButton}
+              accessibilityRole="button"
+              accessibilityLabel="Pregunta anterior"
+            >
+              <ChevronLeft size={20} color={colors.textPrimary} />
+            </TouchableOpacity>
           )}
-          <View style={[styles.nextButtonWrapper, isFirst && styles.nextButtonFull]}>
-            <PrimaryButton
-              label={isLast ? "Finalizar" : "Siguiente"}
-              onPress={handleNext}
-              disabled={!canAdvance()}
-            />
-          </View>
-        </View>
-      </KeyboardAvoidingView>
-
-      {/* Modal de confirmación de salida */}
-      <Modal
-        visible={showExitConfirm}
-        transparent
-        animationType="fade"
-        statusBarTranslucent
-        onRequestClose={() => setShowExitConfirm(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>¿Salir de la encuesta?</Text>
-            <Text style={styles.modalBody}>
-              La encuesta está sin terminar. Las respuestas guardadas quedarán como borrador y podrás reanudarla más tarde.
+          <TouchableOpacity
+            onPress={handleNext}
+            disabled={!canAdvance()}
+            style={[styles.nextButton, !canAdvance() && styles.nextButtonDisabled]}
+            accessibilityRole="button"
+            accessibilityLabel={isLast ? "Finalizar encuesta" : "Siguiente pregunta"}
+          >
+            <Text
+              style={[styles.nextButtonText, !canAdvance() && styles.nextButtonTextDisabled]}
+            >
+              {isLast ? "Finalizar" : "Siguiente"}
             </Text>
-            <View style={styles.modalActions}>
-              <Pressable
-                style={[styles.modalButton, styles.modalButtonSecondary]}
-                onPress={() => setShowExitConfirm(false)}
-              >
-                <Text style={styles.modalButtonSecondaryText}>Cancelar</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.modalButton, styles.modalButtonDestructive]}
-                onPress={() => {
-                  setShowExitConfirm(false);
-                  router.replace("/(tabs)/campaign");
-                }}
-              >
-                <Text style={styles.modalButtonText}>Salir</Text>
-              </Pressable>
-            </View>
-          </View>
+            <ArrowRight
+              size={19}
+              color={canAdvance() ? colors.brandForeground : colors.textMuted}
+              strokeWidth={2.6}
+            />
+          </TouchableOpacity>
         </View>
-      </Modal>
+    </KeyboardAvoidingView>
+  );
+
+  return (
+    <SafeAreaView style={styles.root} edges={["top", "bottom"]}>
+      <OfflineBanner />
+
+      <View style={[styles.body, isTablet && styles.bodyTablet]}>
+        {isTablet ? (
+          <SectionNavPanel
+            sectionName={currentItem.sectionName}
+            questions={sectionQuestions}
+            currentQuestionId={currentItem.question.questionId}
+            answers={answers}
+            onSelect={handleJumpTo}
+          />
+        ) : null}
+
+        {questionColumn}
+
+        {isTablet ? (
+          <RespondentContextPanel
+            farmerName={farmerName}
+            instrumentName={surveyInstrumentName}
+            conditionReason={conditionReason}
+          />
+        ) : null}
+      </View>
+
+      {/* Confirmación de salida — bottom sheet compartido (spec 74, Fase 1),
+          reemplaza el modal propio que tenía esta pantalla. No es una acción
+          destructiva (las respuestas quedan guardadas como borrador), así
+          que "Seguir respondiendo" es el camino seguro (primario) y "Salir"
+          el neutro, no el destructivo separado. */}
+      <ConfirmSheet
+        visible={showExitConfirm}
+        icon={X}
+        tone="warning"
+        title="¿Salir de la encuesta?"
+        body="La encuesta está sin terminar. Las respuestas guardadas quedarán como borrador y podrás reanudarla más tarde."
+        primaryAction={{
+          label: "Seguir respondiendo",
+          onPress: () => setShowExitConfirm(false),
+        }}
+        secondaryAction={{
+          label: "Salir",
+          icon: X,
+          onPress: () => {
+            setShowExitConfirm(false);
+            router.replace("/(tabs)/campaign");
+          },
+        }}
+        onRequestClose={() => setShowExitConfirm(false)}
+      />
     </SafeAreaView>
   );
 };
@@ -252,8 +336,25 @@ function createStyles(colors: ThemeColors) {
       flex: 1,
       backgroundColor: colors.surfaceMuted,
     },
+    // Fila de tres columnas en tablet (spec 74, Fase 10): panel de
+    // navegación + columna de lectura + panel de contexto. En teléfono es
+    // un `flex: 1` normal — `questionColumn` es el único hijo.
+    body: {
+      flex: 1,
+    },
+    bodyTablet: {
+      flexDirection: "row",
+    },
     kavContainer: {
       flex: 1,
+    },
+    // La columna de lectura no se estira a todo el ancho en tablet — 560 px
+    // máx., centrada entre los dos paneles (criterio 9 del spec: ningún
+    // input se estira a todo el ancho).
+    kavContainerTablet: {
+      maxWidth: 560,
+      alignSelf: "center",
+      width: "100%",
     },
     emptyState: {
       flex: 1,
@@ -268,130 +369,97 @@ function createStyles(colors: ThemeColors) {
       textAlign: "center",
     },
 
-    // 1. Header
+    // 1. Header — patrón showBackHeader (mismo de pre-encuesta, spec 74
+    // Fase 3): slot izquierdo/derecho de 48×48, título centrado.
     header: {
       flexDirection: "row",
       alignItems: "center",
-      justifyContent: "space-between",
-      paddingHorizontal: 16,
-      paddingVertical: 12,
+      gap: 12,
+      paddingHorizontal: 12,
+      paddingVertical: 11,
       backgroundColor: colors.surface,
       borderBottomWidth: 1,
       borderBottomColor: colors.border,
     },
-    brand: {
-      flex: 1,
-      alignItems: "center",
-    },
-    brandTitle: {
-      fontFamily: Fonts.bold,
-      fontSize: 17,
-      color: colors.brand,
-      letterSpacing: 1.5,
-      textTransform: "uppercase",
-    },
-    brandSubtitle: {
-      fontFamily: Fonts.regular,
-      fontSize: 11,
-      color: colors.textMuted,
-      marginTop: 2,
-    },
-    exitButton: {
-      width: 36,
-      height: 36,
+    headerSlot: {
+      width: 48,
+      height: 48,
       alignItems: "center",
       justifyContent: "center",
-      position: "absolute",
-      right: 12,
+      flexShrink: 0,
     },
-    exitIcon: {
+    // Acción de índice reservada visualmente pero sin destino todavía — no
+    // existe pantalla de índice/outline hasta la Fase 9 (Variante B).
+    headerSlotDisabled: {
+      opacity: 0.5,
+    },
+    headerTitleWrapper: { flex: 1, minWidth: 0, alignItems: "center" },
+    headerTitle: {
       fontSize: 16,
-      color: colors.textMuted,
-      fontFamily: Fonts.regular,
+      fontFamily: Fonts.extraBold,
+      color: colors.textPrimary,
+      textAlign: "center",
     },
 
-    // 2. Sección
-    sectionCard: {
-      backgroundColor: colors.surface,
+    // 2. Chrome fusionado: acento + sección/contador/Guardado + progreso.
+    // Un solo bloque de ~52 px (spec 74, Fase 4) en vez de los tres bloques
+    // separados que había antes (header de marca, tarjeta de sección y
+    // barra de progreso con su propio contenedor).
+    chrome: {
+      flexShrink: 0,
+      backgroundColor: colors.surfaceMuted,
       borderBottomWidth: 1,
       borderBottomColor: colors.border,
-      overflow: "hidden",
     },
-    sectionAccent: {
+    chromeAccent: {
       height: 3,
       backgroundColor: colors.brand,
     },
-    sectionName: {
-      fontFamily: Fonts.semiBold,
-      fontSize: 14,
-      color: colors.textPrimary,
-      letterSpacing: 0.5,
-      textTransform: "uppercase",
+    chromeBody: {
       paddingHorizontal: 20,
-      paddingVertical: 10,
+      paddingVertical: 9,
     },
-
-    // Exit confirmation modal
-    modalOverlay: {
-      flex: 1,
-      backgroundColor: "rgba(0,0,0,0.5)",
-      justifyContent: "center",
-      alignItems: "center",
-      padding: 24,
-    },
-    modalCard: {
-      width: "100%",
-      backgroundColor: colors.surface,
-      borderRadius: 16,
-      padding: 24,
-      gap: 12,
-    },
-    modalTitle: {
-      fontSize: 18,
-      fontFamily: Fonts.bold,
-      color: colors.textPrimary,
-    },
-    modalBody: {
-      fontSize: 15,
-      fontFamily: Fonts.regular,
-      color: colors.textPrimary,
-      lineHeight: 22,
-    },
-    modalActions: {
+    chromeRow: {
       flexDirection: "row",
-      gap: 12,
-      marginTop: 4,
-    },
-    modalButton: {
-      flex: 1,
-      borderRadius: 10,
-      paddingVertical: 14,
       alignItems: "center",
+      gap: 8,
+      marginBottom: 7,
     },
-    modalButtonSecondary: {
-      backgroundColor: colors.surfaceMuted,
-      borderWidth: 1,
-      borderColor: colors.border,
+    sectionName: {
+      fontSize: 10,
+      fontFamily: Fonts.extraBold,
+      color: colors.brandSubtleFg,
+      letterSpacing: 0.8,
+      flex: 1,
+      minWidth: 0,
     },
-    modalButtonDestructive: {
-      backgroundColor: colors.dangerFg,
+    counter: {
+      fontSize: 10.5,
+      fontFamily: Fonts.bold,
+      color: colors.textMuted,
+      flexShrink: 0,
     },
-    modalButtonText: {
-      fontSize: 15,
-      fontFamily: Fonts.semiBold,
-      color: colors.brandForeground,
+    savedChip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+      flexShrink: 0,
     },
-    modalButtonSecondaryText: {
-      fontSize: 15,
-      fontFamily: Fonts.semiBold,
-      color: colors.textPrimary,
+    savedChipText: {
+      fontSize: 10,
+      fontFamily: Fonts.bold,
+      color: colors.successFg,
     },
-
-    // Progress
-    progressContainer: {
-      paddingHorizontal: 16,
-      paddingVertical: 12,
-      backgroundColor: colors.surface,
+    progressTrack: {
+      height: 4,
+      backgroundColor: colors.border,
+      borderRadius: 99,
+      overflow: "hidden",
+    },
+    progressFill: {
+      height: 4,
+      backgroundColor: colors.brand,
+      borderRadius: 99,
     },
 
     // Scroll
@@ -409,24 +477,45 @@ function createStyles(colors: ThemeColors) {
       paddingBottom: 8,
     },
 
-    // Footer
+    // 4. Footer: «Anterior» reducido a botón de ícono de 62 px, «Siguiente»
+    // dominante con flecha (spec 74, Fase 4).
     footer: {
       flexDirection: "row",
-      gap: 12,
-      paddingHorizontal: 16,
-      paddingVertical: 16,
+      gap: 10,
+      paddingHorizontal: 20,
+      paddingVertical: 12,
       backgroundColor: colors.surface,
       borderTopWidth: 1,
       borderTopColor: colors.border,
     },
-    prevButtonWrapper: {
-      flex: 1,
+    prevButton: {
+      width: 62,
+      alignItems: "center",
+      justifyContent: "center",
+      borderWidth: 1,
+      borderColor: colors.borderStrong,
+      borderRadius: 11,
     },
-    nextButtonWrapper: {
+    nextButton: {
       flex: 1,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 9,
+      backgroundColor: colors.brand,
+      borderRadius: 11,
+      paddingVertical: 17,
     },
-    nextButtonFull: {
-      flex: 1,
+    nextButtonDisabled: {
+      backgroundColor: colors.surfaceMuted,
+    },
+    nextButtonText: {
+      fontSize: 15.5,
+      fontFamily: Fonts.extraBold,
+      color: colors.brandForeground,
+    },
+    nextButtonTextDisabled: {
+      color: colors.textMuted,
     },
   });
 }
