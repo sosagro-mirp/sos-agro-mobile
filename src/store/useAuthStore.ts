@@ -52,11 +52,12 @@ export const useAuthStore = create<AuthState>((set) => ({
           return userStorage.saveUser(freshUser);
         })
         .catch(async (e) => {
-          // 401 real del backend → el token quedó verificablemente
-          // inválido (ej. revocado). Cualquier otro error (sin conexión,
-          // timeout, 5xx) no es evidencia de invalidez: la sesión
-          // restaurada localmente se conserva.
-          if (e instanceof ServerError && e.status === 401) {
+          // 401 (token revocado/inválido) o 404 (el usuario autenticado ya
+          // no existe — `UsersService.findOne` lanza NotFoundException, no
+          // Unauthorized) son ambos identidad verificablemente inválida.
+          // Cualquier otro error (sin conexión, timeout, 5xx) no lo es: la
+          // sesión restaurada localmente se conserva.
+          if (e instanceof ServerError && (e.status === 401 || e.status === 404)) {
             await Promise.all([secureStorage.deleteToken(), userStorage.deleteUser()]);
             set({ token: null, user: null });
           }

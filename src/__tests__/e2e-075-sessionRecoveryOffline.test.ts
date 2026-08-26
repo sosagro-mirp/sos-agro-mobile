@@ -158,6 +158,23 @@ describe('spec75 / useAuthStore.restoreSession — Criterio: 401 real del backen
   });
 });
 
+describe('spec75 / useAuthStore.restoreSession — Criterio: usuario borrado (404 del backend)', () => {
+  it('borra token y user cuando apiMe() responde 404 (TC-075-03, hallazgo de la ronda manual)', async () => {
+    mockGetToken.mockResolvedValue(VALID_TOKEN);
+    mockGetUser.mockResolvedValue(CACHED_USER);
+    mockApiMe.mockRejectedValue(new ServerError(404, 'User not found'));
+
+    await useAuthStore.getState().restoreSession();
+    await new Promise((r) => setTimeout(r, 0));
+
+    const state = useAuthStore.getState();
+    expect(state.token).toBeNull();
+    expect(state.user).toBeNull();
+    expect(mockDeleteToken).toHaveBeenCalledTimes(1);
+    expect(mockDeleteUser).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('spec75 / useAuthStore.restoreSession — Criterio: backend caído (5xx/timeout)', () => {
   it('conserva la sesión restaurada localmente ante un ServerError 5xx', async () => {
     mockGetToken.mockResolvedValue(VALID_TOKEN);
