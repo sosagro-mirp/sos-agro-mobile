@@ -4,6 +4,13 @@ export default ({ config }: ConfigContext): ExpoConfig => {
   const [major, minor, patch] = (config.version ?? '1.0.0').split('.').map(Number);
   const versionCode = major * 10000 + minor * 100 + patch;
 
+  // Spec 75: los builds release (preview/production) bloquean HTTP sin cifrar
+  // por defecto en Android. Solo se habilita cleartext cuando el propio
+  // EXPO_PUBLIC_API_BASE_URL del build es http:// (backend de desarrollo en
+  // LAN para pruebas manuales) — production/preview reales siempre usan
+  // https://sosagroapi.up.railway.app, así que nunca activan esto.
+  const usesCleartextTraffic = (process.env.EXPO_PUBLIC_API_BASE_URL ?? '').startsWith('http://');
+
   return {
     ...config,
     name: 'Sos Agro 4.C',
@@ -87,6 +94,12 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         {
           organization: 'instituto-tecnologico-metropol',
           project: 'sosagro-mobile',
+        },
+      ],
+      [
+        'expo-build-properties',
+        {
+          android: { usesCleartextTraffic },
         },
       ],
     ],
