@@ -23,10 +23,19 @@ import { logger } from "../src/lib/logger";
 import { ChangeRequestBanner } from "../src/components/requests/ChangeRequestBanner";
 import { ThemeProvider, useTheme } from "../src/theme/ThemeProvider";
 import { SnackbarProvider } from "../src/components/common/Snackbar";
+import { StartupErrorScreen } from "../src/components/common/StartupErrorScreen";
+import {
+  SPLASH_TIMEOUT_MS,
+  pendingSplashDependencies,
+  shouldHideSplash,
+} from "../src/lib/splashGate";
 
 initSentry();
 
-SplashScreen.preventAutoHideAsync();
+// Spec 76, Fase 2: sin `.catch()` esto era una promesa sin manejar.
+SplashScreen.preventAutoHideAsync().catch((err) =>
+  logger.error('[App] preventAutoHideAsync failed', err),
+);
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -97,14 +106,58 @@ function AppStack() {
 // antiguo `return null` del propio ThemeProvider (ver el comentario en
 // src/theme/ThemeProvider.tsx: ese null causaba un bucle infinito de
 // remontaje en Samsung One UI 7 / Android 15).
-function SplashGate({ ready }: { ready: boolean }) {
+//
+// Spec 76, Fase 3: retener el splash tiene un riesgo simétrico al que corrigió
+// —si una dependencia nunca resuelve (p. ej. `runMigrations()` rechaza y
+// `dbReady` se queda en false), el splash no se ocultaría jamás y la app
+// quedaría indistinguible de un cuelgue—. De ahí el tope de tiempo: pasado
+// SPLASH_TIMEOUT_MS el splash se oculta igual y se reporta qué faltaba.
+// Las dependencias se pasan como props primitivas, no como un objeto: un
+// objeto nuevo en cada render reejecutaría el efecto constantemente, que es
+// justo el tipo de churn que conviene evitar en la ruta de arranque.
+function SplashGate({
+  ready,
+  fontsLoaded,
+  dbReady,
+  isRestoring,
+}: {
+  ready: boolean;
+  fontsLoaded: boolean;
+  dbReady: boolean;
+  isRestoring: boolean;
+}) {
   const { restored } = useTheme();
+  const hiddenRef = useRef(false);
+  const mountedAtRef = useRef(Date.now());
 
   useEffect(() => {
-    if (ready && restored) {
-      SplashScreen.hideAsync();
+    if (hiddenRef.current) return;
+
+    const hide = (timedOut: boolean) => {
+      if (hiddenRef.current) return;
+      hiddenRef.current = true;
+
+      if (timedOut) {
+        const pending = pendingSplashDependencies({ fontsLoaded, dbReady, isRestoring, restored });
+        const message = `[SplashGate] splash ocultado por tope de ${SPLASH_TIMEOUT_MS}ms; pendientes: ${pending.join(', ') || 'ninguna'}`;
+        logger.error(message);
+        captureError(new Error(message));
+      }
+
+      SplashScreen.hideAsync().catch((err) =>
+        logger.error('[SplashGate] hideAsync failed', err),
+      );
+    };
+
+    if (shouldHideSplash({ ready, restored, elapsedMs: Date.now() - mountedAtRef.current })) {
+      hide(!(ready && restored));
+      return;
     }
-  }, [ready, restored]);
+
+    const remaining = SPLASH_TIMEOUT_MS - (Date.now() - mountedAtRef.current);
+    const timer = setTimeout(() => hide(true), Math.max(0, remaining));
+    return () => clearTimeout(timer);
+  }, [ready, restored, fontsLoaded, dbReady, isRestoring]);
 
   return null;
 }
@@ -113,6 +166,11 @@ export default function RootLayout() {
   const { isRestoring, restoreSession } = useAuthStore();
   const loadInstrumentCache = useCachedInstrumentsStore((s) => s.loadFromCache);
   const [dbReady, setDbReady] = useState(false);
+  // Spec 76, Fase 3: un fallo de migraciones dejaba `dbReady` en false para
+  // siempre — splash eterno y sin mensaje. Ahora se registra como estado
+  // propio para poder mostrar una pantalla accionable.
+  const [startupError, setStartupError] = useState<Error | null>(null);
+  const [retryToken, setRetryToken] = useState(0);
 
   const [fontsLoaded] = useFonts({
     JetBrainsMono_400Regular,
@@ -129,8 +187,12 @@ export default function RootLayout() {
         await restoreSession();
         loadInstrumentCache().catch((err) => logger.error('[App] loadInstrumentCache failed', err));
       })
-      .catch((err) => { captureError(err); logger.error('[App] runMigrations failed', err); });
-  }, []);
+      .catch((err) => {
+        captureError(err);
+        logger.error('[App] runMigrations failed', err);
+        setStartupError(err instanceof Error ? err : new Error(String(err)));
+      });
+  }, [retryToken]);
 
   useEffect(() => {
     if (!dbReady) return;
@@ -170,14 +232,37 @@ export default function RootLayout() {
     return () => NetworkMonitor.stop();
   }, [dbReady]);
 
+  // El árbol se renderiza SIEMPRE; la pantalla de error sustituye al stack de
+  // navegación, nunca a los providers. Desmontar providers es exactamente lo
+  // que provocó el bucle infinito de remontaje del 2026-08-18.
   return (
     <ThemeProvider>
       <QueryClientProvider client={queryClient}>
         <SnackbarProvider>
-          <SplashGate ready={fontsLoaded && !isRestoring && dbReady} />
-          <AuthGuard />
-          <ChangeRequestBanner />
-          <AppStack />
+          <SplashGate
+            // Un fallo de arranque cuenta como "listo" a efectos del splash:
+            // hay algo que mostrar, y sostenerlo hasta el tope de 10s solo
+            // retrasaría el mensaje de error.
+            ready={(fontsLoaded && !isRestoring && dbReady) || startupError !== null}
+            fontsLoaded={fontsLoaded}
+            dbReady={dbReady}
+            isRestoring={isRestoring}
+          />
+          {startupError ? (
+            <StartupErrorScreen
+              error={startupError}
+              onRetry={() => {
+                setStartupError(null);
+                setRetryToken((n) => n + 1);
+              }}
+            />
+          ) : (
+            <>
+              <AuthGuard />
+              <ChangeRequestBanner />
+              <AppStack />
+            </>
+          )}
         </SnackbarProvider>
       </QueryClientProvider>
     </ThemeProvider>
