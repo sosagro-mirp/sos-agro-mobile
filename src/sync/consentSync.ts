@@ -77,15 +77,32 @@ export interface QueueLikeEntry {
  * criterio 8. Nunca marca una encuesta como bloqueada por el estado de su
  * constancia: una constancia rechazada con 4xx no debe impedir subir
  * respuestas ya recolectadas (criterio 9 y decisión de diseño del spec).
+ *
+ * Hallazgo M3 (auditoría) — la versión anterior devolvía `0` en el
+ * comparador cuando `campaignSessionId` difería, una relación no transitiva
+ * que `Array.prototype.sort` no garantiza resolver igual en todos los
+ * motores con más de una sesión en la cola. Aquí se calcula primero un orden
+ * total: las sesiones conservan su orden de primera aparición (no se
+ * reordena entre sesiones distintas) y, dentro de cada sesión, consent va
+ * antes que el resto.
  */
 export function orderConsentBeforeSurveys<T extends QueueLikeEntry>(
   entries: T[],
 ): (T & { blocked: boolean })[] {
-  const withFlag = entries.map((entry) => ({ ...entry, blocked: false }));
+  const sessionOrder = new Map<string, number>();
+  for (const entry of entries) {
+    const key = entry.campaignSessionId ?? '';
+    if (!sessionOrder.has(key)) sessionOrder.set(key, sessionOrder.size);
+  }
 
-  return withFlag.sort((a, b) => {
-    if (a.campaignSessionId !== b.campaignSessionId) return 0;
-    const rank = (e: T) => (e.itemType === 'consent' ? 0 : 1);
-    return rank(a) - rank(b);
-  });
+  const rank = (e: QueueLikeEntry) => (e.itemType === 'consent' ? 0 : 1);
+
+  return entries
+    .map((entry) => ({ ...entry, blocked: false }))
+    .sort((a, b) => {
+      const sessionA = sessionOrder.get(a.campaignSessionId ?? '') ?? 0;
+      const sessionB = sessionOrder.get(b.campaignSessionId ?? '') ?? 0;
+      if (sessionA !== sessionB) return sessionA - sessionB;
+      return rank(a) - rank(b);
+    });
 }

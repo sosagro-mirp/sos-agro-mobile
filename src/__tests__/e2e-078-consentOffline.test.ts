@@ -152,4 +152,24 @@ describe('orderConsentBeforeSurveys — orden de la cola', () => {
     expect(ordered.map((e) => e.id)).toContain('q2');
     expect(ordered.find((e) => e.id === 'q2')?.blocked).toBeFalsy();
   });
+
+  // Hallazgo M3 (auditoría) — el comparador debe ser una relación de orden
+  // total y transitiva: con más de una sesión en la cola, no debe reordenar
+  // entre sesiones distintas (cada una conserva su orden de primera
+  // aparición), solo dentro de cada una.
+  it('con varias sesiones en la cola, no reordena entre sesiones distintas', () => {
+    const OTHER_SESSION_ID = 'local_session_other';
+    const queue = [
+      { id: 'a-survey', itemType: 'survey' as const, campaignSessionId: LOCAL_SESSION_ID },
+      { id: 'b-consent', itemType: 'consent' as const, campaignSessionId: OTHER_SESSION_ID },
+      { id: 'a-consent', itemType: 'consent' as const, campaignSessionId: LOCAL_SESSION_ID },
+      { id: 'b-survey', itemType: 'survey' as const, campaignSessionId: OTHER_SESSION_ID },
+    ];
+
+    const ordered = orderConsentBeforeSurveys(queue).map((e) => e.id);
+
+    // La sesión LOCAL_SESSION_ID apareció primero en la cola original → su
+    // grupo va primero; dentro de cada grupo, consent antes que survey.
+    expect(ordered).toEqual(['a-consent', 'a-survey', 'b-consent', 'b-survey']);
+  });
 });

@@ -140,11 +140,18 @@ export const farmerCacheStorage = {
    * Spec 78 — registra localmente que este agricultor aceptó el
    * consentimiento, para que `hasValidConsent()` pueda decidir sin red en su
    * próximo encuentro. No toca el resto de la identidad cacheada.
+   *
+   * Hallazgo M5 (auditoría) — es un `UPDATE`, no un upsert: si el agricultor
+   * todavía no tiene fila en esta tabla (encuestado nuevo cuyo `Farmer` recién
+   * se está creando en este mismo flujo), afecta 0 filas. Devuelve el conteo
+   * en vez de tragárselo en silencio, para que el llamador decida si eso es
+   * esperado (encuestado nuevo, todavía sin identidad cacheada) o un bug.
    */
-  async recordConsent(farmerId: string, version: string, consentedAt: Date): Promise<void> {
-    await db
+  async recordConsent(farmerId: string, version: string, consentedAt: Date): Promise<number> {
+    const result = await db
       .update(farmerCache)
       .set({ consentVersion: version, consentedAt })
       .where(eq(farmerCache.farmerId, farmerId));
+    return result.changes ?? 0;
   },
 };

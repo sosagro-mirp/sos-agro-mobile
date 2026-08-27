@@ -31,6 +31,7 @@ import { createFarmPlot } from '../api/farmPlots';
 import type { CampaignSessionResponse } from '../types/campaign';
 import { consentRecordStore } from '../storage/consentRecordStore';
 import { submitConsent } from '../api/consents';
+import { buildConsentSyncPayload, remapConsentSessionId } from './consentSync';
 
 const MAX_CONSECUTIVE_NETWORK_FAILURES = 5;
 const BACKOFF_BASE_MS = 1000;
@@ -306,8 +307,22 @@ class SyncQueueServiceClass {
         return;
       }
 
-      const response = await submitConsent({
-        sessionId: entry.campaignSessionId,
+      // M2 (auditoría spec 78) — antes se reconstruía el payload en línea y
+      // `buildConsentSyncPayload`/`remapConsentSessionId` quedaban sin
+      // ningún llamador real, solo cubiertos por su propio test. `remap`
+      // aquí es un resguardo defensivo: `resolveCampaignSession` ya garantiza
+      // que `entry.campaignSessionId` no es local a esta altura (o esta
+      // función ya retornó antes), así que en el camino normal es un no-op —
+      // pero si esa garantía se rompe algún día, lanza en vez de mandarle al
+      // backend un `sessionId` `local_…` que fallaría igual, solo que con un
+      // 400 menos claro.
+      const remapped = remapConsentSessionId(
+        { localId: draft.id, sessionId: entry.campaignSessionId },
+        { [entry.campaignSessionId]: entry.campaignSessionId },
+      );
+      const payload = buildConsentSyncPayload({
+        localId: draft.id,
+        sessionId: remapped.sessionId,
         consentDocumentId: draft.consentDocumentId,
         respondentName: draft.respondentName,
         acceptedDataProcessing: draft.acceptedDataProcessing,
@@ -315,8 +330,10 @@ class SyncQueueServiceClass {
         acceptedAudio: draft.acceptedAudio,
         acceptedVideo: draft.acceptedVideo,
         acceptedFollowUpContact: draft.acceptedFollowUpContact,
-        acceptedAt: draft.acceptedAt.toISOString(),
+        acceptedAt: draft.acceptedAt,
       });
+
+      const response = await submitConsent(payload);
 
       await consentRecordStore.markSynced(draft.id);
       await syncQueueStorage.markSynced(entry.id);
