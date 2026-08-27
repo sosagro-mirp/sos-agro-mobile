@@ -29,6 +29,8 @@ import { useChangeRequestStore } from '../store/useChangeRequestStore';
 import { farmPlotStore } from '../storage/farmPlotStore';
 import { createFarmPlot } from '../api/farmPlots';
 import type { CampaignSessionResponse } from '../types/campaign';
+import { consentRecordStore } from '../storage/consentRecordStore';
+import { submitConsent } from '../api/consents';
 
 const MAX_CONSECUTIVE_NETWORK_FAILURES = 5;
 const BACKOFF_BASE_MS = 1000;
@@ -195,6 +197,11 @@ class SyncQueueServiceClass {
           .set({ campaignSessionId: realSessionId })
           .where(eq(syncQueue.campaignSessionId, localSessionId));
 
+        // Spec 78 — consent_records.session_id vive fuera de syncQueue (lo
+        // consulta processConsentEntry por su propio id, no por
+        // campaignSessionId), así que necesita su propio remapeo aquí.
+        await consentRecordStore.remapSession(localSessionId, realSessionId);
+
         await pendingSessionStorage.resolve(localSessionId, realSessionId);
 
         // Update the active store if this session is still open.
@@ -257,8 +264,79 @@ class SyncQueueServiceClass {
       await this.processFarmPlotEntry(entry);
     } else if (entry.itemType === 'skip-step') {
       await this.processSkipStepEntry(entry);
+    } else if (entry.itemType === 'consent') {
+      await this.processConsentEntry(entry);
     } else {
       await this.processSurveyEntry(entry);
+    }
+  }
+
+  // Spec 78 — entry.surveyId guarda el id local de `consent_records` (mismo
+  // convenio que farm-plot con farmPlotId). entry.campaignSessionId es el
+  // sessionId (local o real) — resolveLocalSessions() ya lo remapea junto
+  // con surveys/syncQueue; consentRecordStore.remapSession() lo replica para
+  // esta tabla. Un 4xx aquí NUNCA debe frenar el resto de la cola: la
+  // constancia perdida se reporta para reconciliar desde el panel (ver
+  // "Puntos delicados", 2, en spec/78_consentimiento_informado_tratamiento_datos.md).
+  private async processConsentEntry(entry: SyncQueueEntry): Promise<void> {
+    await syncQueueStorage.markInFlight(entry.id);
+
+    try {
+      const draft = await consentRecordStore.get(entry.surveyId);
+      if (!draft) {
+        await syncQueueStorage.markSynced(entry.id);
+        return;
+      }
+
+      if (draft.status === 'synced') {
+        await syncQueueStorage.markSynced(entry.id);
+        return;
+      }
+
+      const resolved = await this.resolveCampaignSession(entry);
+      if (!resolved) return;
+      entry = resolved;
+
+      if (!entry.campaignSessionId) {
+        const detail = `Entrada consent sin campaignSessionId — entry ${entry.id}`;
+        logger.error(`[Sync] ${detail}`);
+        captureError(new Error(detail), { entryId: entry.id });
+        await consentRecordStore.markFailed(entry.surveyId);
+        await syncQueueStorage.markFailedValidation(entry.id, detail);
+        return;
+      }
+
+      const response = await submitConsent({
+        sessionId: entry.campaignSessionId,
+        consentDocumentId: draft.consentDocumentId,
+        respondentName: draft.respondentName,
+        acceptedDataProcessing: draft.acceptedDataProcessing,
+        acceptedPhoto: draft.acceptedPhoto,
+        acceptedAudio: draft.acceptedAudio,
+        acceptedVideo: draft.acceptedVideo,
+        acceptedFollowUpContact: draft.acceptedFollowUpContact,
+        acceptedAt: draft.acceptedAt.toISOString(),
+      });
+
+      await consentRecordStore.markSynced(draft.id);
+      await syncQueueStorage.markSynced(entry.id);
+
+      logger.info(
+        `[Sync] processed consent entry ${entry.id} → ${response.consentRecordId}`,
+      );
+      this.consecutiveNetworkFailures = 0;
+    } catch (error) {
+      if (error instanceof NetworkError) {
+        logger.error('[Sync] network error (consent)', error);
+        await this.handleNetworkError(entry);
+      } else {
+        logger.error('[Sync] validation error (consent)', error);
+        captureError(error, { consentRecordId: entry.surveyId, entryId: entry.id });
+        const detail = error instanceof Error ? error.message : String(error);
+        await consentRecordStore.markFailed(entry.surveyId);
+        await syncQueueStorage.markFailedValidation(entry.id, detail);
+        this.consecutiveNetworkFailures = 0;
+      }
     }
   }
 

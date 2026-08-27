@@ -21,6 +21,42 @@ import { sessionCropsStorage } from "../../../src/storage/sessionCropsStorage";
 import { ServerError } from "../../../src/api/httpClient";
 import { logger } from "../../../src/lib/logger";
 import type { CropSummary, FarmerSearchResult } from "../../../src/types";
+import { fetchFarmerConsentStatus } from "../../../src/api/consents";
+import { consentDocumentCacheStorage } from "../../../src/storage/consentDocumentCache";
+import { hasValidConsent } from "../../../src/lib/hasValidConsent";
+
+/**
+ * Spec 78 — decide si hay que pasar por la pantalla de consentimiento antes
+ * del flujo de preguntas. Un encuestado nuevo siempre lo requiere; uno
+ * conocido solo si su última constancia no está vigente para la versión
+ * activa (online: lo resuelve el backend; offline: se evalúa contra lo
+ * cacheado en este dispositivo — ver `hasValidConsent`).
+ */
+async function needsConsent(options: {
+  isNew?: boolean;
+  farmerId?: string;
+  isOnline: boolean;
+}): Promise<boolean> {
+  if (options.isNew || !options.farmerId) return true;
+
+  if (options.isOnline) {
+    try {
+      const status = await fetchFarmerConsentStatus(options.farmerId);
+      return status.status !== "valid";
+    } catch {
+      return true;
+    }
+  }
+
+  const [cachedFarmer, activeDocument] = await Promise.all([
+    farmerCacheStorage.get(options.farmerId),
+    consentDocumentCacheStorage.get(),
+  ]);
+  return !hasValidConsent(
+    { consentVersion: cachedFarmer?.consentVersion, consentedAt: cachedFarmer?.consentedAt },
+    activeDocument?.version ?? null,
+  );
+}
 
 export default function PreSurveyScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -56,6 +92,8 @@ export default function PreSurveyScreen() {
   const createOnlineSession = async (
     farmerId: string | undefined,
     crops: CropSummary[] | undefined,
+    isNew?: boolean,
+    farmerName?: string,
   ) => {
     const cropIds = crops?.map((c) => c.cropId);
     const sessionResponse = await createCampaignSession({
@@ -71,7 +109,35 @@ export default function PreSurveyScreen() {
     await sessionCropsStorage.save(sessionResponse.sessionId, crops ?? []);
 
     applySessionResponse(sessionResponse);
-    router.push(`/campaign/${id}/session/${sessionResponse.sessionId}/orchestrator`);
+    await navigateAfterSessionCreated(sessionResponse.sessionId, { isNew, farmerId, farmerName });
+  };
+
+  // Spec 78 — punto único de decisión tras crear la sesión (online u
+  // offline): si el consentimiento no está vigente, pasa por esa pantalla
+  // primero; si ya lo está, va directo al orquestador como antes del spec 78.
+  const navigateAfterSessionCreated = async (
+    sessionId: string,
+    options: { isNew?: boolean; farmerId?: string; farmerName?: string },
+  ) => {
+    const mustConsent = await needsConsent({
+      isNew: options.isNew,
+      farmerId: options.farmerId,
+      isOnline,
+    }).catch(() => true);
+
+    if (mustConsent) {
+      router.push({
+        pathname: `/campaign/${id}/consent`,
+        params: {
+          sessionId,
+          ...(options.farmerId ? { farmerId: options.farmerId } : {}),
+          ...(options.farmerName ? { farmerName: options.farmerName } : {}),
+        },
+      });
+      return;
+    }
+
+    router.push(`/campaign/${id}/session/${sessionId}/orchestrator`);
   };
 
   const startSessionOnline = async (options?: {
@@ -91,7 +157,7 @@ export default function PreSurveyScreen() {
     }
 
     try {
-      await createOnlineSession(options?.farmerId, options?.crops);
+      await createOnlineSession(options?.farmerId, options?.crops, options?.isNew, options?.farmerName);
     } catch (err) {
       // The farmer was cached on this device (e.g. from a prior test round)
       // but has since been deleted on the backend: invalidate the stale
@@ -116,7 +182,7 @@ export default function PreSurveyScreen() {
         }
         setNewFarmerMode();
         try {
-          await createOnlineSession(undefined, options.crops);
+          await createOnlineSession(undefined, options.crops, true);
           setError("El agricultor seleccionado ya no existe en el servidor. Se registró como agricultor nuevo.");
         } catch (retryErr) {
           setError(retryErr instanceof Error ? retryErr.message : "Error al crear la sesión");
@@ -158,7 +224,11 @@ export default function PreSurveyScreen() {
       await sessionCropsStorage.save(localSessionId, options?.crops ?? []);
 
       applyOfflineSession(localSessionId);
-      router.push(`/campaign/${id}/session/${localSessionId}/orchestrator`);
+      await navigateAfterSessionCreated(localSessionId, {
+        isNew: options?.isNew,
+        farmerId: options?.farmerId,
+        farmerName: options?.farmerName,
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al iniciar sesión offline");
     } finally {
