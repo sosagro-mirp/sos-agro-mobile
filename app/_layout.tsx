@@ -24,6 +24,7 @@ import { ChangeRequestBanner } from "../src/components/requests/ChangeRequestBan
 import { ThemeProvider, useTheme } from "../src/theme/ThemeProvider";
 import { SnackbarProvider } from "../src/components/common/Snackbar";
 import { StartupErrorScreen } from "../src/components/common/StartupErrorScreen";
+import { ThemedStatusBar } from "../src/components/common/ThemedStatusBar";
 import {
   SPLASH_TIMEOUT_MS,
   pendingSplashDependencies,
@@ -239,6 +240,7 @@ export default function RootLayout() {
     <ThemeProvider>
       <QueryClientProvider client={queryClient}>
         <SnackbarProvider>
+          <ThemedStatusBar />
           <SplashGate
             // Un fallo de arranque cuenta como "listo" a efectos del splash:
             // hay algo que mostrar, y sostenerlo hasta el tope de 10s solo
