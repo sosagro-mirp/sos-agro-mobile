@@ -15,6 +15,20 @@
  * Nota de entorno: los casos que dependen de transiciones de conectividad se
  * repiten en APK `preview` — Expo Go no reproduce con fidelidad la secuencia de
  * eventos de NetInfo (ver `mobile/CLAUDE.md`, nota del spec 52).
+ *
+ * **Cambio de alcance (2026-08-28):** el consentimiento deja de bloquear
+ * `pre-survey.tsx → orchestrator`; se abre desde un `ConsentModal` superpuesto
+ * al orquestador (Fases 14-15), controlado por `store.consentPending`. Los
+ * tests de este archivo (`hasValidConsent`, `buildConsentSyncPayload`,
+ * `remapConsentSessionId`, `orderConsentBeforeSurveys`) prueban lógica pura
+ * que **no dependía de cuándo se dispara la pantalla** — ninguno requiere
+ * reescritura. `orderConsentBeforeSurveys` en particular ya no puede asumir
+ * que la entrada `'consent'' sea la primera de la cola de esa sesión (ahora
+ * puede encolarse a mitad de sesión), pero eso es justo lo que ya prueba: que
+ * se reordena, no que ya venía ordenada. Los tests de `ConsentModal` y del
+ * hook `useSubmitConsent` (Fase 14, nuevos) quedan pendientes de escribirse
+ * cuando esos módulos existan — no se fabrican aquí contra código que aún no
+ * se diseñó a nivel de implementación.
  */
 
 import { hasValidConsent } from '../lib/hasValidConsent';

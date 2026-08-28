@@ -69,6 +69,7 @@ export default function PreSurveyScreen() {
     applyOfflineSession,
     setSelectedFarmer,
     setNewFarmerMode,
+    setConsentPending,
   } = useCampaignSessionStore();
   const { isOnline } = useSyncStatusStore();
   const { user } = useAuthStore();
@@ -112,9 +113,12 @@ export default function PreSurveyScreen() {
     await navigateAfterSessionCreated(sessionResponse.sessionId, { isNew, farmerId, farmerName });
   };
 
-  // Spec 78 — punto único de decisión tras crear la sesión (online u
-  // offline): si el consentimiento no está vigente, pasa por esa pantalla
-  // primero; si ya lo está, va directo al orquestador como antes del spec 78.
+  // Cambio de alcance (2026-08-28, spec 78, Fase 14) — el consentimiento ya
+  // no bloquea el paso al orquestador: `needsConsent()` sigue calculando lo
+  // mismo (mismos criterios de antes), pero ahora solo alimenta
+  // `consentPending` en el store, que el orquestador usa para mostrar el
+  // aviso persistente y ofrecer `ConsentModal` en cualquier momento — la
+  // navegación deja de depender de su resultado.
   const navigateAfterSessionCreated = async (
     sessionId: string,
     options: { isNew?: boolean; farmerId?: string; farmerName?: string },
@@ -124,18 +128,7 @@ export default function PreSurveyScreen() {
       farmerId: options.farmerId,
       isOnline,
     }).catch(() => true);
-
-    if (mustConsent) {
-      router.push({
-        pathname: `/campaign/${id}/consent`,
-        params: {
-          sessionId,
-          ...(options.farmerId ? { farmerId: options.farmerId } : {}),
-          ...(options.farmerName ? { farmerName: options.farmerName } : {}),
-        },
-      });
-      return;
-    }
+    setConsentPending(mustConsent);
 
     router.push(`/campaign/${id}/session/${sessionId}/orchestrator`);
   };

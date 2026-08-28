@@ -40,6 +40,14 @@ interface CampaignSessionState {
   localSessionId: string | null;
   localFarmerId: string | null;
 
+  /**
+   * Cambio de alcance (2026-08-28, spec 78, Fase 14) — el consentimiento ya
+   * no bloquea `pre-survey → orchestrator`. Este flag alimenta el aviso
+   * persistente del orquestador (Fase 15), fijado por `pre-survey.tsx` con
+   * el resultado de `needsConsent()` y limpiado al registrar la constancia.
+   */
+  consentPending: boolean;
+
   startSession: (campaign: CampaignRender) => void;
   applySessionResponse: (response: CampaignSessionResponse) => void;
   applyNextStep: (nextStep: NextStepResponse) => void;
@@ -60,6 +68,7 @@ interface CampaignSessionState {
   resolveSession: (realSessionId: string) => void;
   applyLocalFarmer: (draft: LocalFarmerDraft) => void;
   resolveFarmer: (realFarmerId: string) => void;
+  setConsentPending: (pending: boolean) => void;
 }
 
 const initialState = {
@@ -77,6 +86,7 @@ const initialState = {
   isOfflineSession: false,
   localSessionId: null,
   localFarmerId: null,
+  consentPending: false,
 };
 
 export const useCampaignSessionStore = create<CampaignSessionState>((set, get) => ({
@@ -174,5 +184,9 @@ export const useCampaignSessionStore = create<CampaignSessionState>((set, get) =
 
   resolveFarmer(realFarmerId) {
     set({ farmerId: realFarmerId, localFarmerId: null });
+  },
+
+  setConsentPending(pending) {
+    set({ consentPending: pending });
   },
 }));
