@@ -275,4 +275,39 @@ export const logger = {
     const logs = await logger.getLogs();
     return logs.map((l) => `=== ${l.date} ===\n${l.content}`).join('\n');
   },
+
+  /**
+   * Borra todos los logs en disco Y el estado del segmento activo en memoria.
+   *
+   * Hallazgo de la auditoría 36 del spec 76 (2026-08-29): antes, `/dev/logs`
+   * borraba los archivos directamente con `FileSystem.deleteAsync`, sin pasar
+   * por el logger. `segmentContent` seguía vivo en memoria del módulo con
+   * todas las líneas del día — el primer `flush()` posterior (incluido el que
+   * hace el propio `getLogs()` al refrescar la lista) volvía a escribir ese
+   * contenido en el mismo archivo que se acababa de borrar, resucitándolo en
+   * la misma pulsación. Encadenado a `writeChain` para no pisar una escritura
+   * en curso.
+   */
+  async clearAll(): Promise<void> {
+    if (flushTimer) {
+      clearTimeout(flushTimer);
+      flushTimer = null;
+    }
+    buffer = []; // se descartan las líneas sin volcar: el pedido es borrar, no preservarlas.
+
+    writeChain = writeChain.then(async () => {
+      const info = await FileSystem.getInfoAsync(LOG_DIR);
+      if (info.exists) {
+        const names = await FileSystem.readDirectoryAsync(LOG_DIR);
+        await Promise.all(
+          names.map((name) => FileSystem.deleteAsync(LOG_DIR + name, { idempotent: true }))
+        );
+      }
+      segmentDate = '';
+      segmentIndex = 0;
+      segmentContent = '';
+      resolvedDates.clear();
+    });
+    await writeChain;
+  },
 };

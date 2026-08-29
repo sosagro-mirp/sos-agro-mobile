@@ -116,7 +116,9 @@ describe('Criterios 8 y 9 — el logger no pierde líneas ni relee el archivo co
       })),
       makeDirectoryAsync: jest.fn(async () => undefined),
       readDirectoryAsync: jest.fn(async () => [...files.keys()].map((p) => p.split('/').pop()!)),
-      deleteAsync: jest.fn(async () => undefined),
+      deleteAsync: jest.fn(async (path: string) => {
+        files.delete(path);
+      }),
       readAsStringAsync: jest.fn(async (path: string) => {
         readCalls += 1;
         return files.get(path) ?? '';
@@ -217,6 +219,39 @@ describe('Criterios 8 y 9 — el logger no pierde líneas ni relee el archivo co
     expect(logs).toHaveLength(1);
     expect(logs[0].date).toBe(today);
     for (let i = 0; i < 10; i += 1) expect(logs[0].content).toContain(`${i}-`);
+  });
+
+  it('clearAll() borra el segmento activo en memoria, no solo los archivos', async () => {
+    // Regresión de la auditoría 36 del spec 76 (2026-08-29): "Limpiar logs" en
+    // `/dev/logs` borraba los archivos con `FileSystem.deleteAsync` a mano,
+    // sin pasar por el logger. `segmentContent` seguía vivo en memoria del
+    // módulo, así que el siguiente `flush()` —incluido el que hace `getLogs()`
+    // al refrescar la pantalla— volvía a escribir ese contenido en el mismo
+    // archivo recién borrado, resucitándolo. `logger.clearAll()` debe borrar
+    // ambas cosas de forma atómica.
+    const { logger } = require('../lib/logger');
+
+    logger.info('linea-antes-de-limpiar');
+    await logger.flush();
+    expect(files.size).toBe(1);
+
+    await logger.clearAll();
+    expect(files.size).toBe(0);
+
+    // El propio getLogs() hace flush() al refrescar — si `clearAll()` no
+    // hubiera limpiado la memoria, este flush por sí solo resucitaría el
+    // archivo que se acaba de borrar.
+    const logsAfterClear = await logger.getLogs();
+    expect(logsAfterClear).toHaveLength(0);
+    expect(files.size).toBe(0);
+
+    // El logger sigue utilizable después de limpiar: una línea nueva abre un
+    // segmento nuevo, no reaparece contenido antiguo.
+    logger.info('linea-despues-de-limpiar');
+    await logger.flush();
+    expect(files.size).toBe(1);
+    expect([...files.values()].join('')).not.toContain('linea-antes-de-limpiar');
+    expect([...files.values()].join('')).toContain('linea-despues-de-limpiar');
   });
 });
 

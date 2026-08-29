@@ -11,12 +11,9 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useFocusEffect } from "expo-router";
-import * as FileSystem from "expo-file-system/legacy";
 import { logger, type LogFile } from "../../src/lib/logger";
 import { farmerCacheStorage, type FarmerCacheEntry } from "../../src/storage/farmerCache";
 import { Fonts } from "../../src/theme/fonts";
-
-const LOG_DIR = (FileSystem.documentDirectory ?? "") + "logs/";
 
 interface LogFileMeta {
   date: string;
@@ -115,14 +112,11 @@ export default function DevLogsScreen() {
 
   async function handleClear() {
     try {
-      const info = await FileSystem.getInfoAsync(LOG_DIR);
-      if (!info.exists) return;
-      const names = await FileSystem.readDirectoryAsync(LOG_DIR);
-      await Promise.all(
-        names.map((name) =>
-          FileSystem.deleteAsync(LOG_DIR + name, { idempotent: true })
-        )
-      );
+      // Hallazgo de la auditoría 36 del spec 76 (2026-08-29): borrar los
+      // archivos a mano no bastaba — el logger conservaba el segmento activo
+      // en memoria y lo resucitaba en el siguiente flush. `logger.clearAll()`
+      // borra archivos Y estado en memoria de forma atómica.
+      await logger.clearAll();
       setSelectedLog(null);
       await loadFileList();
     } catch (e) {
