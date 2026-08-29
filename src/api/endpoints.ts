@@ -1,4 +1,7 @@
 export const endpoints = {
+  // Health (spec 81, Fase 4 — sondeo bajo demanda de disponibilidad del backend)
+  health: '/api/health',
+
   // Instruments
   instrumentRender: (id: string) => `/api/instruments/${id}/render`,
 

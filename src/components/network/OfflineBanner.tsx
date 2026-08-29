@@ -6,19 +6,26 @@ import { useTheme } from "../../theme/ThemeProvider";
 import type { ThemeColors } from "../../theme/colors";
 
 export const OfflineBanner: React.FC = () => {
-  const isOnline = useSyncStatusStore((state) => state.isOnline);
+  const reachability = useSyncStatusStore((state) => state.reachability);
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
-  if (isOnline) {
+  if (reachability === 'online') {
     return null;
   }
 
+  // Spec 81, Fase 4 — "sin conexión" (radio realmente caída) y "servidor
+  // inalcanzable" (hay red, pero el backend no responde) son mensajes
+  // distintos a propósito: el primero manda a buscar señal, el segundo no
+  // debería.
+  const text =
+    reachability === 'server_unreachable'
+      ? 'No pudimos contactar el servidor — los datos se guardarán localmente'
+      : 'Sin conexión — los datos se guardarán localmente';
+
   return (
     <View style={styles.banner}>
-      <Text style={styles.text}>
-        Sin conexión — los datos se guardarán localmente
-      </Text>
+      <Text style={styles.text}>{text}</Text>
     </View>
   );
 };

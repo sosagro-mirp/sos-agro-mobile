@@ -15,6 +15,10 @@ import { searchFarmers } from "../../api/farmers";
 import { farmerCacheStorage } from "../../storage/farmerCache";
 import { getInitials } from "../../lib/getInitials";
 import { EmptyState } from "../common/EmptyState";
+import { mergeFarmerResults, type MergedFarmerResult } from "../../lib/mergeFarmerResults";
+import { useSyncStatusStore } from "../../store/useSyncStatusStore";
+import { NetworkMonitor } from "../../sync/NetworkMonitor";
+import { logger } from "../../lib/logger";
 import type { FarmerSearchResult } from "../../types";
 
 interface PreSurveyFormProps {
@@ -29,51 +33,72 @@ export const PreSurveyForm: React.FC<PreSurveyFormProps> = ({
   onNewFarmer,
 }) => {
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<FarmerSearchResult[]>([]);
+  const [results, setResults] = useState<MergedFarmerResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [networkFailed, setNetworkFailed] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reachability = useSyncStatusStore((s) => s.reachability);
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
-  useEffect(() => {
+  const runSearch = (term: string) => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (!query.trim()) {
-      setResults([]);
-      return;
-    }
     debounceRef.current = setTimeout(async () => {
       setIsSearching(true);
       setSearchError(null);
+      setNetworkFailed(false);
+
+      // Spec 81, Fase 1 — la caché local siempre se consulta, con
+      // conectividad o sin ella: es lo que garantiza que un fallo de red no
+      // vacíe la lista y empuje a duplicar el agricultor (ver backlog "Falso
+      // «Sin conexión» bloquea seleccionar un agricultor ya encuestado").
+      const cached = await farmerCacheStorage.search(term).catch(() => []);
+
+      if (!isOnline) {
+        setResults(mergeFarmerResults({ network: [], cached }));
+        setIsSearching(false);
+        return;
+      }
+
       try {
-        if (isOnline) {
-          const data = await searchFarmers(query.trim());
-          setResults(data);
-        } else {
-          const cached = await farmerCacheStorage.search(query.trim());
-          setResults(
-            cached.map((c) => ({
-              farmerId: c.farmerId,
-              name: c.name,
-              documentId: c.documentId ?? null,
-              phone: c.phone ?? null,
-              farm: c.farmName || (c.crops && c.crops.length > 0)
-                ? { name: c.farmName ?? '', crops: c.crops ?? null }
-                : null,
-            }))
-          );
-        }
+        const network = await searchFarmers(term);
+        setResults(mergeFarmerResults({ network, cached }));
       } catch {
-        if (isOnline) {
-          setSearchError("No se pudo buscar. Verifica la conexión.");
-        }
+        // La red falló, pero no dejamos la lista vacía: se muestra lo que
+        // ya se conoce localmente y se avisa de que son datos guardados.
+        setNetworkFailed(true);
+        // Spec 81, Fase 4 — mensaje diferenciado según `reachability`, y
+        // sondeo bajo demanda para refinar el estado publicado (puede que
+        // NetInfo diga "hay red" con el backend inalcanzable).
+        setSearchError(
+          reachability === 'offline'
+            ? "Sin conexión."
+            : "No se pudo contactar el servidor.",
+        );
+        NetworkMonitor.probeReachability().catch((err) =>
+          logger.error('[PreSurveyForm] probeReachability failed', err),
+        );
+        setResults(mergeFarmerResults({ network: [], cached }));
       } finally {
         setIsSearching(false);
       }
     }, 300);
+  };
+
+  useEffect(() => {
+    if (!query.trim()) {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      setResults([]);
+      setSearchError(null);
+      setNetworkFailed(false);
+      return;
+    }
+    runSearch(query.trim());
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, isOnline]);
 
   const handleSelect = (farmer: FarmerSearchResult) => {
@@ -81,7 +106,18 @@ export const PreSurveyForm: React.FC<PreSurveyFormProps> = ({
   };
 
   const trimmedQuery = query.trim();
-  const showNewFarmerOption = trimmedQuery.length > 0 && !isSearching && results.length === 0;
+  // Spec 81, Fase 1 — tras un fallo de red no ofrecemos "+ Nuevo encuestado"
+  // como única salida: eso es justo lo que empujaba a duplicar agricultores.
+  // La acción primaria pasa a ser reintentar la búsqueda.
+  const showNewFarmerOption =
+    trimmedQuery.length > 0 && !isSearching && results.length === 0 && !networkFailed;
+  const showRetrySearch =
+    trimmedQuery.length > 0 && !isSearching && networkFailed;
+  // Tras un fallo de red sin ningún resultado en caché, "Nuevo encuestado"
+  // sigue disponible pero como acción secundaria y con advertencia explícita
+  // — nunca como la única salida ofrecida.
+  const showNewFarmerAsFallback =
+    trimmedQuery.length > 0 && !isSearching && networkFailed && results.length === 0;
   const showInitialEmpty = trimmedQuery.length === 0;
 
   return (
@@ -115,12 +151,31 @@ export const PreSurveyForm: React.FC<PreSurveyFormProps> = ({
         </View>
       ) : null}
 
+      {isOnline && networkFailed && results.length > 0 ? (
+        <View style={styles.offlineHint}>
+          <Info size={15} color={colors.infoFg} style={styles.offlineHintIcon} />
+          <Text style={styles.offlineHintText}>
+            Mostrando agricultores guardados en el dispositivo
+          </Text>
+        </View>
+      ) : null}
+
       {isSearching ? (
         <ActivityIndicator size="small" color={colors.brand} style={styles.searchSpinner} />
       ) : null}
 
       {searchError ? (
         <Text style={styles.searchError}>{searchError}</Text>
+      ) : null}
+
+      {showRetrySearch ? (
+        <Pressable
+          style={styles.retryButton}
+          onPress={() => runSearch(trimmedQuery)}
+          accessibilityRole="button"
+        >
+          <Text style={styles.retryButtonText}>Reintentar búsqueda</Text>
+        </Pressable>
       ) : null}
 
       {showInitialEmpty ? (
@@ -174,6 +229,20 @@ export const PreSurveyForm: React.FC<PreSurveyFormProps> = ({
             {!isOnline ? (
               <Text style={styles.newFarmerDetail}>Los datos se sincronizarán al reconectar</Text>
             ) : null}
+          </View>
+        </Pressable>
+      ) : null}
+
+      {showNewFarmerAsFallback ? (
+        <Pressable style={styles.newFarmerCardSecondary} onPress={onNewFarmer}>
+          <View style={styles.newFarmerIconWrapper}>
+            <Plus size={20} color={colors.brandForeground} />
+          </View>
+          <View style={styles.newFarmerTextWrapper}>
+            <Text style={styles.newFarmerText}>Nuevo encuestado</Text>
+            <Text style={styles.newFarmerDetail}>
+              Solo si estás seguro de que no está registrado
+            </Text>
           </View>
         </Pressable>
       ) : null}
@@ -238,6 +307,20 @@ function createStyles(colors: ThemeColors) {
       fontSize: 13,
       color: colors.dangerFg,
     },
+    retryButton: {
+      alignSelf: "flex-start",
+      minHeight: 40,
+      borderRadius: 9,
+      borderWidth: 2,
+      borderColor: colors.brand,
+      paddingHorizontal: 16,
+      justifyContent: "center",
+    },
+    retryButtonText: {
+      fontFamily: Fonts.bold,
+      fontSize: 13,
+      color: colors.brand,
+    },
     resultsCount: {
       fontFamily: Fonts.semiBold,
       fontSize: 10.5,
@@ -297,6 +380,21 @@ function createStyles(colors: ThemeColors) {
       borderColor: colors.brand,
       borderRadius: 12,
       backgroundColor: colors.brandSubtleBg,
+      padding: 14,
+    },
+    // Spec 81 — variante secundaria: solo aparece cuando la búsqueda falló y
+    // no hay nada en caché. Visualmente más discreta que `newFarmerCard`
+    // porque no debe leerse como la acción recomendada.
+    newFarmerCardSecondary: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+      minHeight: 48,
+      borderWidth: 1,
+      borderStyle: "dashed",
+      borderColor: colors.border,
+      borderRadius: 12,
+      backgroundColor: colors.surface,
       padding: 14,
     },
     newFarmerIconWrapper: {
