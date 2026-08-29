@@ -141,7 +141,13 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         '@sentry/react-native/expo',
         {
           organization: 'instituto-tecnologico-metropol',
-          project: 'sosagro-mobile',
+          // Corregido en el spec 80 (2026-08-29): el slug real del proyecto
+          // en Sentry es 'react-native', no 'sosagro-mobile'. Con el slug
+          // equivocado, la subida de sourcemaps fallaba en Gradle con
+          // "sentry reported an error: One or more projects are invalid
+          // (http status: 400)" — incluso con el binario de sentry-cli ya
+          // resuelto correctamente.
+          project: 'react-native',
         },
       ],
       [
