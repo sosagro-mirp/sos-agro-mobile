@@ -1,12 +1,16 @@
 # Pendientes de build EAS
 
 > Registro de cambios de código ya committeados que **todavía no se han verificado en un build EAS
-> real** (no basta con Expo Go: `expo-updates` no está instalado — ver
-> `spec/backlog.md` → "El build instalado en las tablets tiene EAS Update desactivado en
-> runtime" —, así que la única forma de llevar código nuevo, incluso puramente JS, a un APK ya
-> instalado es generar un build nuevo). El plan Free de EAS tiene cupo limitado
-> (`https://expo.dev/accounts/{{cuenta}}/settings/billing`), así que no se genera un build por cada
-> commit: se acumulan aquí hasta que valga la pena gastar uno.
+> real**, y que **exigen build nativo** (no alcanza con `eas update` por OTA — ver
+> `mobile/docs/ota-updates.md` para el criterio de qué va por cada vía). El plan Free de EAS tiene
+> cupo limitado (`https://expo.dev/accounts/{{cuenta}}/settings/billing`), así que no se genera un
+> build por cada commit: se acumulan aquí hasta que valga la pena gastar uno.
+>
+> **Nota del spec 80 (2026-08-29):** las tablets de campo todavía no tienen `expo-updates`
+> instalado — eso solo llega con el próximo build. Las dos filas de abajo son JS puro y, en
+> cualquier build **posterior** a ese, se publicarían por OTA en vez de esperar aquí. Hoy siguen en
+> esta tabla porque comparten el mismo build que instala el canal OTA (ver Fase 6 del spec 80):
+> agrupar es lo que evita gastar dos vueltas físicas por las tablets en vez de una.
 
 **Última consulta de cuota:** 2026-08-29 — plan Free, 15 Android + 15 iOS por mes (cupos
 independientes, no intercambiables), 8/15 Android usados este ciclo.

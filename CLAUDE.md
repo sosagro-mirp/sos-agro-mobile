@@ -333,16 +333,28 @@ El test E2E cubre: login → campaña → pre-encuesta → responder → kill de
 
 No borrar ni modificar tests existentes sin instrucción explícita.
 
+### Canal OTA (expo-updates)
+
+Desde el spec 80 (2026-08-29), `expo-updates` está instalado y el canal OTA es efectivo: la mayoría
+de los cambios puramente JS **ya no exigen build EAS** ni vuelta física por las tablets — se publican
+con `eas update`. Ver `mobile/docs/ota-updates.md` para el procedimiento completo (qué va por OTA,
+comando de publicación, verificación, rollback) y la regla de oro: **nunca tocar `version` en
+`app.config.ts` salvo que se vaya a compilar e instalar un build nativo nuevo**.
+
+**Pendiente del spec 80:** la Fase 4 (sourcemaps de Sentry para bundles OTA) sigue bloqueada por
+falta de `SENTRY_AUTH_TOKEN` — un crash de un bundle publicado por OTA hoy llega a Sentry sin stack
+trace legible. Retomarla antes de depender del canal para hotfixes complejos.
+
 ### Pendientes de build EAS
 
-Este repositorio **no tiene OTA** (`expo-updates` no está instalado — ver `spec/backlog.md`), así
-que un cambio de código, aunque sea puramente JS, no llega a un APK ya instalado sin un build EAS
-nuevo. El plan de EAS tiene cupo limitado por mes, así que no se genera un build por cada commit.
+`mobile/docs/pendientes-de-build.md` lleva la lista de cambios que **sí** exigen build nativo (no
+alcanza con OTA — dependencias nativas, permisos, plugins de config, cambio de `version`; ver
+`mobile/docs/ota-updates.md` para el criterio completo) y que todavía no se han verificado en un
+build real. El plan de EAS tiene cupo limitado por mes, así que no se genera un build por cada
+cambio de ese tipo.
 
-- **`mobile/docs/pendientes-de-build.md`** lleva la lista de cambios ya committeados sin verificar
-  todavía en un build real.
-- Al cerrar cualquier cambio de código en `mobile/` que solo pueda probarse en un build EAS (no en
-  Expo Go), **agregar una fila a esa tabla** antes de continuar.
+- Al cerrar cualquier cambio de código en `mobile/` que exija build nativo, **agregar una fila a esa
+  tabla** antes de continuar.
 - **Cuando la tabla acumule 3 o más filas pendientes, o alguna sea bloqueante para una fecha
   comprometida** (ej. una ventana de instalación en tablets), señalarlo al usuario y **proponer**
   generar un build EAS `preview` que cubra todos los pendientes a la vez. Nunca generarlo sin esa
