@@ -1,3 +1,4 @@
+import { AppState, type AppStateStatus } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 
 const LOG_DIR = FileSystem.documentDirectory + 'logs/';
@@ -67,19 +68,60 @@ let segmentDate = '';
 let segmentIndex = 0;
 let segmentContent = '';
 
+/**
+ * Fechas para las que ya se resolvió el índice inicial de segmento **en esta
+ * ejecución del proceso**. Bug corregido tras la auditoría del spec 76
+ * (`docs/reports/auditorias/35-...`): al arrancar la app, `segmentDate` vuelve
+ * a estar vacío, así que el primer `write()` del día entraba por
+ * `date !== segmentDate` y arrancaba siempre en el índice `000` — pisando el
+ * segmento que había dejado la ejecución anterior. Si esa ejecución anterior
+ * había crasheado, el reinicio borraba justo el log de la corrida que crasheó
+ * (la evidencia que `TC-076-01` necesita). Ahora, la primera vez que se
+ * escribe para una fecha dada en este proceso, se lista `LOG_DIR` y se
+ * arranca en `máximo índice existente + 1`, sin releer ningún contenido — se
+ * sigue sin releer nada para escribir, solo se lee el *nombre* de los
+ * archivos para no repetir un índice.
+ */
+const resolvedDates = new Set<string>();
+
 let buffer: string[] = [];
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 /** Cadena serializada de escrituras: garantiza que no se pisen entre sí. */
 let writeChain: Promise<void> = Promise.resolve();
 
-function startNewSegment(date: string): void {
-  if (date !== segmentDate) {
-    segmentDate = date;
-    segmentIndex = 0;
-  } else {
-    segmentIndex += 1;
+async function nextIndexForDate(date: string): Promise<number> {
+  const info = await FileSystem.getInfoAsync(LOG_DIR);
+  if (!info.exists) return 0;
+
+  const files = await FileSystem.readDirectoryAsync(LOG_DIR);
+  const prefix = `${date}.`;
+  let maxIndex = -1;
+  for (const file of files) {
+    if (!file.startsWith(prefix)) continue;
+    const index = Number(file.slice(prefix.length, prefix.length + 3));
+    if (!isNaN(index) && index > maxIndex) maxIndex = index;
   }
+  return maxIndex + 1;
+}
+
+async function startSegmentForDate(date: string): Promise<void> {
+  segmentDate = date;
+  segmentIndex = resolvedDates.has(date) ? segmentIndex + 1 : await nextIndexForDate(date);
+  resolvedDates.add(date);
   segmentContent = '';
+}
+
+function startNewSegmentSameDate(): void {
+  // Rotación por tamaño dentro del mismo `flushBuffer()`: la fecha ya se
+  // resolvió en esta pasada, así que basta con avanzar el índice en memoria.
+  segmentIndex += 1;
+  segmentContent = '';
+}
+
+async function writeCurrentSegment(): Promise<void> {
+  await FileSystem.writeAsStringAsync(segmentPath(segmentDate, segmentIndex), segmentContent, {
+    encoding: FileSystem.EncodingType.UTF8,
+  });
 }
 
 async function flushBuffer(): Promise<void> {
@@ -91,18 +133,22 @@ async function flushBuffer(): Promise<void> {
   await ensureDir();
 
   const date = todayKey();
-  if (date !== segmentDate) startNewSegment(date);
+  if (date !== segmentDate) await startSegmentForDate(date);
 
   for (const entry of entries) {
     if (segmentContent.length + entry.length > MAX_SEGMENT_BYTES && segmentContent.length > 0) {
-      startNewSegment(date);
+      // Encontrado al escribir el test de rotación de la auditoría del spec
+      // 76: si una ráfaga cruza MAX_SEGMENT_BYTES dentro de un mismo
+      // `flushBuffer()`, el segmento que se está por abandonar debe
+      // persistirse ANTES de rotar — de lo contrario solo el último segmento
+      // de la ráfaga llegaba a disco y los anteriores se perdían en silencio.
+      await writeCurrentSegment();
+      startNewSegmentSameDate();
     }
     segmentContent += entry;
   }
 
-  await FileSystem.writeAsStringAsync(segmentPath(segmentDate, segmentIndex), segmentContent, {
-    encoding: FileSystem.EncodingType.UTF8,
-  });
+  await writeCurrentSegment();
 }
 
 function scheduleFlush(): void {
@@ -134,11 +180,30 @@ async function deleteOldLogs(): Promise<void> {
   }
 }
 
+let appStateSubscribed = false;
+
+/**
+ * Auditoría del spec 76 (mayor, no bloqueante): el buffer se vuelca con
+ * FLUSH_DELAY_MS de retardo, así que un crash nativo justo después de un
+ * `logger.error(...)` podía perder las últimas líneas — las de más valor
+ * forense, porque suelen ser las que preceden al crash. Al pasar a segundo
+ * plano (o inactivo) se fuerza el volcado inmediato.
+ */
+function handleAppStateChange(state: AppStateStatus): void {
+  if (state === 'background' || state === 'inactive') {
+    logger.flush().catch((e) => console.error('[logger] flush on background failed', e));
+  }
+}
+
 export const logger = {
   async init(): Promise<void> {
     try {
       await ensureDir();
       await deleteOldLogs();
+      if (!appStateSubscribed) {
+        appStateSubscribed = true;
+        AppState.addEventListener('change', handleAppStateChange);
+      }
     } catch (e) {
       console.error('[logger] init error', e);
     }

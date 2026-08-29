@@ -7,9 +7,10 @@
 // es JavaScript plano, sin sintaxis TS, para que ambos lados lo puedan leer
 // sin duplicar los valores a mano.
 //
-// Si cambia el fondo institucional, actualizar aquí Y `background` en
-// `lightColors`/`darkColors` de `colors.ts` — son la misma fuente lógica,
-// repartida en dos archivos por esta limitación de carga del config.
+// Este archivo es la única fuente real de los dos valores: `colors.ts` ya
+// lee `background` de aquí (`require("./splashBackground")`), así que
+// cambiar el fondo institucional se hace **solo en este archivo** — no hay
+// un segundo lugar que actualizar a mano.
 module.exports = {
   light: "#FFFFFF",
   dark: "#0F172A",

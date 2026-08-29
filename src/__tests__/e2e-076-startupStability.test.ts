@@ -159,6 +159,65 @@ describe('Criterios 8 y 9 — el logger no pierde líneas ni relee el archivo co
     // línea. Con un log de 5 MB, escribir una línea mueve 10 MB de I/O.
     expect(readCalls).toBe(0);
   });
+
+  it('un reinicio del proceso no pisa el segmento que dejó la ejecución anterior', async () => {
+    // Regresión encontrada en la auditoría del spec 76
+    // (`docs/reports/auditorias/35-...`): `segmentDate`/`segmentIndex` viven
+    // en memoria del módulo, así que al reiniciar el proceso (`jest.resetModules`
+    // simula exactamente eso: un `require` nuevo del módulo, como ocurre en
+    // cada arranque de la app) el primer `write()` del día volvía a arrancar
+    // en el índice `000` y `writeAsStringAsync` pisaba lo que ya hubiera ahí.
+    // Si la ejecución anterior había crasheado, el reinicio borraba justo el
+    // log de la corrida que crasheó — la evidencia que necesita `TC-076-01`.
+    const { logger: firstRun } = require('../lib/logger');
+    firstRun.info('antes-del-crash');
+    await firstRun.flush();
+
+    const filesAfterFirstRun = new Map(files); // `beforeEach` no limpia `files` a mitad de un `it`.
+    expect(filesAfterFirstRun.size).toBe(1);
+
+    // Simula el reinicio: nuevo `require`, mismo directorio de logs en disco.
+    jest.resetModules();
+    const { logger: secondRun } = require('../lib/logger');
+    secondRun.info('despues-del-reinicio');
+    await secondRun.flush();
+
+    // El segmento de la primera ejecución sigue intacto, y la segunda
+    // escribió en un segmento nuevo — nunca se pisaron entre sí.
+    for (const [path, content] of filesAfterFirstRun) {
+      expect(files.get(path)).toBe(content);
+    }
+    expect(files.size).toBe(2);
+    expect([...files.values()].join('')).toContain('antes-del-crash');
+    expect([...files.values()].join('')).toContain('despues-del-reinicio');
+  });
+
+  it('la rotación por tamaño reparte las líneas en varios segmentos del mismo día', async () => {
+    const { logger } = require('../lib/logger');
+
+    // MAX_SEGMENT_BYTES = 256 KB; una línea de ~50 KB fuerza rotación cada
+    // pocas escrituras dentro de la misma pasada de `flushBuffer()`.
+    const bigLine = 'x'.repeat(50 * 1024);
+    for (let i = 0; i < 10; i += 1) logger.info(`${i}-${bigLine}`);
+    await logger.flush();
+
+    expect(files.size).toBeGreaterThan(1);
+  });
+
+  it('getLogs() reagrupa varios segmentos del mismo día en una sola entrada', async () => {
+    const { logger } = require('../lib/logger');
+
+    const bigLine = 'x'.repeat(50 * 1024);
+    for (let i = 0; i < 10; i += 1) logger.info(`${i}-${bigLine}`);
+    await logger.flush();
+
+    const logs = await logger.getLogs();
+    const today = new Date().toISOString().slice(0, 10);
+
+    expect(logs).toHaveLength(1);
+    expect(logs[0].date).toBe(today);
+    for (let i = 0; i < 10; i += 1) expect(logs[0].content).toContain(`${i}-`);
+  });
 });
 
 describe('Regresión del incidente 2026-08-18 — ningún provider desmonta el árbol', () => {
@@ -172,6 +231,17 @@ describe('Regresión del incidente 2026-08-18 — ningún provider desmonta el �
     'app/_layout.tsx',
   ];
 
+  // Nombres de los componentes que efectivamente envuelven `children` en cada
+  // archivo. `app/_layout.tsx` no define ningún `*Provider` propio —el que
+  // envuelve el árbol es `RootLayout`—, así que el patrón original
+  // (`\w*Provider`) pasaba en verde sin revisar una sola línea de ese archivo
+  // (hallazgo de la auditoría del spec 76, `docs/reports/auditorias/35-...`).
+  const wrapperNames: Record<string, RegExp> = {
+    'src/theme/ThemeProvider.tsx': /Provider$/,
+    'src/components/common/Snackbar.tsx': /Provider$/,
+    'app/_layout.tsx': /^RootLayout$/,
+  };
+
   it.each(wrappers)('%s nunca devuelve null en lugar de sus children', (relativePath) => {
     const source = readFileSync(join(__dirname, '../..', relativePath), 'utf8');
 
@@ -182,7 +252,18 @@ describe('Regresión del incidente 2026-08-18 — ningún provider desmonta el �
       .filter((line) => !line.trim().startsWith('//') && !line.trim().startsWith('*'))
       .join('\n');
 
-    const wrapperBodies = code.match(/function\s+\w*Provider[\s\S]*?\n}/g) ?? [];
+    const namePattern = wrapperNames[relativePath];
+    const declarations = code.match(/(?:export default )?function\s+(\w+)[\s\S]*?\n}/g) ?? [];
+    const wrapperBodies = declarations.filter((decl) => {
+      const nameMatch = decl.match(/function\s+(\w+)/);
+      return nameMatch !== null && namePattern.test(nameMatch[1]);
+    });
+
+    // Guardarraíl del guardarraíl: si esto llega a 0, el `for` de abajo no
+    // verificaría nada y el caso pasaría en verde sin haber comprobado nada
+    // — exactamente el falso positivo que tenía este test para `_layout.tsx`.
+    expect(wrapperBodies.length).toBeGreaterThan(0);
+
     for (const body of wrapperBodies) {
       expect(body).not.toMatch(/return\s+null\s*;/);
     }

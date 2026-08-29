@@ -4,7 +4,7 @@ import type { EffectiveTheme } from "./resolveTheme";
 // imports relativos a este archivo `.ts` al evaluar el config plugin de
 // `expo-splash-screen`. Se importa aquí para no hardcodear el mismo valor
 // dos veces — un cambio de fondo se hace en un solo lugar.
-// eslint-disable-next-line @typescript-eslint/no-var-requires
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const splashBackground = require("./splashBackground") as { light: string; dark: string };
 
 export interface ThemeColors {
