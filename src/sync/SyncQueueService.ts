@@ -445,8 +445,11 @@ class SyncQueueServiceClass {
       // marcó esta entrada `in_flight` antes de llegar aquí; devolverla a
       // `pending` explícitamente evita que quede varada hasta que corra un
       // `processAll()` de fondo (su único `finally` la rescataba antes),
-      // algo que `processSurveyNow()` nunca ejecuta por sí solo.
-      await syncQueueStorage.resetInFlightToRetryBySurveyId(entry.surveyId);
+      // algo que `processSurveyNow()` nunca ejecuta por sí solo. Por `id`,
+      // no por `surveyId` (corrección de auditoría,
+      // docs/reports/auditorias/37-…): el mismo `surveyId` puede tener otra
+      // entrada legítimamente en vuelo (ej. una `skip-step` hermana).
+      await syncQueueStorage.resetInFlightToRetryById(entry.id);
       logger.warn(`[Sync] campaign session not yet resolved for entry ${entry.id}, deferring`);
       return null;
     }

@@ -162,6 +162,20 @@ export const syncQueueStorage = {
       .where(and(eq(syncQueue.surveyId, surveyId), eq(syncQueue.status, 'in_flight')));
   },
 
+  // Spec 81, Fase 3 — corrección de auditoría
+  // (docs/reports/auditorias/37-…): variante acotada a un `id` de entrada
+  // específico, para `resolveCampaignSession()`. Un mismo `surveyId` puede
+  // tener más de una entrada en la cola (p. ej. una `survey` y una
+  // `skip-step`, o dos intentos de resolución de sesión distintos) —
+  // `resetInFlightToRetryBySurveyId()` habría devuelto a `pending` una
+  // entrada hermana que sigue legítimamente en vuelo.
+  async resetInFlightToRetryById(id: string): Promise<void> {
+    await db
+      .update(syncQueue)
+      .set({ status: 'pending' })
+      .where(and(eq(syncQueue.id, id), eq(syncQueue.status, 'in_flight')));
+  },
+
   async clearFailed(): Promise<number> {
     const result = await db
       .delete(syncQueue)

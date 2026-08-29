@@ -709,11 +709,20 @@ export default function OrchestratorScreen() {
   // MAX_CONSECUTIVE_NETWORK_FAILURES`) hasta una transición offline→online
   // real de NetInfo — que en campo, con la radio nunca totalmente caída, no
   // llega nunca. `processSurveyNow()` ya no vuelve a chocar contra ese tope.
-  const handleRetry = useCallback(() => {
+  const handleRetry = useCallback(async () => {
     SyncQueueService.resetNetworkFailures();
-    SyncQueueService.processAll().catch((err) =>
-      logger.error('[Orchestrator] processAll on manual retry failed', err),
-    );
+    // Spec 81 — corrección de auditoría (docs/reports/auditorias/37-…): este
+    // `processAll()` se espera antes de `run()`. Sin el `await`, quedaba
+    // corriendo en paralelo con `processSurveyNow()` (dentro de `run()`), que
+    // ahora resetea `in_flight` → `pending` por `surveyId`: si `processAll()`
+    // ya había tomado esa misma entrada y estaba esperando la respuesta del
+    // POST, el reset se la devolvía al camino interactivo y ambos la volvían
+    // a procesar — ventana real de doble `POST /api/surveys` (criterio 11).
+    try {
+      await SyncQueueService.processAll();
+    } catch (err) {
+      logger.error('[Orchestrator] processAll on manual retry failed', err);
+    }
     hasStarted.current = false;
     run();
   }, [run]);
@@ -850,7 +859,13 @@ export default function OrchestratorScreen() {
         <SpinningLoader size={42} color={colors.brand} />
         <Text style={styles.loadingLabel}>
           {retryAttempt > 0
-            ? `Reintentando (${retryAttempt} de 3)…`
+            // Spec 81 — corrección de auditoría
+            // (docs/reports/auditorias/37-…): `withNetworkRetry` llama a
+            // `onRetry(attempt)` con el intento que acaba de fallar, justo
+            // antes de correr `attempt + 1` — mostrar `retryAttempt` a secas
+            // nunca llegaba a "(3 de 3)" aunque sí corriera el tercer
+            // intento.
+            ? `Reintentando (${retryAttempt + 1} de 3)…`
             : "Cargando siguiente paso…"}
         </Text>
         {stepLabel ? <Text style={styles.loadingSubLabel}>{stepLabel}</Text> : null}

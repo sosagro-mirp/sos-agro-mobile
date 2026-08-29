@@ -21,6 +21,7 @@ archiva) en cuanto un build lo cubre y la ronda manual correspondiente lo confir
 |---|--------|--------|------------------------------|--------------------------------------|
 | 1 | `app/dev/logs.tsx`: lista de logs agrupada por fecha vía `logger.getLogs()`, en vez de una fila por segmento | `b46b653` | Spec 76 — repetir `TC-076-08` | No (JS puro, pero sin OTA igual exige build) |
 | 2 | `src/lib/logger.ts`: `logger.clearAll()` borra archivos y estado en memoria de forma atómica — "Limpiar logs" ya no resucitaba el segmento del día | `321e597` | Spec 76 — repetir `TC-076-08` (botón "Limpiar logs") | No (JS puro, pero sin OTA igual exige build) |
+| 3 | Resiliencia de red en pre-encuesta y extract-farmer: fallback a caché en `PreSurveyForm`, `withNetworkRetry` en `extractFarmer`/`extractCrops`, desatasco de la cola `in_flight` desde `processSurveyNow()`, `reachability` de 3 estados (`online`/`offline`/`server_unreachable`) vía `GET /api/health` | `2dd19c3` | Spec 81 — `docs/testing/test-081-resiliencia-red.md`, `TC-081-001` a `TC-081-010` | No (JS puro, pero sin OTA igual exige build) |
 
 ## Política: cuándo generar el siguiente build
 

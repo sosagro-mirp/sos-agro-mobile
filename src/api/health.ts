@@ -21,11 +21,17 @@ export async function pingApi(): Promise<boolean> {
   const timer = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
 
   try {
-    const res = await fetch(`${API_BASE_URL}${endpoints.health}`, {
+    // Spec 81 — corrección de auditoría (docs/reports/auditorias/37-…):
+    // cualquier respuesta HTTP, incluido un 503 (backend degradado/DB caída,
+    // ver `health.controller.ts` del backend), demuestra que el servidor
+    // contestó — es justo el caso que este sondeo debe distinguir de un
+    // `NetworkError` real. El código anterior (`status < 500`) contradecía
+    // este docstring.
+    await fetch(`${API_BASE_URL}${endpoints.health}`, {
       method: 'GET',
       signal: controller.signal,
     });
-    return res.status < 500;
+    return true;
   } catch {
     return false;
   } finally {

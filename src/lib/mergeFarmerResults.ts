@@ -36,6 +36,14 @@ function cacheEntryToSearchResult(entry: FarmerCacheEntry): FarmerSearchResult {
  * red y la caché, a diferencia del id — una entrada de caché puede seguir
  * con un `farmerId` provisional `local_...` mientras la red ya conoce el
  * real). Sin `documentId`, cae al `farmerId`.
+ *
+ * Límite conocido (corrección de auditoría,
+ * docs/reports/auditorias/37-…): sin `documentId` en ninguna de las dos
+ * filas, una entrada de caché con `farmerId` provisional `local_...` y su
+ * contraparte real de red **no** se detectan como el mismo agricultor y
+ * aparecen duplicadas. Resolverlo exigiría comparación de nombres (la misma
+ * máquina del spec 68, que vive en `backend/` y no se trae aquí a propósito)
+ * — se documenta como limitación, no se enmascara.
  */
 function dedupeKey(farmer: FarmerSearchResult): string {
   if (farmer.documentId) {

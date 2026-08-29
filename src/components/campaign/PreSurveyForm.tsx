@@ -38,7 +38,6 @@ export const PreSurveyForm: React.FC<PreSurveyFormProps> = ({
   const [searchError, setSearchError] = useState<string | null>(null);
   const [networkFailed, setNetworkFailed] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const reachability = useSyncStatusStore((s) => s.reachability);
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
@@ -68,18 +67,24 @@ export const PreSurveyForm: React.FC<PreSurveyFormProps> = ({
         // La red falló, pero no dejamos la lista vacía: se muestra lo que
         // ya se conoce localmente y se avisa de que son datos guardados.
         setNetworkFailed(true);
-        // Spec 81, Fase 4 — mensaje diferenciado según `reachability`, y
-        // sondeo bajo demanda para refinar el estado publicado (puede que
-        // NetInfo diga "hay red" con el backend inalcanzable).
+        setResults(mergeFarmerResults({ network: [], cached }));
+
+        // Spec 81, Fase 4 — corrección de auditoría
+        // (docs/reports/auditorias/37-…): antes se leía `reachability` ANTES
+        // de sondear, así que el mensaje quedaba desalineado con el banner
+        // hasta la siguiente búsqueda. Se espera `probeReachability()` y el
+        // mensaje se calcula con el estado ya actualizado.
+        try {
+          await NetworkMonitor.probeReachability();
+        } catch (err) {
+          logger.error('[PreSurveyForm] probeReachability failed', err);
+        }
+        const finalReachability = useSyncStatusStore.getState().reachability;
         setSearchError(
-          reachability === 'offline'
+          finalReachability === 'offline'
             ? "Sin conexión."
             : "No se pudo contactar el servidor.",
         );
-        NetworkMonitor.probeReachability().catch((err) =>
-          logger.error('[PreSurveyForm] probeReachability failed', err),
-        );
-        setResults(mergeFarmerResults({ network: [], cached }));
       } finally {
         setIsSearching(false);
       }
@@ -151,7 +156,16 @@ export const PreSurveyForm: React.FC<PreSurveyFormProps> = ({
         </View>
       ) : null}
 
-      {isOnline && networkFailed && results.length > 0 ? (
+      {/*
+        Spec 81 — corrección de auditoría (docs/reports/auditorias/37-…):
+        antes esto exigía `isOnline`, pero el `probeReachability()` del catch
+        de abajo puede publicar `server_unreachable` (→ `isOnline = false`) y
+        el aviso desaparecía justo cuando seguía siendo cierto que los
+        resultados eran de caché. Se condiciona al hecho real —
+        `networkFailed` y que algún resultado venga de caché— no al estado de
+        conectividad derivado.
+      */}
+      {networkFailed && results.some((r) => r.fromCache) ? (
         <View style={styles.offlineHint}>
           <Info size={15} color={colors.infoFg} style={styles.offlineHintIcon} />
           <Text style={styles.offlineHintText}>
