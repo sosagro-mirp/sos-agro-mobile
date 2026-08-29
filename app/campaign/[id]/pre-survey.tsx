@@ -290,18 +290,25 @@ export default function PreSurveyScreen() {
         </View>
       ) : null}
 
+      {/*
+        Spec 81, Fase 1 — el formulario ya no se desmonta mientras carga: un
+        fallo de red al crear la sesión (createCampaignSession/startSession)
+        antes devolvía a un buscador vacío porque este ternario montaba una
+        rama u otra. Ahora el overlay flota encima y la búsqueda/resultados
+        del encuestador quedan intactos si `startSession_` falla.
+      */}
+      <PreSurveyForm
+        isOnline={isOnline}
+        onSearchSelect={handleSearchSelect}
+        onNewFarmer={handleNewFarmer}
+      />
+
       {isLoading ? (
         <View style={styles.loadingOverlay}>
           <ActivityIndicator size="large" color={colors.brand} />
           <Text style={styles.loadingText}>Iniciando sesión…</Text>
         </View>
-      ) : (
-        <PreSurveyForm
-          isOnline={isOnline}
-          onSearchSelect={handleSearchSelect}
-          onNewFarmer={handleNewFarmer}
-        />
-      )}
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -360,10 +367,15 @@ function createStyles(colors: ThemeColors) {
       margin: 24,
     },
     loadingOverlay: {
-      flex: 1,
+      position: "absolute",
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
       alignItems: "center",
       justifyContent: "center",
       gap: 14,
+      backgroundColor: colors.surfaceMuted,
     },
     loadingText: {
       fontSize: 15,

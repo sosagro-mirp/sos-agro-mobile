@@ -261,15 +261,20 @@ class SyncQueueServiceClass {
     return null;
   }
 
-  private async processEntry(entry: SyncQueueEntry): Promise<void> {
+  // Spec 81, Fase 3 — `interactive` distingue el camino donde hay un
+  // encuestador esperando en pantalla (processSurveyNow()) del ciclo de
+  // fondo (processAll()). En el primero, handleNetworkError() no debe
+  // dormir el backoff completo (hasta 60s): el "Reintentar" se quedaría
+  // colgado sin ninguna señal en pantalla.
+  private async processEntry(entry: SyncQueueEntry, interactive = false): Promise<void> {
     if (entry.itemType === 'farm-plot') {
-      await this.processFarmPlotEntry(entry);
+      await this.processFarmPlotEntry(entry, interactive);
     } else if (entry.itemType === 'skip-step') {
-      await this.processSkipStepEntry(entry);
+      await this.processSkipStepEntry(entry, interactive);
     } else if (entry.itemType === 'consent') {
-      await this.processConsentEntry(entry);
+      await this.processConsentEntry(entry, interactive);
     } else {
-      await this.processSurveyEntry(entry);
+      await this.processSurveyEntry(entry, interactive);
     }
   }
 
@@ -280,7 +285,7 @@ class SyncQueueServiceClass {
   // esta tabla. Un 4xx aquí NUNCA debe frenar el resto de la cola: la
   // constancia perdida se reporta para reconciliar desde el panel (ver
   // "Puntos delicados", 2, en spec/78_consentimiento_informado_tratamiento_datos.md).
-  private async processConsentEntry(entry: SyncQueueEntry): Promise<void> {
+  private async processConsentEntry(entry: SyncQueueEntry, interactive = false): Promise<void> {
     await syncQueueStorage.markInFlight(entry.id);
 
     try {
@@ -346,7 +351,7 @@ class SyncQueueServiceClass {
     } catch (error) {
       if (error instanceof NetworkError) {
         logger.error('[Sync] network error (consent)', error);
-        await this.handleNetworkError(entry);
+        await this.handleNetworkError(entry, interactive);
       } else {
         logger.error('[Sync] validation error (consent)', error);
         captureError(error, { consentRecordId: entry.surveyId, entryId: entry.id });
@@ -364,7 +369,7 @@ class SyncQueueServiceClass {
   // marcador vía el mismo endpoint que usa el camino online
   // (POST /api/surveys/skip-step), para que el estado final de la campaña sea
   // idéntico sin importar si hubo conexión en el momento de saltar.
-  private async processSkipStepEntry(entry: SyncQueueEntry): Promise<void> {
+  private async processSkipStepEntry(entry: SyncQueueEntry, interactive = false): Promise<void> {
     await syncQueueStorage.markInFlight(entry.id);
 
     try {
@@ -397,7 +402,7 @@ class SyncQueueServiceClass {
     } catch (error) {
       if (error instanceof NetworkError) {
         logger.error('[Sync] network error (skip-step)', error);
-        await this.handleNetworkError(entry);
+        await this.handleNetworkError(entry, interactive);
       } else {
         logger.error('[Sync] validation error (skip-step)', error);
         captureError(error, { entryId: entry.id, surveyId: entry.surveyId });
@@ -435,7 +440,16 @@ class SyncQueueServiceClass {
 
     const pendingSession = await pendingSessionStorage.getByLocal(entry.campaignSessionId);
     if (pendingSession?.status === 'pending') {
-      // Espera legítima: la sesión sigue en cola de resolución.
+      // Espera legítima: la sesión sigue en cola de resolución. Spec 81,
+      // Fase 3 — el llamador (processSurveyEntry/processSkipStepEntry) ya
+      // marcó esta entrada `in_flight` antes de llegar aquí; devolverla a
+      // `pending` explícitamente evita que quede varada hasta que corra un
+      // `processAll()` de fondo (su único `finally` la rescataba antes),
+      // algo que `processSurveyNow()` nunca ejecuta por sí solo. Por `id`,
+      // no por `surveyId` (corrección de auditoría,
+      // docs/reports/auditorias/37-…): el mismo `surveyId` puede tener otra
+      // entrada legítimamente en vuelo (ej. una `skip-step` hermana).
+      await syncQueueStorage.resetInFlightToRetryById(entry.id);
       logger.warn(`[Sync] campaign session not yet resolved for entry ${entry.id}, deferring`);
       return null;
     }
@@ -453,7 +467,7 @@ class SyncQueueServiceClass {
     return null;
   }
 
-  private async processSurveyEntry(entry: SyncQueueEntry): Promise<void> {
+  private async processSurveyEntry(entry: SyncQueueEntry, interactive = false): Promise<void> {
     await syncQueueStorage.markInFlight(entry.id);
 
     try {
@@ -552,7 +566,7 @@ class SyncQueueServiceClass {
     } catch (error) {
       if (error instanceof NetworkError) {
         logger.error('[Sync] network error', error);
-        await this.handleNetworkError(entry);
+        await this.handleNetworkError(entry, interactive);
       } else {
         logger.error('[Sync] validation error', error);
         captureError(error, { surveyId: entry.surveyId, entryId: entry.id });
@@ -564,7 +578,7 @@ class SyncQueueServiceClass {
   }
 
   // Handles entries with itemType 'farm-plot'; entry.surveyId holds the local farmPlotId (per D5).
-  private async processFarmPlotEntry(entry: SyncQueueEntry): Promise<void> {
+  private async processFarmPlotEntry(entry: SyncQueueEntry, interactive = false): Promise<void> {
     await syncQueueStorage.markInFlight(entry.id);
 
     try {
@@ -603,7 +617,7 @@ class SyncQueueServiceClass {
     } catch (error) {
       if (error instanceof NetworkError) {
         logger.error('[Sync] network error (farm-plot)', error);
-        await this.handleNetworkError(entry);
+        await this.handleNetworkError(entry, interactive);
       } else {
         logger.error('[Sync] validation error (farm-plot)', error);
         captureError(error, { farmPlotId: entry.surveyId, entryId: entry.id });
@@ -786,7 +800,7 @@ class SyncQueueServiceClass {
     return buildResponsesPayload(realSurveyId, flattenedQuestions, resolvedAnswers, attachmentIds);
   }
 
-  private async handleNetworkError(entry: SyncQueueEntry): Promise<void> {
+  private async handleNetworkError(entry: SyncQueueEntry, interactive = false): Promise<void> {
     this.consecutiveNetworkFailures++;
     await syncQueueStorage.incrementAttempts(entry.id);
 
@@ -795,16 +809,31 @@ class SyncQueueServiceClass {
       BACKOFF_MAX_MS
     );
 
-    if (this.consecutiveNetworkFailures < MAX_CONSECUTIVE_NETWORK_FAILURES) {
+    // Spec 81, Fase 3 — en el camino interactivo (processSurveyNow()) no
+    // dormimos el backoff completo: con `attempts` alto llegaba a esperar
+    // hasta 60s con el encuestador mirando la pantalla, sin ninguna señal de
+    // que la app seguía trabajando. El backoff de fondo (processAll()) sigue
+    // igual: ahí sí importa espaciar los reintentos entre corridas.
+    if (!interactive && this.consecutiveNetworkFailures < MAX_CONSECUTIVE_NETWORK_FAILURES) {
       await sleep(delayMs);
     }
   }
 
   async processSurveyNow(surveyId: string): Promise<void> {
+    // Spec 81, Fase 3 — un intento anterior (este mismo camino interactivo,
+    // o un `processAll()` interrumpido) puede haber dejado la entrada de
+    // este `surveyId` en `in_flight`. `getPendingBySurveyId()` no la vería
+    // (filtra por `status = 'pending'`) y este método caería directo al
+    // bucle de espera de más abajo sin procesarla nunca. Repararla antes de
+    // consultar es lo que permite que un segundo "Reintentar" del
+    // encuestador sí avance, sin depender de que corra un `processAll()` de
+    // fondo ni de reiniciar la app.
+    await syncQueueStorage.resetInFlightToRetryBySurveyId(surveyId);
+
     const entry = await syncQueueStorage.getPendingBySurveyId(surveyId);
 
     if (entry) {
-      await this.processEntry(entry);
+      await this.processEntry(entry, true);
       return;
     }
 

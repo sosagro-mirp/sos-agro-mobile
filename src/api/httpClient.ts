@@ -1,6 +1,9 @@
 import { secureStorage } from "../storage/secureStorage";
 
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL ?? "http://localhost:3000";
+// Exportado para `src/api/health.ts` (spec 81, Fase 4): el sondeo de
+// disponibilidad usa su propio fetch, sin pasar por `request()`, así que
+// necesita la misma base de URL sin duplicar la lectura del env.
+export const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL ?? "http://localhost:3000";
 const TIMEOUT_MS = 15_000;
 const MAX_RETRIES = 3;
 
