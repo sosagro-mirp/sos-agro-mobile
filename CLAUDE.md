@@ -333,6 +333,25 @@ El test E2E cubre: login → campaña → pre-encuesta → responder → kill de
 
 No borrar ni modificar tests existentes sin instrucción explícita.
 
+### Pendientes de build EAS
+
+Este repositorio **no tiene OTA** (`expo-updates` no está instalado — ver `spec/backlog.md`), así
+que un cambio de código, aunque sea puramente JS, no llega a un APK ya instalado sin un build EAS
+nuevo. El plan de EAS tiene cupo limitado por mes, así que no se genera un build por cada commit.
+
+- **`mobile/docs/pendientes-de-build.md`** lleva la lista de cambios ya committeados sin verificar
+  todavía en un build real.
+- Al cerrar cualquier cambio de código en `mobile/` que solo pueda probarse en un build EAS (no en
+  Expo Go), **agregar una fila a esa tabla** antes de continuar.
+- **Cuando la tabla acumule 3 o más filas pendientes, o alguna sea bloqueante para una fecha
+  comprometida** (ej. una ventana de instalación en tablets), señalarlo al usuario y **proponer**
+  generar un build EAS `preview` que cubra todos los pendientes a la vez. Nunca generarlo sin esa
+  propuesta y su confirmación explícita — la regla de "nunca ejecutar `eas build` sin autorización
+  del usuario en esa misma instancia" sigue vigente sin excepción, sin importar cuántas filas se
+  hayan acumulado.
+- Al confirmarse un build, vaciar de la tabla las filas que cubre y registrar el `versionCode`
+  resultante en el archivo `docs/testing/test-NNN` de cada spec afectado.
+
 ---
 
 ## Specs de funcionalidades

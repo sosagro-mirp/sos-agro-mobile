@@ -1,4 +1,11 @@
 import type { EffectiveTheme } from "./resolveTheme";
+// Spec 76, Fase 2: `background` de ambos temas vive también en
+// `splashBackground.js` (JS plano) porque `app.config.ts` no puede resolver
+// imports relativos a este archivo `.ts` al evaluar el config plugin de
+// `expo-splash-screen`. Se importa aquí para no hardcodear el mismo valor
+// dos veces — un cambio de fondo se hace en un solo lugar.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const splashBackground = require("./splashBackground") as { light: string; dark: string };
 
 export interface ThemeColors {
   background: string;
@@ -36,7 +43,7 @@ export interface ThemeColors {
 
 /** Verde institucional (#1B6B3A) — mismo valor que app.config.ts, ver DESIGN.md. */
 export const lightColors: ThemeColors = {
-  background: "#FFFFFF",
+  background: splashBackground.light,
   surface: "#FFFFFF",
   surfaceMuted: "#F9FAFB",
   textPrimary: "#111827",
@@ -67,7 +74,7 @@ export const lightColors: ThemeColors = {
 
 /** Verde → amarillo en oscuro, mismo criterio que la web (spec 63). */
 export const darkColors: ThemeColors = {
-  background: "#0F172A",
+  background: splashBackground.dark,
   surface: "#0F172A",
   surfaceMuted: "#1E293B",
   textPrimary: "#F1F5F9",

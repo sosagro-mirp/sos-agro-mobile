@@ -1,4 +1,10 @@
 import { ExpoConfig, ConfigContext } from 'expo/config';
+// `app.config.ts` se evalúa con un require() simple, sin el pipeline de TS
+// del proyecto, y no puede resolver imports relativos a `colors.ts` — de ahí
+// este módulo compartido en JS plano (ver el comentario en el propio
+// archivo).
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const splashBackground = require('./src/theme/splashBackground');
 
 export default ({ config }: ConfigContext): ExpoConfig => {
   const [major, minor, patch] = (config.version ?? '1.0.0').split('.').map(Number);
@@ -25,7 +31,13 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     // para tolerar ambas orientaciones en vez de bloquear una.
     orientation: 'default',
     icon: './assets/icon.png',
-    userInterfaceStyle: 'light',
+    // Spec 76, Fase 1: estaba en 'light', contradiciendo a una app que sí
+    // soporta tema oscuro. Hoy no tiene efecto en Android (usesInterfaceStyle
+    // requiere expo-system-ui, que no está instalado), pero es una bomba de
+    // relojería: el día que ese paquete entre como dependencia transitiva de
+    // cualquier otro paquete de Expo, la preferencia "sistema" dejaría de
+    // funcionar sola. En iOS ya se aplicaría hoy.
+    userInterfaceStyle: 'automatic',
     scheme: 'sosagro',
     runtimeVersion: { policy: 'appVersion' },
     updates: {
@@ -68,6 +80,24 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       'expo-router',
       'expo-sqlite',
       'expo-background-task',
+      // Spec 76, Fase 2: antes el plugin actuaba con su configuración por
+      // defecto y dejaba `values-night/colors.xml` vacío, con
+      // `splashscreen_background` fijo en #FFFFFF. En una tablet en modo
+      // oscuro, el arranque era un rectángulo blanco a pantalla completa
+      // antes de entrar a una interfaz oscura — y SplashGate (Fase 3) agravó
+      // el síntoma al retener el splash más tiempo. Los colores vienen de
+      // ./src/theme/splashBackground.js, compartido con colors.ts, para no
+      // duplicar valores a mano.
+      [
+        'expo-splash-screen',
+        {
+          image: './assets/splash-icon.png',
+          backgroundColor: splashBackground.light,
+          dark: {
+            backgroundColor: splashBackground.dark,
+          },
+        },
+      ],
       [
         'expo-image-picker',
         {
