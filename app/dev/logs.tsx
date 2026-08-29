@@ -23,9 +23,25 @@ interface LogFileMeta {
   sizeKb: number;
 }
 
+/**
+ * Tamaño en bytes UTF-8 de un string, sin `Blob`/`TextEncoder` — su
+ * disponibilidad en Hermes no está garantizada en RN 0.81 (mismo motivo por
+ * el que la Fase 4 del spec 76 descartó la API `FileHandle`). Solo se usa
+ * para un dato informativo de tamaño en esta pantalla de diagnóstico.
+ */
+function utf8ByteLength(text: string): number {
+  let bytes = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.codePointAt(i)!;
+    if (code > 0xffff) i += 1; // par sustituto: ya se contó como 1 code point
+    bytes += code <= 0x7f ? 1 : code <= 0x7ff ? 2 : code <= 0xffff ? 3 : 4;
+  }
+  return bytes;
+}
+
 export default function DevLogsScreen() {
   const router = useRouter();
-  const [files, setFiles] = useState<LogFileMeta[]>([]);
+  const [logs, setLogs] = useState<LogFile[]>([]);
   const [selectedLog, setSelectedLog] = useState<LogFile | null>(null);
   const [loading, setLoading] = useState(false);
   const [clearingFarmers, setClearingFarmers] = useState(false);
@@ -33,25 +49,20 @@ export default function DevLogsScreen() {
   const [loadingFarmers, setLoadingFarmers] = useState(false);
   const [farmerCache, setFarmerCache] = useState<FarmerCacheEntry[] | null>(null);
 
+  // Bug encontrado en la ronda manual del spec 76 (TC-076-08, 2026-08-29): esta
+  // pantalla leía `LOG_DIR` a mano y listaba **cada segmento** como una fila
+  // ("2026-08-29.000", "2026-08-29.001", ...), en vez de un día por fila. La
+  // Fase 4 del spec ya afirmaba (incorrectamente) que `getLogs()` cubría esto
+  // — nunca se había actualizado esta pantalla al rediseño por segmentos.
+  // `getLogs()` sí reagrupa por fecha; basta con usarlo aquí también.
+  const files: LogFileMeta[] = [...logs]
+    .sort((a, b) => (a.date < b.date ? 1 : -1))
+    .map((l) => ({ date: l.date, sizeKb: Math.ceil(utf8ByteLength(l.content) / 1024) }));
+
   async function loadFileList() {
     setLoading(true);
     try {
-      const info = await FileSystem.getInfoAsync(LOG_DIR);
-      if (!info.exists) {
-        setFiles([]);
-        return;
-      }
-      const names = await FileSystem.readDirectoryAsync(LOG_DIR);
-      const metas: LogFileMeta[] = [];
-      for (const name of names.sort().reverse()) {
-        const fileInfo = await FileSystem.getInfoAsync(LOG_DIR + name);
-        const sizeBytes = fileInfo.exists && 'size' in fileInfo ? (fileInfo.size ?? 0) : 0;
-        metas.push({
-          date: name.replace(".log", ""),
-          sizeKb: Math.ceil(sizeBytes / 1024),
-        });
-      }
-      setFiles(metas);
+      setLogs(await logger.getLogs());
     } finally {
       setLoading(false);
     }
@@ -63,11 +74,9 @@ export default function DevLogsScreen() {
     }, [])
   );
 
-  async function handleSelectFile(date: string) {
-    const content = await FileSystem.readAsStringAsync(LOG_DIR + date + ".log", {
-      encoding: FileSystem.EncodingType.UTF8,
-    }).catch(() => "(error al leer archivo)");
-    setSelectedLog({ date, content });
+  function handleSelectFile(date: string) {
+    const match = logs.find((l) => l.date === date);
+    setSelectedLog(match ?? { date, content: "(log no encontrado)" });
   }
 
   async function handleExport() {
