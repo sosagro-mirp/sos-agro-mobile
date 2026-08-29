@@ -12,6 +12,9 @@ export interface FarmerCacheEntry {
   farmName?: string;
   crops?: CropSummary[];
   cachedAt: Date;
+  /** Spec 78 — última versión de consentimiento aceptada conocida localmente. */
+  consentVersion?: string;
+  consentedAt?: Date;
 }
 
 function mapRow(row: typeof farmerCache.$inferSelect): FarmerCacheEntry {
@@ -31,6 +34,8 @@ function mapRow(row: typeof farmerCache.$inferSelect): FarmerCacheEntry {
     farmName: row.farmName ?? undefined,
     crops,
     cachedAt: row.cachedAt,
+    consentVersion: row.consentVersion ?? undefined,
+    consentedAt: row.consentedAt ?? undefined,
   };
 }
 
@@ -129,5 +134,24 @@ export const farmerCacheStorage = {
    */
   async remove(farmerId: string): Promise<void> {
     await db.delete(farmerCache).where(eq(farmerCache.farmerId, farmerId));
+  },
+
+  /**
+   * Spec 78 — registra localmente que este agricultor aceptó el
+   * consentimiento, para que `hasValidConsent()` pueda decidir sin red en su
+   * próximo encuentro. No toca el resto de la identidad cacheada.
+   *
+   * Hallazgo M5 (auditoría) — es un `UPDATE`, no un upsert: si el agricultor
+   * todavía no tiene fila en esta tabla (encuestado nuevo cuyo `Farmer` recién
+   * se está creando en este mismo flujo), afecta 0 filas. Devuelve el conteo
+   * en vez de tragárselo en silencio, para que el llamador decida si eso es
+   * esperado (encuestado nuevo, todavía sin identidad cacheada) o un bug.
+   */
+  async recordConsent(farmerId: string, version: string, consentedAt: Date): Promise<number> {
+    const result = await db
+      .update(farmerCache)
+      .set({ consentVersion: version, consentedAt })
+      .where(eq(farmerCache.farmerId, farmerId));
+    return result.changes ?? 0;
   },
 };

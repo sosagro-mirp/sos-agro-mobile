@@ -30,6 +30,7 @@ import {
   type MediaUploadEntry,
 } from "../../../src/storage/mediaUploadQueueStorage";
 import { surveyDraftStore } from "../../../src/storage/surveyDraftStore";
+import { consentRecordStore } from "../../../src/storage/consentRecordStore";
 import { instrumentCacheStorage } from "../../../src/storage/instrumentCache";
 import { farmerCacheStorage } from "../../../src/storage/farmerCache";
 import { NetworkMonitor } from "../../../src/sync/NetworkMonitor";
@@ -58,7 +59,18 @@ interface EntryIdentity {
 // real de instrumento y agricultor.
 async function resolveEntryIdentity(surveyId: string): Promise<EntryIdentity> {
   const draft = await surveyDraftStore.loadDraft(surveyId).catch(() => null);
-  if (!draft) return { instrumentName: null, farmerName: null };
+  if (!draft) {
+    // Spec 78 — las entradas itemType 'consent' guardan en `surveyId` el id
+    // local de `consent_records`, no un borrador de encuesta.
+    const consentDraft = await consentRecordStore.get(surveyId).catch(() => null);
+    if (consentDraft) {
+      return {
+        instrumentName: "Consentimiento informado",
+        farmerName: consentDraft.respondentName ?? null,
+      };
+    }
+    return { instrumentName: null, farmerName: null };
+  }
 
   const [instrument, farmer] = await Promise.all([
     instrumentCacheStorage.get(draft.instrumentId).catch(() => null),

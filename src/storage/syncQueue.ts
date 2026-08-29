@@ -6,8 +6,11 @@ export type SyncStatus = 'pending' | 'in_flight' | 'failed_validation';
 
 // Spec 70, Fase 10 — 'skip-step' reutiliza esta cola (reintentos, backoff,
 // estado en vuelo) para el salto de paso hecho sin conexión, en vez de una
-// cola paralela.
-export type ItemType = 'survey' | 'farm-plot' | 'skip-step';
+// cola paralela. Spec 78 — 'consent' hace lo mismo con la constancia de
+// consentimiento capturada offline: `surveyId` guarda el id local de
+// `consent_records`, `campaignSessionId` es el mismo id (local o real) que
+// se remapea en `resolveLocalSessions()`.
+export type ItemType = 'survey' | 'farm-plot' | 'skip-step' | 'consent';
 
 export interface SyncQueueEntry {
   id: string;

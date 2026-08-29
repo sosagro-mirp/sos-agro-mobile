@@ -29,6 +29,10 @@ import { useChangeRequestStore } from '../store/useChangeRequestStore';
 import { farmPlotStore } from '../storage/farmPlotStore';
 import { createFarmPlot } from '../api/farmPlots';
 import type { CampaignSessionResponse } from '../types/campaign';
+import { consentRecordStore } from '../storage/consentRecordStore';
+import { submitConsent } from '../api/consents';
+import { buildConsentSyncPayload, remapConsentSessionId } from './consentSync';
+import { resolveLegacyInstrumentCode } from '../lib/instrumentCodeAliases';
 
 const MAX_CONSECUTIVE_NETWORK_FAILURES = 5;
 const BACKOFF_BASE_MS = 1000;
@@ -195,6 +199,11 @@ class SyncQueueServiceClass {
           .set({ campaignSessionId: realSessionId })
           .where(eq(syncQueue.campaignSessionId, localSessionId));
 
+        // Spec 78 — consent_records.session_id vive fuera de syncQueue (lo
+        // consulta processConsentEntry por su propio id, no por
+        // campaignSessionId), así que necesita su propio remapeo aquí.
+        await consentRecordStore.remapSession(localSessionId, realSessionId);
+
         await pendingSessionStorage.resolve(localSessionId, realSessionId);
 
         // Update the active store if this session is still open.
@@ -257,8 +266,95 @@ class SyncQueueServiceClass {
       await this.processFarmPlotEntry(entry);
     } else if (entry.itemType === 'skip-step') {
       await this.processSkipStepEntry(entry);
+    } else if (entry.itemType === 'consent') {
+      await this.processConsentEntry(entry);
     } else {
       await this.processSurveyEntry(entry);
+    }
+  }
+
+  // Spec 78 — entry.surveyId guarda el id local de `consent_records` (mismo
+  // convenio que farm-plot con farmPlotId). entry.campaignSessionId es el
+  // sessionId (local o real) — resolveLocalSessions() ya lo remapea junto
+  // con surveys/syncQueue; consentRecordStore.remapSession() lo replica para
+  // esta tabla. Un 4xx aquí NUNCA debe frenar el resto de la cola: la
+  // constancia perdida se reporta para reconciliar desde el panel (ver
+  // "Puntos delicados", 2, en spec/78_consentimiento_informado_tratamiento_datos.md).
+  private async processConsentEntry(entry: SyncQueueEntry): Promise<void> {
+    await syncQueueStorage.markInFlight(entry.id);
+
+    try {
+      const draft = await consentRecordStore.get(entry.surveyId);
+      if (!draft) {
+        await syncQueueStorage.markSynced(entry.id);
+        return;
+      }
+
+      if (draft.status === 'synced') {
+        await syncQueueStorage.markSynced(entry.id);
+        return;
+      }
+
+      const resolved = await this.resolveCampaignSession(entry);
+      if (!resolved) return;
+      entry = resolved;
+
+      if (!entry.campaignSessionId) {
+        const detail = `Entrada consent sin campaignSessionId — entry ${entry.id}`;
+        logger.error(`[Sync] ${detail}`);
+        captureError(new Error(detail), { entryId: entry.id });
+        await consentRecordStore.markFailed(entry.surveyId);
+        await syncQueueStorage.markFailedValidation(entry.id, detail);
+        return;
+      }
+
+      // M2 (auditoría spec 78) — antes se reconstruía el payload en línea y
+      // `buildConsentSyncPayload`/`remapConsentSessionId` quedaban sin
+      // ningún llamador real, solo cubiertos por su propio test. `remap`
+      // aquí es un resguardo defensivo: `resolveCampaignSession` ya garantiza
+      // que `entry.campaignSessionId` no es local a esta altura (o esta
+      // función ya retornó antes), así que en el camino normal es un no-op —
+      // pero si esa garantía se rompe algún día, lanza en vez de mandarle al
+      // backend un `sessionId` `local_…` que fallaría igual, solo que con un
+      // 400 menos claro.
+      const remapped = remapConsentSessionId(
+        { localId: draft.id, sessionId: entry.campaignSessionId },
+        { [entry.campaignSessionId]: entry.campaignSessionId },
+      );
+      const payload = buildConsentSyncPayload({
+        localId: draft.id,
+        sessionId: remapped.sessionId,
+        consentDocumentId: draft.consentDocumentId,
+        respondentName: draft.respondentName,
+        acceptedDataProcessing: draft.acceptedDataProcessing,
+        acceptedPhoto: draft.acceptedPhoto,
+        acceptedAudio: draft.acceptedAudio,
+        acceptedVideo: draft.acceptedVideo,
+        acceptedFollowUpContact: draft.acceptedFollowUpContact,
+        acceptedAt: draft.acceptedAt,
+      });
+
+      const response = await submitConsent(payload);
+
+      await consentRecordStore.markSynced(draft.id);
+      await syncQueueStorage.markSynced(entry.id);
+
+      logger.info(
+        `[Sync] processed consent entry ${entry.id} → ${response.consentRecordId}`,
+      );
+      this.consecutiveNetworkFailures = 0;
+    } catch (error) {
+      if (error instanceof NetworkError) {
+        logger.error('[Sync] network error (consent)', error);
+        await this.handleNetworkError(entry);
+      } else {
+        logger.error('[Sync] validation error (consent)', error);
+        captureError(error, { consentRecordId: entry.surveyId, entryId: entry.id });
+        const detail = error instanceof Error ? error.message : String(error);
+        await consentRecordStore.markFailed(entry.surveyId);
+        await syncQueueStorage.markFailedValidation(entry.id, detail);
+        this.consecutiveNetworkFailures = 0;
+      }
     }
   }
 
@@ -558,7 +654,7 @@ class SyncQueueServiceClass {
       return;
     }
 
-    const code = instrument.code;
+    const code = resolveLegacyInstrumentCode(instrument.code);
     if (code !== 'S1' && code !== 'S2') return;
 
     if (code === 'S1') {
@@ -622,6 +718,29 @@ class SyncQueueServiceClass {
         farmName: farmer.farm?.name ?? undefined,
         crops: farmer.farm?.crops ?? undefined,
       });
+
+      // Hallazgo TC-078-013 (spec 78): `cacheFarmerIdentity` crea una fila
+      // nueva para el `farmerId` real sin `consentVersion`/`consentedAt` — la
+      // constancia se registró antes, contra el `localFarmerId` provisional,
+      // cuya fila se borró arriba. Sin este carry-over, `hasValidConsent()`
+      // ve un agricultor sin consentimiento conocido offline aunque sí lo
+      // tenga (constancia ya sincronizada), y vuelve a mostrar el aviso de
+      // "consentimiento pendiente".
+      if (provisionalEntry?.consentVersion && provisionalEntry.consentedAt) {
+        try {
+          await farmerCacheStorage.recordConsent(
+            farmer.farmerId,
+            provisionalEntry.consentVersion,
+            provisionalEntry.consentedAt,
+          );
+        } catch (err) {
+          logger.warn(
+            `[Sync] failed to carry over cached consent to ${farmer.farmerId}: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
+      }
 
       logger.info(`[Sync] extractFarmer completed for survey ${realSurveyId}`);
     } else if (code === 'S2') {
