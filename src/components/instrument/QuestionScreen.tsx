@@ -289,13 +289,13 @@ export const QuestionScreen: React.FC<QuestionScreenProps> = ({
           aviso persistente mientras el encuestado no tenga consentimiento
           vigente, con acceso directo al formulario, funcionando offline. */}
       {consentPending && sessionId && (
-        <View style={styles.consentBanner}>
+        <View style={[styles.consentBanner, !isTablet && styles.consentBannerCompact]}>
           <Text style={styles.consentBannerText}>
             Este encuestado todavía no dio su consentimiento informado.
           </Text>
           <TouchableOpacity
             onPress={() => setConsentModalVisible(true)}
-            style={styles.consentBannerButton}
+            style={[styles.consentBannerButton, !isTablet && styles.consentBannerButtonCompact]}
             accessibilityRole="button"
           >
             <Text style={styles.consentBannerButtonText}>Registrar consentimiento</Text>
@@ -410,17 +410,29 @@ function createStyles(colors: ThemeColors) {
       borderBottomWidth: 1,
       borderBottomColor: colors.warningFg,
     },
+    // Hallazgo TC-078-011 (móvil, pantallas pequeñas): texto y botón
+    // quedaban apretados en una sola fila. En teléfono (!isTablet) se apilan
+    // en columna, con el botón ocupando el ancho completo.
+    consentBannerCompact: {
+      flexDirection: "column",
+      alignItems: "stretch",
+      gap: 8,
+    },
     consentBannerText: {
       fontSize: 12,
       fontFamily: Fonts.regular,
       color: colors.warningFg,
       flexShrink: 1,
+      textAlign: "center",
     },
     consentBannerButton: {
       backgroundColor: colors.warningFg,
       borderRadius: 6,
       paddingHorizontal: 10,
       paddingVertical: 5,
+    },
+    consentBannerButtonCompact: {
+      alignItems: "center",
     },
     consentBannerButtonText: {
       fontSize: 11,

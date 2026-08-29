@@ -23,6 +23,8 @@ import { extractFarmerLocally } from "../../../../../src/lib/extractFarmerLocall
 import type { LocalFarmerDraft } from "../../../../../src/lib/extractFarmerLocally";
 import { flattenSections } from "../../../../../src/lib/flattenSections";
 import { cacheFarmerIdentity } from "../../../../../src/lib/cacheFarmerIdentity";
+import { resolveLegacyInstrumentCode } from "../../../../../src/lib/instrumentCodeAliases";
+import { applyPendingConsentToFarmer } from "../../../../../src/lib/applyPendingConsentToFarmer";
 import { sessionCropsStorage } from "../../../../../src/storage/sessionCropsStorage";
 import { DuplicateAlertModal } from "../../../../../src/components/campaign/DuplicateAlertModal";
 import { DocumentCollisionModal } from "../../../../../src/components/campaign/DocumentCollisionModal";
@@ -123,7 +125,7 @@ export default function OrchestratorScreen() {
     if (!resolvedSessionId) return;
 
     const allInstruments = await instrumentCacheStorage.list();
-    const instrument = allInstruments.find((i) => i.code === code);
+    const instrument = allInstruments.find((i) => resolveLegacyInstrumentCode(i.code) === code);
 
     if (!instrument) {
       setScreenState('injection_error');
@@ -282,6 +284,9 @@ export default function OrchestratorScreen() {
               farmName: farmer.farm?.name,
               crops: farmer.farm?.crops ?? undefined,
             });
+            if (resolvedSessionId) {
+              await applyPendingConsentToFarmer(resolvedSessionId, farmer.farmerId);
+            }
             store.completeS1Injection(farmer.farmerId, farmer.name);
             await injectInstrument('S2');
           } catch (err) {
@@ -331,6 +336,9 @@ export default function OrchestratorScreen() {
               phone: draft.phone,
               farmName: draft.farmName,
             });
+            if (resolvedSessionId) {
+              await applyPendingConsentToFarmer(resolvedSessionId, draft.farmerId);
+            }
             store.applyLocalFarmer(draft);
             store.completeS1Injection(draft.farmerId, draft.name);
             await injectInstrument('S2');

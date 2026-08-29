@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 import { db } from './db/db';
 import { consentRecords } from './db/schema';
 
@@ -41,6 +41,24 @@ export const consentRecordStore = {
 
   async get(id: string): Promise<ConsentRecordDraft | null> {
     const row = await db.select().from(consentRecords).where(eq(consentRecords.id, id)).get();
+    return row ? mapRow(row) : null;
+  },
+
+  /**
+   * Hallazgo TC-078-013 (spec 78) — el consentimiento se puede registrar
+   * desde el aviso persistente antes de que exista un `farmerId` (nuevo
+   * encuestado, todavía llenando S1): `useSubmitConsent` no tiene a quién
+   * asociarlo en `farmerCache` en ese momento. Este lookup por `sessionId`
+   * es el puente para aplicarlo retroactivamente en cuanto el `farmerId` se
+   * resuelve (local u online) — ver `applyPendingConsentToFarmer`.
+   */
+  async getBySessionId(sessionId: string): Promise<ConsentRecordDraft | null> {
+    const row = await db
+      .select()
+      .from(consentRecords)
+      .where(eq(consentRecords.sessionId, sessionId))
+      .orderBy(desc(consentRecords.createdAt))
+      .get();
     return row ? mapRow(row) : null;
   },
 

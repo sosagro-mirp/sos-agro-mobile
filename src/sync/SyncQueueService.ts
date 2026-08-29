@@ -32,6 +32,7 @@ import type { CampaignSessionResponse } from '../types/campaign';
 import { consentRecordStore } from '../storage/consentRecordStore';
 import { submitConsent } from '../api/consents';
 import { buildConsentSyncPayload, remapConsentSessionId } from './consentSync';
+import { resolveLegacyInstrumentCode } from '../lib/instrumentCodeAliases';
 
 const MAX_CONSECUTIVE_NETWORK_FAILURES = 5;
 const BACKOFF_BASE_MS = 1000;
@@ -653,7 +654,7 @@ class SyncQueueServiceClass {
       return;
     }
 
-    const code = instrument.code;
+    const code = resolveLegacyInstrumentCode(instrument.code);
     if (code !== 'S1' && code !== 'S2') return;
 
     if (code === 'S1') {
@@ -717,6 +718,29 @@ class SyncQueueServiceClass {
         farmName: farmer.farm?.name ?? undefined,
         crops: farmer.farm?.crops ?? undefined,
       });
+
+      // Hallazgo TC-078-013 (spec 78): `cacheFarmerIdentity` crea una fila
+      // nueva para el `farmerId` real sin `consentVersion`/`consentedAt` — la
+      // constancia se registró antes, contra el `localFarmerId` provisional,
+      // cuya fila se borró arriba. Sin este carry-over, `hasValidConsent()`
+      // ve un agricultor sin consentimiento conocido offline aunque sí lo
+      // tenga (constancia ya sincronizada), y vuelve a mostrar el aviso de
+      // "consentimiento pendiente".
+      if (provisionalEntry?.consentVersion && provisionalEntry.consentedAt) {
+        try {
+          await farmerCacheStorage.recordConsent(
+            farmer.farmerId,
+            provisionalEntry.consentVersion,
+            provisionalEntry.consentedAt,
+          );
+        } catch (err) {
+          logger.warn(
+            `[Sync] failed to carry over cached consent to ${farmer.farmerId}: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
+      }
 
       logger.info(`[Sync] extractFarmer completed for survey ${realSurveyId}`);
     } else if (code === 'S2') {

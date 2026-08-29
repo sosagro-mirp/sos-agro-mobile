@@ -1,5 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import {
+  ActivityIndicator,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import { Check } from "lucide-react-native";
 import { PrimaryButton } from "../common/PrimaryButton";
 import { Fonts } from "../../theme/fonts";
@@ -88,15 +97,21 @@ export function ConsentForm({
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.content}>
       <View style={styles.textBox}>
-        <Text style={styles.title}>{document.title}</Text>
-        <Text style={styles.version}>Versión {document.version}</Text>
-        <Text style={styles.paragraph}>{document.body}</Text>
-        <Text style={styles.paragraph}>{document.dataProcessingClause}</Text>
-        <Text style={styles.paragraph}>{document.multimediaClause}</Text>
-        <Text style={styles.paragraph}>{document.rightsClause}</Text>
-        <Text style={styles.footerText}>
-          {document.responsibleEntity} — {document.contactEmail}
-        </Text>
+        <ScrollView
+          nestedScrollEnabled={Platform.OS === "android"}
+          showsVerticalScrollIndicator
+          contentContainerStyle={styles.textBoxContent}
+        >
+          <Text style={styles.title}>{document.title}</Text>
+          <Text style={styles.version}>Versión {document.version}</Text>
+          <Text style={styles.paragraph}>{document.body}</Text>
+          <Text style={styles.paragraph}>{document.dataProcessingClause}</Text>
+          <Text style={styles.paragraph}>{document.multimediaClause}</Text>
+          <Text style={styles.paragraph}>{document.rightsClause}</Text>
+          <Text style={styles.footerText}>
+            {document.responsibleEntity} — {document.contactEmail}
+          </Text>
+        </ScrollView>
       </View>
 
       <Text style={styles.label}>Nombre de quien acepta</Text>
@@ -201,9 +216,12 @@ function createStyles(colors: ThemeColors) {
       borderColor: colors.border,
       backgroundColor: colors.surface,
       borderRadius: 12,
+      maxHeight: 320,
+      overflow: "hidden",
+    },
+    textBoxContent: {
       padding: 14,
       gap: 8,
-      maxHeight: 320,
     },
     title: { fontSize: 15, fontFamily: Fonts.bold, color: colors.textPrimary },
     version: { fontSize: 11, fontFamily: Fonts.regular, color: colors.textMuted },
