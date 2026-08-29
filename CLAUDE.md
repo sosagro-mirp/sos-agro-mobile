@@ -341,9 +341,9 @@ con `eas update`. Ver `mobile/docs/ota-updates.md` para el procedimiento complet
 comando de publicación, verificación, rollback) y la regla de oro: **nunca tocar `version` en
 `app.config.ts` salvo que se vaya a compilar e instalar un build nativo nuevo**.
 
-**Pendiente del spec 80:** la Fase 4 (sourcemaps de Sentry para bundles OTA) sigue bloqueada por
-falta de `SENTRY_AUTH_TOKEN` — un crash de un bundle publicado por OTA hoy llega a Sentry sin stack
-trace legible. Retomarla antes de depender del canal para hotfixes complejos.
+**Pendiente del spec 80:** la Fase 4 (sourcemaps de Sentry para bundles OTA) ya tiene
+`SENTRY_AUTH_TOKEN` registrado como secreto de EAS y `SENTRY_DISABLE_AUTO_UPLOAD: false` en
+`eas.json`; falta verificarlo con un build y una publicación OTA reales (Fase 6).
 
 ### Pendientes de build EAS
 

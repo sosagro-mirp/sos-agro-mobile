@@ -68,4 +68,4 @@ El APK instalado en las tablets de campo se compiló con el perfil `preview`, as
 
 Cada publicación genera un `updateId` propio. Sin sourcemaps subidos para ese bundle, un crash posterior llega a Sentry con líneas de un bundle minificado, no del código fuente — inservible para diagnosticar.
 
-**Estado actual (2026-08-29): pendiente.** La Fase 4 del spec 80 quedó bloqueada por falta de `SENTRY_AUTH_TOKEN` (requiere generarlo desde el dashboard de Sentry). Hasta que se registre ese secreto y se active `SENTRY_DISABLE_AUTO_UPLOAD: false` en `eas.json`, **cualquier publicación OTA que provoque un crash se investiga sin stack trace legible**. Retomar esta fase antes de depender del canal OTA para hotfixes complejos.
+**Estado actual (2026-08-30): configurado, verificación pendiente.** `SENTRY_AUTH_TOKEN` está registrado como secreto de EAS (scope `org:ci`, visible en `preview` y `production`) y `SENTRY_DISABLE_AUTO_UPLOAD` ya está en `"false"` en ambos perfiles. Falta confirmarlo con un build real y una publicación OTA real (Fase 6 del spec 80): hasta esa verificación, sigue sin comprobarse que un crash de un bundle OTA llegue simbolizado.
