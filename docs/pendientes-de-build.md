@@ -7,10 +7,10 @@
 > build por cada commit: se acumulan aquí hasta que valga la pena gastar uno.
 >
 > **Nota del spec 80 (2026-08-29):** las tablets de campo todavía no tienen `expo-updates`
-> instalado — eso solo llega con el próximo build. Las dos filas de abajo son JS puro y, en
-> cualquier build **posterior** a ese, se publicarían por OTA en vez de esperar aquí. Hoy siguen en
-> esta tabla porque comparten el mismo build que instala el canal OTA (ver Fase 6 del spec 80):
-> agrupar es lo que evita gastar dos vueltas físicas por las tablets en vez de una.
+> instalado — eso solo llega con el próximo build. Las filas de abajo son JS (o JS + migración
+> SQLite) puro y, en cualquier build **posterior** a ese, se publicarían por OTA en vez de esperar
+> aquí. Hoy siguen en esta tabla porque comparten el mismo build que instala el canal OTA (ver Fase 6
+> del spec 80): agrupar es lo que evita gastar varias vueltas físicas por las tablets en vez de una.
 
 **Última consulta de cuota:** 2026-08-29 — plan Free, 15 Android + 15 iOS por mes (cupos
 independientes, no intercambiables), 8/15 Android usados este ciclo.
@@ -25,6 +25,7 @@ archiva) en cuanto un build lo cubre y la ronda manual correspondiente lo confir
 |---|--------|--------|------------------------------|--------------------------------------|
 | 1 | `app/dev/logs.tsx`: lista de logs agrupada por fecha vía `logger.getLogs()`, en vez de una fila por segmento | `b46b653` | Spec 76 — repetir `TC-076-08` | No (JS puro, pero sin OTA igual exige build) |
 | 2 | `src/lib/logger.ts`: `logger.clearAll()` borra archivos y estado en memoria de forma atómica — "Limpiar logs" ya no resucitaba el segmento del día | `321e597` | Spec 76 — repetir `TC-076-08` (botón "Limpiar logs") | No (JS puro, pero sin OTA igual exige build) |
+| 3 | Consentimiento informado offline en mobile: pantalla/modal de consentimiento, caché del documento activo, cola de sync (`processConsentEntry`), aviso persistente en el orquestador y migración SQLite `0012_add_consent.sql`. `[DONE]`, pero sus casos mobile **solo se probaron en Expo Go** — nunca en un APK real | `d7b30f3`, `6ad2084`, `e988ff8`, `f90e151` | Spec 78 — repetir `TC-078-010, 011, 012, 013, 017, 020` en build real | No (JS + migración SQLite, sin dependencia nativa nueva) |
 
 ## Política: cuándo generar el siguiente build
 
