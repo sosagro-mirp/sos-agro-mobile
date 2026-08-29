@@ -105,6 +105,9 @@ importers:
         specifier: ^5.0.14
         version: 5.0.14(@types/react@19.1.17)(react@19.1.0)(use-sync-external-store@1.6.0(react@19.1.0))
     devDependencies:
+      '@sentry/cli':
+        specifier: 2.55.0
+        version: 2.55.0
       '@types/jest':
         specifier: ^29.5.12
         version: 29.5.14

@@ -364,6 +364,43 @@ cambio de ese tipo.
 - Al confirmarse un build, vaciar de la tabla las filas que cubre y registrar el `versionCode`
   resultante en el archivo `docs/testing/test-NNN` de cada spec afectado.
 
+### Verificación previa a un build EAS
+
+> Añadido tras el spec 80 (2026-08-29): un build `preview` falló en la fase `Run gradlew` por un
+> problema de resolución de `@sentry/cli` bajo pnpm (`A problem occurred starting process
+> '.../node_modules/@sentry/cli/bin/sentry-cli'`) — un error que **sí era detectable localmente**
+> sin gastar cuota, y que ya se había topado una vez antes (2026-07-23, commit `b73119f`) sin
+> diagnosticarse a fondo. El cupo de EAS es limitado y compartido entre Android e iOS: cada build
+> fallido evitable es cupo real perdido.
+
+**Antes de proponer o lanzar cualquier `eas build`**, correr esta secuencia y no proceder hasta que
+todo pase:
+
+1. `pnpm typecheck && pnpm lint && pnpm test` — en verde, sin excepciones nuevas.
+2. `npx expo-doctor` — 18/18 (o el total vigente) sin issues.
+3. `npx eas-cli build:inspect -p android -s pre-build -o <tmp-dir> -e <profile> --force` — corre
+   `expo prebuild` y resuelve credenciales **sin subir nada a la cola de EAS** (no consume cupo).
+   Detecta errores de configuración (`app.config.ts`, plugins, credenciales) antes de la fase nativa.
+4. **Si hay Android SDK local** (`echo $ANDROID_HOME`, `ls ~/Library/Android/sdk` o equivalente),
+   **`df -h /` muestra al menos ~6 GB libres**, y el cambio toca algo que solo falla en la fase de
+   Gradle (dependencias nativas nuevas, plugins de config, tareas de Gradle de terceros como la de
+   Sentry) — correr `npx eas-cli build:inspect -p android -s post-build -o <tmp-dir> -e <profile>
+   --force`, que ejecuta el **build nativo completo** (Gradle + Android SDK) en la máquina local.
+   Esto sí reproduce fielmente fallos de Gradle que `pre-build` no detecta, y tampoco consume cupo
+   de EAS. Es más lento (varios minutos) y **pesado en disco**: la primera vez descarga la
+   distribución de Gradle completa a `~/.gradle` (~4 GB) además de copiar el proyecto entero a
+   `<tmp-dir>`. Verificar espacio libre **antes** de lanzarlo — se agotó el disco corriendo esto el
+   2026-08-29 (quedaba menos margen del que parecía) y tumbó otras herramientas hasta liberar
+   espacio. Borrar `<tmp-dir>` en cuanto termine la inspección, esté en verde o no.
+5. Si algo de lo anterior revela un error, diagnosticar y corregir **antes** de proponer el build al
+   usuario — no proponer "probemos en la nube a ver qué pasa" cuando el error es reproducible local.
+6. Recién entonces, señalar al usuario lo que cubre el build propuesto (specs, filas de
+   `pendientes-de-build.md`) y pedir su autorización explícita — sigue sin haber excepción a esa regla.
+
+Este flujo no reemplaza el build real: `pre-build` no ejecuta Gradle, y ni siquiera `post-build` local
+garantiza paridad 100% con el worker Linux de EAS (rutas, variante de OS, cachés). Pero cualquier
+fallo de configuración, dependencias o de las primeras fases de Gradle debería aparecer aquí primero.
+
 ---
 
 ## Specs de funcionalidades

@@ -37,6 +37,7 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@sentry/cli": "2.55.0",
     "@types/jest": "^29.5.12",
     "@types/react": "~19.1.17",
     "drizzle-kit": "^0.31.10",
