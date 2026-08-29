@@ -20,6 +20,7 @@ archiva) en cuanto un build lo cubre y la ronda manual correspondiente lo confir
 | # | Cambio | Commit | Spec / caso que lo verifica | Requiere build nativo (no solo JS) |
 |---|--------|--------|------------------------------|--------------------------------------|
 | 1 | `app/dev/logs.tsx`: lista de logs agrupada por fecha vía `logger.getLogs()`, en vez de una fila por segmento | `b46b653` | Spec 76 — repetir `TC-076-08` | No (JS puro, pero sin OTA igual exige build) |
+| 2 | `src/lib/logger.ts`: `logger.clearAll()` borra archivos y estado en memoria de forma atómica — "Limpiar logs" ya no resucitaba el segmento del día | `321e597` | Spec 76 — repetir `TC-076-08` (botón "Limpiar logs") | No (JS puro, pero sin OTA igual exige build) |
 
 ## Política: cuándo generar el siguiente build
 
