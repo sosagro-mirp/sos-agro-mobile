@@ -18,7 +18,8 @@ import { pendingSessionStorage } from "../../../src/storage/pendingSessions";
 import { cacheFarmerIdentity } from "../../../src/lib/cacheFarmerIdentity";
 import { farmerCacheStorage } from "../../../src/storage/farmerCache";
 import { sessionCropsStorage } from "../../../src/storage/sessionCropsStorage";
-import { ServerError } from "../../../src/api/httpClient";
+import { NetworkError, ServerError } from "../../../src/api/httpClient";
+import { NetworkMonitor } from "../../../src/sync/NetworkMonitor";
 import { logger } from "../../../src/lib/logger";
 import type { CropSummary, FarmerSearchResult } from "../../../src/types";
 import { fetchFarmerConsentStatus } from "../../../src/api/consents";
@@ -56,6 +57,30 @@ async function needsConsent(options: {
     { consentVersion: cachedFarmer?.consentVersion, consentedAt: cachedFarmer?.consentedAt },
     activeDocument?.version ?? null,
   );
+}
+
+/**
+ * Spec 81 — corrección de auditoría en ronda manual (TC-081-004,
+ * 2026-08-30): el bloque de error de esta pantalla mostraba el mensaje
+ * crudo de `NetworkError` ("Sin conexión a internet") sin importar si
+ * realmente no había radio o si el backend específicamente no respondía —
+ * el mismo problema que la Fase 4 corrigió en `PreSurveyForm` y el
+ * orquestador, pero en un tercer lugar que ese trabajo no tocó. Sondea
+ * `reachability` (bajo demanda, igual que los otros dos) antes de fijar el
+ * texto.
+ */
+async function describeSessionError(err: unknown): Promise<string> {
+  if (err instanceof NetworkError) {
+    try {
+      await NetworkMonitor.probeReachability();
+    } catch (probeErr) {
+      logger.error('[pre-survey] probeReachability failed', probeErr);
+    }
+    return useSyncStatusStore.getState().reachability === 'offline'
+      ? "Sin conexión."
+      : "No pudimos contactar el servidor.";
+  }
+  return err instanceof Error ? err.message : "Error al crear la sesión";
 }
 
 export default function PreSurveyScreen() {
@@ -178,10 +203,10 @@ export default function PreSurveyScreen() {
           await createOnlineSession(undefined, options.crops, true);
           setError("El agricultor seleccionado ya no existe en el servidor. Se registró como agricultor nuevo.");
         } catch (retryErr) {
-          setError(retryErr instanceof Error ? retryErr.message : "Error al crear la sesión");
+          setError(await describeSessionError(retryErr));
         }
       } else {
-        setError(err instanceof Error ? err.message : "Error al crear la sesión");
+        setError(await describeSessionError(err));
       }
     } finally {
       setIsLoading(false);
