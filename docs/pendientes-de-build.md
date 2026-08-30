@@ -6,15 +6,15 @@
 > cupo limitado (`https://expo.dev/accounts/{{cuenta}}/settings/billing`), así que no se genera un
 > build por cada commit: se acumulan aquí hasta que valga la pena gastar uno.
 >
-> **Nota del spec 80 (2026-08-29):** las tablets de campo todavía no tienen `expo-updates`
-> instalado — eso solo llega con el próximo build (fila 4). Las filas 1-3 y 5 son JS (o JS +
-> migración SQLite) puro y, en **cualquier build posterior** a ese, se publicarían por OTA en vez de
-> esperar aquí. Hoy siguen en esta tabla porque comparten el mismo build que instala el canal OTA
-> (ver Fase 6 del spec 80): agrupar es lo que evita gastar varias vueltas físicas por las tablets en
-> vez de una.
-> **Decisión del usuario (2026-08-29):** fusionar `feature/network-resilience-pre-survey` (spec 81,
-> fila 5) en esta rama de preview para que el próximo build cubra las 5 filas de una sola vez, en vez
-> de gastar otro intento de la cuota restante (4/15 Android) por separado.
+> **Build `versionCode 10014` generado el 2026-08-29** (build `8850317d-…`, rama
+> `deploy/preview-build-batch`) e instalado en el `SM-S931B`. Cubrió las 5 filas que había en esta
+> tabla. Las filas 1, 2 y 5 ya se verificaron en dispositivo y **se retiraron**; queda solo lo que
+> sigue sin comprobarse (ver abajo).
+>
+> **Desde este build, el canal OTA es efectivo en el dispositivo de pruebas**, así que los cambios
+> puramente JS ya se publican con `eas update` en vez de esperar aquí — con la advertencia de
+> variables de entorno documentada en `mobile/docs/ota-updates.md`, que costó un incidente real el
+> 2026-08-30.
 
 **Última consulta de cuota:** 2026-08-29 — plan Free, 15 Android + 15 iOS por mes (cupos
 independientes, no intercambiables), **11/15 Android usados** este ciclo (quedan 4). Los 2 intentos
@@ -29,11 +29,8 @@ archiva) en cuanto un build lo cubre y la ronda manual correspondiente lo confir
 
 | # | Cambio | Commit | Spec / caso que lo verifica | Requiere build nativo (no solo JS) |
 |---|--------|--------|------------------------------|--------------------------------------|
-| 1 | `app/dev/logs.tsx`: lista de logs agrupada por fecha vía `logger.getLogs()`, en vez de una fila por segmento | `b46b653` | Spec 76 — repetir `TC-076-08` | No (JS puro, pero sin OTA igual exige build) |
-| 2 | `src/lib/logger.ts`: `logger.clearAll()` borra archivos y estado en memoria de forma atómica — "Limpiar logs" ya no resucitaba el segmento del día | `321e597` | Spec 76 — repetir `TC-076-08` (botón "Limpiar logs") | No (JS puro, pero sin OTA igual exige build) |
-| 3 | Consentimiento informado offline en mobile: pantalla/modal de consentimiento, caché del documento activo, cola de sync (`processConsentEntry`), aviso persistente en el orquestador y migración SQLite `0012_add_consent.sql`. `[DONE]`, pero sus casos mobile **solo se probaron en Expo Go** — nunca en un APK real | `d7b30f3`, `6ad2084`, `e988ff8`, `f90e151` | Spec 78 — repetir `TC-078-010, 011, 012, 013, 017, 020` en build real | No (JS + migración SQLite, sin dependencia nativa nueva) |
-| 4 | Canal OTA (`expo-updates` instalado, bloque "Actualizaciones" en `dev/logs.tsx`) + sourcemaps de Sentry para bundles OTA. Verificado localmente: `expo-doctor` 18/18, `pre-build` de EAS resuelve bien, `sentry.properties` con el slug correcto (`react-native`) y el binario de `@sentry/cli` ya se resuelve bajo pnpm. **Sin verificar en dispositivo real todavía** — es la única fila de esta tabla que sí exige build nativo por sí misma (dependencia nativa nueva), el resto la acompaña para no gastar una vuelta física aparte | `09ae322`, `87b9bc7`, `db1cdd7`, `b574690`, `e94b1df` | Spec 80 — criterios 2, 3, 4, 8, 9; `docs/testing/test-080-expo-updates-canal-ota.md` | **Sí** (dependencia nativa `expo-updates`) |
-| 5 | Resiliencia de red en pre-encuesta y extract-farmer: fallback a caché en `PreSurveyForm`, `withNetworkRetry` en `extractFarmer`/`extractCrops`, desatasco de la cola `in_flight` desde `processSurveyNow()` (por `entry.id`, corregido en revisión), `reachability` de 3 estados (`online`/`offline`/`server_unreachable`) vía `GET /api/health`. `[TESTING]`, revisado por `@reviewer` (`docs/reports/auditorias/37-…`, CAMBIOS REQUERIDOS ya corregidos) | `2dd19c3`, `c21f97d` | Spec 81 — `docs/testing/test-081-resiliencia-red.md`, `TC-081-001` a `TC-081-010` | No (JS puro, pero sin OTA igual exige build) |
+| 1 | Consentimiento informado offline en mobile: pantalla/modal de consentimiento, caché del documento activo, cola de sync (`processConsentEntry`), aviso persistente en el orquestador y migración SQLite `0012_add_consent.sql`. `[DONE]`, pero sus casos mobile **solo se probaron en Expo Go** — nunca en un APK real | `d7b30f3`, `6ad2084`, `e988ff8`, `f90e151` | Spec 78 — repetir `TC-078-010, 011, 012, 013, 017, 020` en build real | Ya cubierto por el build 10014 — **falta ejecutar la ronda** |
+| 2 | Canal OTA + sourcemaps de Sentry para bundles OTA — **parcialmente verificado**. ✅ Confirmado en dispositivo: `TC-080-002` (canal activo), `TC-080-005` (botón manual descarga y aplica, 3 veces), `TC-080-006`, `TC-080-010`. ⬜ Sin verificar: `TC-080-003` (`ota_updates.is_enabled` en Sentry — no hay eventos recientes, exige provocar un error controlado), `TC-080-004` (llegada automática en arranque en frío), `TC-080-007` (la recarga no atropella trabajo en curso), `TC-080-008` (crash simbolizado — **exige publicar un crash deliberado al canal de las tablets**), `TC-080-009` (rollback — el caso debe reinterpretarse: las publicaciones vivas son fixes reales del spec 81, no publicaciones de prueba) | `09ae322`, `87b9bc7`, `db1cdd7`, `b574690`, `e94b1df` | Spec 80 — `docs/testing/test-080-expo-updates-canal-ota.md` | Ya cubierto por el build 10014 — **falta cerrar la ronda** |
 
 ## Política: cuándo generar el siguiente build
 
