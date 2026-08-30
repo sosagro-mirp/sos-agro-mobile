@@ -30,17 +30,67 @@ Con `runtimeVersion: { policy: 'appVersion' }`, el campo `version` de `app.confi
 
 ## Publicar una actualización
 
+> ⚠️ **Nunca uses el comando "simple"** (`eas update --channel preview -m "..."`)
+> desde una máquina de desarrollo. Lee la trampa de las variables de entorno,
+> justo abajo: rompe todas las tablets del canal, en silencio.
+
 ```sh
-eas update --channel preview --message "spec-NN: descripción corta del cambio"
+EXPO_NO_DOTENV=1 \
+EXPO_PUBLIC_API_BASE_URL=https://sosagroapi.up.railway.app \
+EXPO_PUBLIC_SENTRY_DSN="<el DSN del perfil preview en eas.json>" \
+eas update --channel preview --clear-cache --message "spec-NN: descripción corta del cambio"
 ```
 
 Convención del `--message`: `spec-NN: qué cambia`, igual que los commits. El canal `preview` es el que usan las tablets de campo — cualquier publicación en él las alcanza a todas.
 
-Para producción (cuando exista distribución formal fuera del piloto):
+### ⚠️ Trampa: `eas update` NO usa el `env` del perfil de `eas.json`
+
+**Incidente real (2026-08-30, ronda manual del spec 81).** Se publicó un OTA
+con el comando simple y **dejó la app inutilizable**: apuntando a
+`http://192.168.1.57:3000` (el backend de desarrollo en la LAN de la máquina
+que publicó) en vez de a producción. Síntoma en el dispositivo: "Sin conexión
+a internet" en todas las pantallas, mientras el navegador del mismo teléfono
+sí cargaba el backend. Sobrevive a reiniciar el teléfono y a desinstalar
+cualquier VPN/bloqueador — porque no es un problema de red, es la URL
+incrustada en el bundle. Diagnosticarlo tomó ~40 min de perseguir causas de
+red inexistentes.
+
+Tres cosas que hay que saber, y que se contradicen entre sí de forma poco intuitiva:
+
+1. **`eas build` sí lee** el bloque `env` del perfil de `eas.json`
+   (`"preview"` → `EXPO_PUBLIC_API_BASE_URL=https://sosagroapi.up.railway.app`).
+   Lo dice en su salida: *"Environment variables loaded from the 'preview'
+   build profile 'env' configuration"*.
+2. **`eas update` NO lo lee.** Carga el `.env` **local** de la máquina
+   (*"env: load .env"* en su salida), que en una máquina de desarrollo apunta
+   al backend local. Las `EXPO_PUBLIC_*` se **incrustan en el bundle** al
+   transformarlo, así que la URL equivocada viaja dentro del OTA.
+3. **`.env` gana sobre la variable inline.** Poner
+   `EXPO_PUBLIC_API_BASE_URL=... eas update` **no basta**: hay que desactivar
+   la carga del `.env` con `EXPO_NO_DOTENV=1`. (Verificado exportando el
+   bundle y buscando la URL dentro.)
+
+Además, **`--clear-cache` no es opcional**: Metro cachea el módulo ya
+transformado con el valor viejo incrustado, así que sin limpiar la caché
+puedes publicar la URL anterior aunque las variables de entorno sean
+correctas. También verificado en el mismo incidente.
+
+### Verificar el bundle ANTES de dar por buena la publicación
+
+`eas update` escribe el bundle exportado en `dist/`. Comprobar qué URL quedó
+dentro es cuestión de un `grep` y es la única forma de detectar esto sin un
+dispositivo:
 
 ```sh
-eas update --channel production --message "..."
+grep -aoc "sosagroapi\.up\.railway\.app" dist/_expo/static/js/android/*.hbc   # debe dar ≥1
+grep -aoc "192\.168\."                    dist/_expo/static/js/android/*.hbc   # debe dar 0
 ```
+
+Hacerlo **siempre** tras publicar al canal `preview`, antes de pedirle a nadie
+que aplique la actualización.
+
+Para producción (cuando exista distribución formal fuera del piloto), mismo
+patrón, cambiando el canal y las variables por las del perfil `production`.
 
 ## Verificar que llegó
 
