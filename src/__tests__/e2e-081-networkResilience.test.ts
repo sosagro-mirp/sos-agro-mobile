@@ -381,19 +381,25 @@ describe('Criterio 7 — el aplazamiento por sesión provisional devuelve la ent
 // ─── Criterio 9 — tres estados de conectividad ─────────────────────────────
 
 describe('Criterio 9 — "sin conexión" y "servidor inalcanzable" son estados distintos', () => {
-  it('el store expone reachability y deriva isOnline de él', () => {
+  it('el store expone reachability, y solo "offline" real apaga isOnline', () => {
+    // Corrección de bug real encontrado en la ronda manual (TC-081-003,
+    // 2026-08-29): `isOnline` NO debe apagarse en `server_unreachable` — es
+    // justo el estado en el que el código (PreSurveyForm, orquestador) debe
+    // seguir intentando la red. La versión original de este test afirmaba
+    // `isOnline === false` para `server_unreachable`, lo cual reproducía el
+    // bug: una vez ahí, la app dejaba de intentar la red para siempre (nada
+    // más la sacaba de ese estado).
     jest.isolateModules(() => {
       jest.doMock('../storage/mediaUploadQueueStorage', () => ({
         mediaUploadQueueStorage: { countPending: jest.fn().mockResolvedValue(0) },
       }));
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { useSyncStatusStore: realStore } = jest.requireActual(
         '../store/useSyncStatusStore',
       );
 
       realStore.getState().setReachability('server_unreachable');
       expect(realStore.getState().reachability).toBe('server_unreachable');
-      expect(realStore.getState().isOnline).toBe(false);
+      expect(realStore.getState().isOnline).toBe(true);
 
       realStore.getState().setReachability('offline');
       expect(realStore.getState().reachability).toBe('offline');
@@ -403,4 +409,10 @@ describe('Criterio 9 — "sin conexión" y "servidor inalcanzable" son estados d
       expect(realStore.getState().isOnline).toBe(true);
     });
   });
+
+  // La recuperación de `reachability` tras una respuesta HTTP exitosa se
+  // prueba en `httpClient.test.ts` ("Network failures" → "recupera
+  // reachability tras un éxito"), donde `useSyncStatusStore` no está
+  // mockeado y se puede usar la instancia real del store sin pelear con
+  // `jest.isolateModules`.
 });

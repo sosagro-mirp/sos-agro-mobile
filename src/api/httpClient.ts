@@ -1,4 +1,5 @@
 import { secureStorage } from "../storage/secureStorage";
+import { useSyncStatusStore } from "../store/useSyncStatusStore";
 
 // Exportado para `src/api/health.ts` (spec 81, Fase 4): el sondeo de
 // disponibilidad usa su propio fetch, sin pasar por `request()`, así que
@@ -81,6 +82,18 @@ async function request<T>(
     }
 
     const res = await attempt(url, options);
+
+    // Bug real encontrado en la ronda manual del spec 81 (TC-081-003,
+    // 2026-08-29): `reachability` solo se movía a `'server_unreachable'`
+    // (vía `NetworkMonitor.probeReachability()`), pero nada la devolvía a
+    // `'online'` tras una petición exitosa — el banner y el copy de error
+    // quedaban diciendo "no pudimos contactar el servidor" indefinidamente
+    // aunque el backend ya respondiera. Cualquier respuesta HTTP real (2xx,
+    // 4xx o 5xx — todas implican que el servidor contestó) confirma que el
+    // servidor es alcanzable de nuevo.
+    if (useSyncStatusStore.getState().reachability === 'server_unreachable') {
+      useSyncStatusStore.getState().setReachability('online');
+    }
 
     if (res.ok) {
       if (res.status === 204) return undefined as T;
