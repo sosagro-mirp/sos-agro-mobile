@@ -75,7 +75,7 @@ export const syncQueue = sqliteTable('sync_queue', {
   // Spec 70, Fase 10 — 'skip-step' se agrega a 'survey' | 'farm-plot' para
   // que un salto de paso hecho sin conexión viaje por la misma cola (con sus
   // reintentos y backoff) en vez de una cola paralela.
-  itemType: text('item_type', { enum: ['survey', 'farm-plot', 'skip-step'] })
+  itemType: text('item_type', { enum: ['survey', 'farm-plot', 'skip-step', 'consent'] })
     .notNull()
     .default('survey'),
   // Spec 70, Fase 10 — solo lo usan las entradas 'skip-step': el instrumento
@@ -150,4 +150,46 @@ export const farmerCache = sqliteTable('farmer_cache', {
   farmName: text('farm_name'),
   crops: text('crops'), // JSON array of CropSummary: { cropId, name }[]
   cachedAt: integer('cached_at', { mode: 'timestamp' }).notNull(),
+  // Spec 78 — última versión de consentimiento aceptada por este agricultor,
+  // conocida por este dispositivo. hasValidConsent() la compara contra la
+  // versión activa cacheada (consent_document_cache) para decidir offline si
+  // hay que volver a pedirlo.
+  consentVersion: text('consent_version'),
+  consentedAt: integer('consented_at', { mode: 'timestamp' }),
+});
+
+// Spec 78 — documento de consentimiento activo, descargado junto con la
+// campaña (Fase 3 de refresh(), junto a S1/S2) para poder mostrarlo sin red.
+export const consentDocumentCache = sqliteTable('consent_document_cache', {
+  // Fila única: siempre 'active'. Igual patrón que instrumentCache/campaignCache
+  // pero de un solo registro, así que no necesita id real.
+  id: text('id').primaryKey(),
+  data: text('data').notNull(),
+  cachedAt: integer('cached_at', { mode: 'timestamp' }).notNull(),
+});
+
+// Spec 78 — constancia de consentimiento capturada en el dispositivo,
+// pendiente de sincronizar. `sessionId` puede ser un id provisional
+// (`local_session_…`) mientras la sesión no se resuelve: sync_queue.
+// campaign_session_id ya remapea ese id en resolveLocalSessions(), y esta
+// tabla se remapea junto con él (ver SyncQueueService).
+export const consentRecords = sqliteTable('consent_records', {
+  id: text('id').primaryKey(),
+  sessionId: text('session_id').notNull(),
+  consentDocumentId: text('consent_document_id').notNull(),
+  respondentName: text('respondent_name'),
+  acceptedDataProcessing: integer('accepted_data_processing', { mode: 'boolean' }).notNull(),
+  acceptedPhoto: integer('accepted_photo', { mode: 'boolean' }).notNull().default(false),
+  acceptedAudio: integer('accepted_audio', { mode: 'boolean' }).notNull().default(false),
+  acceptedVideo: integer('accepted_video', { mode: 'boolean' }).notNull().default(false),
+  acceptedFollowUpContact: integer('accepted_follow_up_contact', { mode: 'boolean' })
+    .notNull()
+    .default(false),
+  // Momento real de aceptación en el dispositivo — se conserva tal cual
+  // aunque la sincronización ocurra mucho después (criterio 8 del spec).
+  acceptedAt: integer('accepted_at', { mode: 'timestamp' }).notNull(),
+  status: text('status', { enum: ['pending', 'synced', 'failed'] })
+    .notNull()
+    .default('pending'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
 });

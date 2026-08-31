@@ -3,8 +3,10 @@ import { captureError } from '../lib/sentry';
 import { campaignCacheStorage } from '../storage/campaignCache';
 import { instrumentCacheStorage } from '../storage/instrumentCache';
 import { farmerCacheStorage } from '../storage/farmerCache';
+import { consentDocumentCacheStorage } from '../storage/consentDocumentCache';
 import { fetchActiveCampaigns, fetchCampaignRender } from '../api/campaigns';
 import { fetchInstrumentRender, fetchInstrumentByCode } from '../api/instruments';
+import { fetchActiveConsentDocument } from '../api/consents';
 import { listAllFarmers } from '../api/farmers';
 import { useCachedInstrumentsStore } from './useCachedInstrumentsStore';
 import type { CampaignRender } from '../types';
@@ -146,6 +148,16 @@ export const useCachedCampaignsStore = create<CachedCampaignsState>((set, get) =
         } catch {
           // S1/S2 not configured in backend — ignore silently
         }
+      }
+
+      // ── Spec 78 — pre-cache the active consent document, alongside S1/S2 ──
+      try {
+        const activeDocument = await fetchActiveConsentDocument();
+        await consentDocumentCacheStorage.save(activeDocument);
+      } catch {
+        // No hay versión publicada todavía, o la ruta falló — no bloquea la
+        // descarga; pre-survey.tsx exigirá el consentimiento igual (ver
+        // hasValidConsent, que trata versión activa desconocida como "no vigente").
       }
 
       // ── Phase 4: pre-cache all farmers for offline search ────────────────

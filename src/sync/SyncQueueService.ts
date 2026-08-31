@@ -29,6 +29,10 @@ import { useChangeRequestStore } from '../store/useChangeRequestStore';
 import { farmPlotStore } from '../storage/farmPlotStore';
 import { createFarmPlot } from '../api/farmPlots';
 import type { CampaignSessionResponse } from '../types/campaign';
+import { consentRecordStore } from '../storage/consentRecordStore';
+import { submitConsent } from '../api/consents';
+import { buildConsentSyncPayload, remapConsentSessionId } from './consentSync';
+import { resolveLegacyInstrumentCode } from '../lib/instrumentCodeAliases';
 
 const MAX_CONSECUTIVE_NETWORK_FAILURES = 5;
 const BACKOFF_BASE_MS = 1000;
@@ -195,6 +199,11 @@ class SyncQueueServiceClass {
           .set({ campaignSessionId: realSessionId })
           .where(eq(syncQueue.campaignSessionId, localSessionId));
 
+        // Spec 78 — consent_records.session_id vive fuera de syncQueue (lo
+        // consulta processConsentEntry por su propio id, no por
+        // campaignSessionId), así que necesita su propio remapeo aquí.
+        await consentRecordStore.remapSession(localSessionId, realSessionId);
+
         await pendingSessionStorage.resolve(localSessionId, realSessionId);
 
         // Update the active store if this session is still open.
@@ -252,13 +261,105 @@ class SyncQueueServiceClass {
     return null;
   }
 
-  private async processEntry(entry: SyncQueueEntry): Promise<void> {
+  // Spec 81, Fase 3 — `interactive` distingue el camino donde hay un
+  // encuestador esperando en pantalla (processSurveyNow()) del ciclo de
+  // fondo (processAll()). En el primero, handleNetworkError() no debe
+  // dormir el backoff completo (hasta 60s): el "Reintentar" se quedaría
+  // colgado sin ninguna señal en pantalla.
+  private async processEntry(entry: SyncQueueEntry, interactive = false): Promise<void> {
     if (entry.itemType === 'farm-plot') {
-      await this.processFarmPlotEntry(entry);
+      await this.processFarmPlotEntry(entry, interactive);
     } else if (entry.itemType === 'skip-step') {
-      await this.processSkipStepEntry(entry);
+      await this.processSkipStepEntry(entry, interactive);
+    } else if (entry.itemType === 'consent') {
+      await this.processConsentEntry(entry, interactive);
     } else {
-      await this.processSurveyEntry(entry);
+      await this.processSurveyEntry(entry, interactive);
+    }
+  }
+
+  // Spec 78 — entry.surveyId guarda el id local de `consent_records` (mismo
+  // convenio que farm-plot con farmPlotId). entry.campaignSessionId es el
+  // sessionId (local o real) — resolveLocalSessions() ya lo remapea junto
+  // con surveys/syncQueue; consentRecordStore.remapSession() lo replica para
+  // esta tabla. Un 4xx aquí NUNCA debe frenar el resto de la cola: la
+  // constancia perdida se reporta para reconciliar desde el panel (ver
+  // "Puntos delicados", 2, en spec/78_consentimiento_informado_tratamiento_datos.md).
+  private async processConsentEntry(entry: SyncQueueEntry, interactive = false): Promise<void> {
+    await syncQueueStorage.markInFlight(entry.id);
+
+    try {
+      const draft = await consentRecordStore.get(entry.surveyId);
+      if (!draft) {
+        await syncQueueStorage.markSynced(entry.id);
+        return;
+      }
+
+      if (draft.status === 'synced') {
+        await syncQueueStorage.markSynced(entry.id);
+        return;
+      }
+
+      const resolved = await this.resolveCampaignSession(entry);
+      if (!resolved) return;
+      entry = resolved;
+
+      if (!entry.campaignSessionId) {
+        const detail = `Entrada consent sin campaignSessionId — entry ${entry.id}`;
+        logger.error(`[Sync] ${detail}`);
+        captureError(new Error(detail), { entryId: entry.id });
+        await consentRecordStore.markFailed(entry.surveyId);
+        await syncQueueStorage.markFailedValidation(entry.id, detail);
+        return;
+      }
+
+      // M2 (auditoría spec 78) — antes se reconstruía el payload en línea y
+      // `buildConsentSyncPayload`/`remapConsentSessionId` quedaban sin
+      // ningún llamador real, solo cubiertos por su propio test. `remap`
+      // aquí es un resguardo defensivo: `resolveCampaignSession` ya garantiza
+      // que `entry.campaignSessionId` no es local a esta altura (o esta
+      // función ya retornó antes), así que en el camino normal es un no-op —
+      // pero si esa garantía se rompe algún día, lanza en vez de mandarle al
+      // backend un `sessionId` `local_…` que fallaría igual, solo que con un
+      // 400 menos claro.
+      const remapped = remapConsentSessionId(
+        { localId: draft.id, sessionId: entry.campaignSessionId },
+        { [entry.campaignSessionId]: entry.campaignSessionId },
+      );
+      const payload = buildConsentSyncPayload({
+        localId: draft.id,
+        sessionId: remapped.sessionId,
+        consentDocumentId: draft.consentDocumentId,
+        respondentName: draft.respondentName,
+        acceptedDataProcessing: draft.acceptedDataProcessing,
+        acceptedPhoto: draft.acceptedPhoto,
+        acceptedAudio: draft.acceptedAudio,
+        acceptedVideo: draft.acceptedVideo,
+        acceptedFollowUpContact: draft.acceptedFollowUpContact,
+        acceptedAt: draft.acceptedAt,
+      });
+
+      const response = await submitConsent(payload);
+
+      await consentRecordStore.markSynced(draft.id);
+      await syncQueueStorage.markSynced(entry.id);
+
+      logger.info(
+        `[Sync] processed consent entry ${entry.id} → ${response.consentRecordId}`,
+      );
+      this.consecutiveNetworkFailures = 0;
+    } catch (error) {
+      if (error instanceof NetworkError) {
+        logger.error('[Sync] network error (consent)', error);
+        await this.handleNetworkError(entry, interactive);
+      } else {
+        logger.error('[Sync] validation error (consent)', error);
+        captureError(error, { consentRecordId: entry.surveyId, entryId: entry.id });
+        const detail = error instanceof Error ? error.message : String(error);
+        await consentRecordStore.markFailed(entry.surveyId);
+        await syncQueueStorage.markFailedValidation(entry.id, detail);
+        this.consecutiveNetworkFailures = 0;
+      }
     }
   }
 
@@ -268,7 +369,7 @@ class SyncQueueServiceClass {
   // marcador vía el mismo endpoint que usa el camino online
   // (POST /api/surveys/skip-step), para que el estado final de la campaña sea
   // idéntico sin importar si hubo conexión en el momento de saltar.
-  private async processSkipStepEntry(entry: SyncQueueEntry): Promise<void> {
+  private async processSkipStepEntry(entry: SyncQueueEntry, interactive = false): Promise<void> {
     await syncQueueStorage.markInFlight(entry.id);
 
     try {
@@ -301,7 +402,7 @@ class SyncQueueServiceClass {
     } catch (error) {
       if (error instanceof NetworkError) {
         logger.error('[Sync] network error (skip-step)', error);
-        await this.handleNetworkError(entry);
+        await this.handleNetworkError(entry, interactive);
       } else {
         logger.error('[Sync] validation error (skip-step)', error);
         captureError(error, { entryId: entry.id, surveyId: entry.surveyId });
@@ -339,7 +440,16 @@ class SyncQueueServiceClass {
 
     const pendingSession = await pendingSessionStorage.getByLocal(entry.campaignSessionId);
     if (pendingSession?.status === 'pending') {
-      // Espera legítima: la sesión sigue en cola de resolución.
+      // Espera legítima: la sesión sigue en cola de resolución. Spec 81,
+      // Fase 3 — el llamador (processSurveyEntry/processSkipStepEntry) ya
+      // marcó esta entrada `in_flight` antes de llegar aquí; devolverla a
+      // `pending` explícitamente evita que quede varada hasta que corra un
+      // `processAll()` de fondo (su único `finally` la rescataba antes),
+      // algo que `processSurveyNow()` nunca ejecuta por sí solo. Por `id`,
+      // no por `surveyId` (corrección de auditoría,
+      // docs/reports/auditorias/37-…): el mismo `surveyId` puede tener otra
+      // entrada legítimamente en vuelo (ej. una `skip-step` hermana).
+      await syncQueueStorage.resetInFlightToRetryById(entry.id);
       logger.warn(`[Sync] campaign session not yet resolved for entry ${entry.id}, deferring`);
       return null;
     }
@@ -357,7 +467,7 @@ class SyncQueueServiceClass {
     return null;
   }
 
-  private async processSurveyEntry(entry: SyncQueueEntry): Promise<void> {
+  private async processSurveyEntry(entry: SyncQueueEntry, interactive = false): Promise<void> {
     await syncQueueStorage.markInFlight(entry.id);
 
     try {
@@ -456,7 +566,7 @@ class SyncQueueServiceClass {
     } catch (error) {
       if (error instanceof NetworkError) {
         logger.error('[Sync] network error', error);
-        await this.handleNetworkError(entry);
+        await this.handleNetworkError(entry, interactive);
       } else {
         logger.error('[Sync] validation error', error);
         captureError(error, { surveyId: entry.surveyId, entryId: entry.id });
@@ -468,7 +578,7 @@ class SyncQueueServiceClass {
   }
 
   // Handles entries with itemType 'farm-plot'; entry.surveyId holds the local farmPlotId (per D5).
-  private async processFarmPlotEntry(entry: SyncQueueEntry): Promise<void> {
+  private async processFarmPlotEntry(entry: SyncQueueEntry, interactive = false): Promise<void> {
     await syncQueueStorage.markInFlight(entry.id);
 
     try {
@@ -507,7 +617,7 @@ class SyncQueueServiceClass {
     } catch (error) {
       if (error instanceof NetworkError) {
         logger.error('[Sync] network error (farm-plot)', error);
-        await this.handleNetworkError(entry);
+        await this.handleNetworkError(entry, interactive);
       } else {
         logger.error('[Sync] validation error (farm-plot)', error);
         captureError(error, { farmPlotId: entry.surveyId, entryId: entry.id });
@@ -558,7 +668,7 @@ class SyncQueueServiceClass {
       return;
     }
 
-    const code = instrument.code;
+    const code = resolveLegacyInstrumentCode(instrument.code);
     if (code !== 'S1' && code !== 'S2') return;
 
     if (code === 'S1') {
@@ -623,6 +733,29 @@ class SyncQueueServiceClass {
         crops: farmer.farm?.crops ?? undefined,
       });
 
+      // Hallazgo TC-078-013 (spec 78): `cacheFarmerIdentity` crea una fila
+      // nueva para el `farmerId` real sin `consentVersion`/`consentedAt` — la
+      // constancia se registró antes, contra el `localFarmerId` provisional,
+      // cuya fila se borró arriba. Sin este carry-over, `hasValidConsent()`
+      // ve un agricultor sin consentimiento conocido offline aunque sí lo
+      // tenga (constancia ya sincronizada), y vuelve a mostrar el aviso de
+      // "consentimiento pendiente".
+      if (provisionalEntry?.consentVersion && provisionalEntry.consentedAt) {
+        try {
+          await farmerCacheStorage.recordConsent(
+            farmer.farmerId,
+            provisionalEntry.consentVersion,
+            provisionalEntry.consentedAt,
+          );
+        } catch (err) {
+          logger.warn(
+            `[Sync] failed to carry over cached consent to ${farmer.farmerId}: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
+      }
+
       logger.info(`[Sync] extractFarmer completed for survey ${realSurveyId}`);
     } else if (code === 'S2') {
       const cropsResult = await extractCrops(realSurveyId);
@@ -667,7 +800,7 @@ class SyncQueueServiceClass {
     return buildResponsesPayload(realSurveyId, flattenedQuestions, resolvedAnswers, attachmentIds);
   }
 
-  private async handleNetworkError(entry: SyncQueueEntry): Promise<void> {
+  private async handleNetworkError(entry: SyncQueueEntry, interactive = false): Promise<void> {
     this.consecutiveNetworkFailures++;
     await syncQueueStorage.incrementAttempts(entry.id);
 
@@ -676,16 +809,31 @@ class SyncQueueServiceClass {
       BACKOFF_MAX_MS
     );
 
-    if (this.consecutiveNetworkFailures < MAX_CONSECUTIVE_NETWORK_FAILURES) {
+    // Spec 81, Fase 3 — en el camino interactivo (processSurveyNow()) no
+    // dormimos el backoff completo: con `attempts` alto llegaba a esperar
+    // hasta 60s con el encuestador mirando la pantalla, sin ninguna señal de
+    // que la app seguía trabajando. El backoff de fondo (processAll()) sigue
+    // igual: ahí sí importa espaciar los reintentos entre corridas.
+    if (!interactive && this.consecutiveNetworkFailures < MAX_CONSECUTIVE_NETWORK_FAILURES) {
       await sleep(delayMs);
     }
   }
 
   async processSurveyNow(surveyId: string): Promise<void> {
+    // Spec 81, Fase 3 — un intento anterior (este mismo camino interactivo,
+    // o un `processAll()` interrumpido) puede haber dejado la entrada de
+    // este `surveyId` en `in_flight`. `getPendingBySurveyId()` no la vería
+    // (filtra por `status = 'pending'`) y este método caería directo al
+    // bucle de espera de más abajo sin procesarla nunca. Repararla antes de
+    // consultar es lo que permite que un segundo "Reintentar" del
+    // encuestador sí avance, sin depender de que corra un `processAll()` de
+    // fondo ni de reiniciar la app.
+    await syncQueueStorage.resetInFlightToRetryBySurveyId(surveyId);
+
     const entry = await syncQueueStorage.getPendingBySurveyId(surveyId);
 
     if (entry) {
-      await this.processEntry(entry);
+      await this.processEntry(entry, true);
       return;
     }
 

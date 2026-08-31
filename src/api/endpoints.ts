@@ -1,4 +1,7 @@
 export const endpoints = {
+  // Health (spec 81, Fase 4 — sondeo bajo demanda de disponibilidad del backend)
+  health: '/api/health',
+
   // Instruments
   instrumentRender: (id: string) => `/api/instruments/${id}/render`,
 
@@ -50,4 +53,9 @@ export const endpoints = {
 
   // Question options (dynamic creation)
   questionOptions: (questionId: string) => `/api/questions/${questionId}/options`,
+
+  // Consent (spec 78)
+  consentDocumentActive: '/api/consent-documents/active',
+  consents: '/api/consents',
+  farmerConsentStatus: (farmerId: string) => `/api/farmers/${farmerId}/consent`,
 } as const;

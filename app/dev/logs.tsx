@@ -11,21 +11,44 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useFocusEffect } from "expo-router";
-import * as FileSystem from "expo-file-system/legacy";
 import { logger, type LogFile } from "../../src/lib/logger";
 import { farmerCacheStorage, type FarmerCacheEntry } from "../../src/storage/farmerCache";
 import { Fonts } from "../../src/theme/fonts";
-
-const LOG_DIR = (FileSystem.documentDirectory ?? "") + "logs/";
+import {
+  applyDownloadedUpdate,
+  canApplyUpdateNow,
+  checkAndFetchUpdate,
+  getOtaStatus,
+  type CheckOutcome,
+} from "../../src/lib/otaUpdates";
+import { captureError } from "../../src/lib/sentry";
+import { useSyncStatusStore } from "../../src/store/useSyncStatusStore";
+import { useInstrumentSurveyStore } from "../../src/store/useInstrumentSurveyStore";
 
 interface LogFileMeta {
   date: string;
   sizeKb: number;
 }
 
+/**
+ * Tamaño en bytes UTF-8 de un string, sin `Blob`/`TextEncoder` — su
+ * disponibilidad en Hermes no está garantizada en RN 0.81 (mismo motivo por
+ * el que la Fase 4 del spec 76 descartó la API `FileHandle`). Solo se usa
+ * para un dato informativo de tamaño en esta pantalla de diagnóstico.
+ */
+function utf8ByteLength(text: string): number {
+  let bytes = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.codePointAt(i)!;
+    if (code > 0xffff) i += 1; // par sustituto: ya se contó como 1 code point
+    bytes += code <= 0x7f ? 1 : code <= 0x7ff ? 2 : code <= 0xffff ? 3 : 4;
+  }
+  return bytes;
+}
+
 export default function DevLogsScreen() {
   const router = useRouter();
-  const [files, setFiles] = useState<LogFileMeta[]>([]);
+  const [logs, setLogs] = useState<LogFile[]>([]);
   const [selectedLog, setSelectedLog] = useState<LogFile | null>(null);
   const [loading, setLoading] = useState(false);
   const [clearingFarmers, setClearingFarmers] = useState(false);
@@ -33,25 +56,30 @@ export default function DevLogsScreen() {
   const [loadingFarmers, setLoadingFarmers] = useState(false);
   const [farmerCache, setFarmerCache] = useState<FarmerCacheEntry[] | null>(null);
 
+  // Spec 80 — bloque "Actualizaciones".
+  const otaStatus = getOtaStatus();
+  const pendingCount = useSyncStatusStore((s) => s.pendingCount);
+  const hasSurveyInProgress = useInstrumentSurveyStore((s) => s.surveyId !== null);
+  const [checkingOta, setCheckingOta] = useState(false);
+  const [otaCheckResult, setOtaCheckResult] = useState<CheckOutcome | null>(null);
+  const [otaDownloaded, setOtaDownloaded] = useState(false);
+  const [sentryTestResult, setSentryTestResult] = useState<string | null>(null);
+  const [applyingOta, setApplyingOta] = useState(false);
+
+  // Bug encontrado en la ronda manual del spec 76 (TC-076-08, 2026-08-29): esta
+  // pantalla leía `LOG_DIR` a mano y listaba **cada segmento** como una fila
+  // ("2026-08-29.000", "2026-08-29.001", ...), en vez de un día por fila. La
+  // Fase 4 del spec ya afirmaba (incorrectamente) que `getLogs()` cubría esto
+  // — nunca se había actualizado esta pantalla al rediseño por segmentos.
+  // `getLogs()` sí reagrupa por fecha; basta con usarlo aquí también.
+  const files: LogFileMeta[] = [...logs]
+    .sort((a, b) => (a.date < b.date ? 1 : -1))
+    .map((l) => ({ date: l.date, sizeKb: Math.ceil(utf8ByteLength(l.content) / 1024) }));
+
   async function loadFileList() {
     setLoading(true);
     try {
-      const info = await FileSystem.getInfoAsync(LOG_DIR);
-      if (!info.exists) {
-        setFiles([]);
-        return;
-      }
-      const names = await FileSystem.readDirectoryAsync(LOG_DIR);
-      const metas: LogFileMeta[] = [];
-      for (const name of names.sort().reverse()) {
-        const fileInfo = await FileSystem.getInfoAsync(LOG_DIR + name);
-        const sizeBytes = fileInfo.exists && 'size' in fileInfo ? (fileInfo.size ?? 0) : 0;
-        metas.push({
-          date: name.replace(".log", ""),
-          sizeKb: Math.ceil(sizeBytes / 1024),
-        });
-      }
-      setFiles(metas);
+      setLogs(await logger.getLogs());
     } finally {
       setLoading(false);
     }
@@ -63,17 +91,35 @@ export default function DevLogsScreen() {
     }, [])
   );
 
-  async function handleSelectFile(date: string) {
-    const content = await FileSystem.readAsStringAsync(LOG_DIR + date + ".log", {
-      encoding: FileSystem.EncodingType.UTF8,
-    }).catch(() => "(error al leer archivo)");
-    setSelectedLog({ date, content });
+  function handleSelectFile(date: string) {
+    const match = logs.find((l) => l.date === date);
+    setSelectedLog(match ?? { date, content: "(log no encontrado)" });
   }
 
   async function handleExport() {
     const content = await logger.exportLogs();
     if (!content) return;
     Share.share({ message: content });
+  }
+
+  // Spec 80, TC-080-003 / TC-080-008 — disparador de diagnóstico para
+  // verificar la cadena de reporte a Sentry desde un build real: que el
+  // contexto `ota_updates.is_enabled` llegue en `true` (antes de este spec
+  // llegaba en `false` desde todas las tablets) y que el stack trace de un
+  // bundle entregado por OTA aparezca simbolizado (`src/…`) y no minificado.
+  //
+  // Vive en esta pantalla, que está oculta tras 5 toques en el título, y solo
+  // dispara al pulsarlo: el bundle NO queda roto. Es lo que permite verificar
+  // los sourcemaps sin publicar código defectuoso al canal `preview`, que es
+  // el de las tablets de campo (no hay canal de staging — ver spec/backlog.md).
+  function handleTestSentryError() {
+    const stamp = new Date().toISOString();
+    setSentryTestResult(`Evento enviado: ${stamp}`);
+    captureError(
+      new Error(`[TC-080-003/008] Error de prueba lanzado desde /dev/logs — ${stamp}`),
+      { origin: 'dev-logs-manual-test', triggeredAt: stamp },
+    );
+    logger.info(`[DevLogs] error de prueba enviado a Sentry — ${stamp}`);
   }
 
   async function handleViewFarmers() {
@@ -106,18 +152,38 @@ export default function DevLogsScreen() {
 
   async function handleClear() {
     try {
-      const info = await FileSystem.getInfoAsync(LOG_DIR);
-      if (!info.exists) return;
-      const names = await FileSystem.readDirectoryAsync(LOG_DIR);
-      await Promise.all(
-        names.map((name) =>
-          FileSystem.deleteAsync(LOG_DIR + name, { idempotent: true })
-        )
-      );
+      // Hallazgo de la auditoría 36 del spec 76 (2026-08-29): borrar los
+      // archivos a mano no bastaba — el logger conservaba el segmento activo
+      // en memoria y lo resucitaba en el siguiente flush. `logger.clearAll()`
+      // borra archivos Y estado en memoria de forma atómica.
+      await logger.clearAll();
       setSelectedLog(null);
       await loadFileList();
     } catch (e) {
       logger.error("[DevLogs] clear error", e);
+    }
+  }
+
+  async function handleCheckOta() {
+    if (checkingOta) return;
+    setCheckingOta(true);
+    setOtaCheckResult(null);
+    try {
+      const result = await checkAndFetchUpdate();
+      setOtaCheckResult(result.outcome);
+      setOtaDownloaded(result.outcome === "downloaded");
+    } finally {
+      setCheckingOta(false);
+    }
+  }
+
+  async function handleApplyOta() {
+    if (applyingOta) return;
+    setApplyingOta(true);
+    try {
+      await applyDownloadedUpdate();
+    } finally {
+      setApplyingOta(false);
     }
   }
 
@@ -154,6 +220,78 @@ export default function DevLogsScreen() {
               </Pressable>
             ))
           )}
+
+          {/* Spec 80 — Actualizaciones (canal OTA) */}
+          <View style={styles.otaBox}>
+            <Text style={styles.otaTitle}>Actualizaciones</Text>
+            {otaStatus.available ? (
+              <>
+                <Text style={styles.otaLine}>OTA activo: {otaStatus.isEnabled ? "sí" : "no"}</Text>
+                <Text style={styles.otaLine}>Canal: {otaStatus.channel ?? "-"}</Text>
+                <Text style={styles.otaLine}>Runtime: {otaStatus.runtimeVersion ?? "-"}</Text>
+                {otaStatus.isEmbeddedLaunch ? (
+                  <Text style={styles.otaLine}>Ejecutando el bundle embebido (APK)</Text>
+                ) : (
+                  <>
+                    <Text style={styles.otaLine}>
+                      Update actual: {otaStatus.updateId ? `${otaStatus.updateId.slice(0, 8)}…` : "-"}
+                    </Text>
+                    <Text style={styles.otaLine}>
+                      Publicado: {otaStatus.createdAt ? otaStatus.createdAt.toLocaleString() : "-"}
+                    </Text>
+                  </>
+                )}
+              </>
+            ) : (
+              <Text style={styles.otaLine}>OTA no disponible en este entorno</Text>
+            )}
+
+            <Pressable
+              style={[styles.actionButton, styles.otaButton, (checkingOta || !otaStatus.available) && styles.buttonDisabled]}
+              onPress={handleCheckOta}
+              disabled={checkingOta || !otaStatus.available}
+            >
+              {checkingOta
+                ? <ActivityIndicator color="#fff" size="small" />
+                : <Text style={styles.actionText}>Buscar actualización ahora</Text>
+              }
+            </Pressable>
+
+            {otaCheckResult ? (
+              <Text style={styles.devResult}>
+                {otaCheckResult === "unavailable" && "OTA no disponible en este entorno"}
+                {otaCheckResult === "up-to-date" && "Sin actualizaciones"}
+                {otaCheckResult === "downloaded" && "Descargada — se aplica al reiniciar"}
+                {otaCheckResult === "error" && "Error al buscar la actualización"}
+              </Text>
+            ) : null}
+
+            {otaDownloaded ? (() => {
+              const guard = canApplyUpdateNow({ pendingCount, hasSurveyInProgress });
+              return (
+                <>
+                  {guard.warning ? <Text style={styles.otaWarning}>{guard.warning}</Text> : null}
+                  {!guard.allowed && guard.reason ? (
+                    <Text style={styles.otaWarning}>{guard.reason}</Text>
+                  ) : null}
+                  <Pressable
+                    style={[
+                      styles.actionButton,
+                      styles.otaButton,
+                      (applyingOta || !guard.allowed) && styles.buttonDisabled,
+                    ]}
+                    onPress={handleApplyOta}
+                    disabled={applyingOta || !guard.allowed}
+                  >
+                    {applyingOta
+                      ? <ActivityIndicator color="#fff" size="small" />
+                      : <Text style={styles.actionText}>Reiniciar ahora</Text>
+                    }
+                  </Pressable>
+                </>
+              );
+            })() : null}
+          </View>
 
           {/* Actions */}
           <View style={styles.actions}>
@@ -205,6 +343,14 @@ export default function DevLogsScreen() {
             </Pressable>
             {farmerClearResult ? (
               <Text style={styles.devResult}>{farmerClearResult}</Text>
+            ) : null}
+
+            {/* Spec 80 — diagnóstico de la cadena de reporte a Sentry (TC-080-003 / TC-080-008) */}
+            <Pressable style={styles.actionButton} onPress={handleTestSentryError}>
+              <Text style={styles.actionText}>Provocar error de prueba (Sentry)</Text>
+            </Pressable>
+            {sentryTestResult ? (
+              <Text style={styles.devResult}>{sentryTestResult}</Text>
             ) : null}
           </View>
         </ScrollView>
@@ -287,6 +433,35 @@ const styles = StyleSheet.create({
   },
   listContent: {
     flexGrow: 1,
+  },
+  otaBox: {
+    gap: 6,
+    padding: 16,
+    marginHorizontal: 16,
+    marginTop: 12,
+    borderRadius: 8,
+    backgroundColor: "#1E293B",
+  },
+  otaTitle: {
+    color: "#F1F5F9",
+    fontFamily: Fonts.semiBold,
+    fontSize: 14,
+    marginBottom: 4,
+  },
+  otaLine: {
+    color: "#94A3B8",
+    fontFamily: Fonts.regular,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  otaWarning: {
+    color: "#FBBF24",
+    fontFamily: Fonts.regular,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  otaButton: {
+    marginTop: 8,
   },
   actions: {
     gap: 10,

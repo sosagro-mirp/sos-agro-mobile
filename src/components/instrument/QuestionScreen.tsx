@@ -15,6 +15,7 @@ import { Check, ChevronLeft, ArrowRight, List, X } from "lucide-react-native";
 import { useInstrumentSurveyStore } from "../../store/useInstrumentSurveyStore";
 import { useCampaignSessionStore } from "../../store/useCampaignSessionStore";
 import { OfflineBanner } from "../network/OfflineBanner";
+import { ConsentModal } from "../campaign/ConsentModal";
 import { QuestionContainer } from "./QuestionContainer";
 import { QuestionRenderer } from "./QuestionRenderer";
 import { SectionNavPanel } from "./SectionNavPanel";
@@ -63,6 +64,14 @@ export const QuestionScreen: React.FC<QuestionScreenProps> = ({
   const savedQuestionId = useInstrumentSurveyStore((s) => s.savedQuestionId);
   const surveyInstrumentName = useInstrumentSurveyStore((s) => s.instrumentName);
   const farmerName = useCampaignSessionStore((s) => s.farmerName);
+  // Cambio de alcance (2026-08-28, spec 78, Fase 15) — aviso persistente de
+  // consentimiento pendiente, visible mientras se responde (no solo antes de
+  // empezar). Mismo store que ya alimenta el resto de la sesión de campaña.
+  const sessionId = useCampaignSessionStore((s) => s.sessionId);
+  const farmerId = useCampaignSessionStore((s) => s.farmerId);
+  const consentPending = useCampaignSessionStore((s) => s.consentPending);
+  const setConsentPending = useCampaignSessionStore((s) => s.setConsentPending);
+  const [consentModalVisible, setConsentModalVisible] = useState(false);
 
   const visible = visibleQuestions();
   const total = visible.length;
@@ -276,6 +285,23 @@ export const QuestionScreen: React.FC<QuestionScreenProps> = ({
   return (
     <SafeAreaView style={styles.root} edges={["top", "bottom"]}>
       <OfflineBanner />
+      {/* Spec 78, cambio de alcance (2026-08-28) — criterio 1-cuarter/1-sexter:
+          aviso persistente mientras el encuestado no tenga consentimiento
+          vigente, con acceso directo al formulario, funcionando offline. */}
+      {consentPending && sessionId && (
+        <View style={[styles.consentBanner, !isTablet && styles.consentBannerCompact]}>
+          <Text style={styles.consentBannerText}>
+            Este encuestado todavía no dio su consentimiento informado.
+          </Text>
+          <TouchableOpacity
+            onPress={() => setConsentModalVisible(true)}
+            style={[styles.consentBannerButton, !isTablet && styles.consentBannerButtonCompact]}
+            accessibilityRole="button"
+          >
+            <Text style={styles.consentBannerButtonText}>Registrar consentimiento</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       <View style={[styles.body, isTablet && styles.bodyTablet]}>
         {isTablet ? (
@@ -324,6 +350,20 @@ export const QuestionScreen: React.FC<QuestionScreenProps> = ({
         }}
         onRequestClose={() => setShowExitConfirm(false)}
       />
+
+      {sessionId && (
+        <ConsentModal
+          visible={consentModalVisible}
+          sessionId={sessionId}
+          farmerId={farmerId ?? undefined}
+          farmerName={farmerName ?? undefined}
+          onAccepted={() => {
+            setConsentPending(false);
+            setConsentModalVisible(false);
+          }}
+          onClose={() => setConsentModalVisible(false)}
+        />
+      )}
     </SafeAreaView>
   );
 };
@@ -355,6 +395,49 @@ function createStyles(colors: ThemeColors) {
       maxWidth: 560,
       alignSelf: "center",
       width: "100%",
+    },
+    // Spec 78, cambio de alcance (2026-08-28) — aviso persistente de
+    // consentimiento pendiente. Tono `warning`, no `danger`: es una
+    // obligación pendiente, no un error bloqueante.
+    consentBanner: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 10,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      backgroundColor: colors.warningBg,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.warningFg,
+    },
+    // Hallazgo TC-078-011 (móvil, pantallas pequeñas): texto y botón
+    // quedaban apretados en una sola fila. En teléfono (!isTablet) se apilan
+    // en columna, con el botón ocupando el ancho completo.
+    consentBannerCompact: {
+      flexDirection: "column",
+      alignItems: "stretch",
+      gap: 8,
+    },
+    consentBannerText: {
+      fontSize: 12,
+      fontFamily: Fonts.regular,
+      color: colors.warningFg,
+      flexShrink: 1,
+      textAlign: "center",
+    },
+    consentBannerButton: {
+      backgroundColor: colors.warningFg,
+      borderRadius: 6,
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+    },
+    consentBannerButtonCompact: {
+      alignItems: "center",
+    },
+    consentBannerButtonText: {
+      fontSize: 11,
+      fontFamily: Fonts.bold,
+      color: "#FFFFFF",
     },
     emptyState: {
       flex: 1,

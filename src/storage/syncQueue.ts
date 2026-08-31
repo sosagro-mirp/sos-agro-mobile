@@ -6,8 +6,11 @@ export type SyncStatus = 'pending' | 'in_flight' | 'failed_validation';
 
 // Spec 70, Fase 10 — 'skip-step' reutiliza esta cola (reintentos, backoff,
 // estado en vuelo) para el salto de paso hecho sin conexión, en vez de una
-// cola paralela.
-export type ItemType = 'survey' | 'farm-plot' | 'skip-step';
+// cola paralela. Spec 78 — 'consent' hace lo mismo con la constancia de
+// consentimiento capturada offline: `surveyId` guarda el id local de
+// `consent_records`, `campaignSessionId` es el mismo id (local o real) que
+// se remapea en `resolveLocalSessions()`.
+export type ItemType = 'survey' | 'farm-plot' | 'skip-step' | 'consent';
 
 export interface SyncQueueEntry {
   id: string;
@@ -143,6 +146,34 @@ export const syncQueueStorage = {
       .update(syncQueue)
       .set({ status: 'pending' })
       .where(eq(syncQueue.status, 'in_flight'));
+  },
+
+  // Spec 81, Fase 3 — variante acotada a un `surveyId`: `processSurveyNow()`
+  // la llama antes de consultar `getPendingBySurveyId()` para desatascar su
+  // propia entrada sin depender de un `processAll()` de fondo. Antes, una
+  // entrada dejada en `in_flight` por `resolveCampaignSession()` (sesión aún
+  // provisional) o por cualquier interrupción del camino interactivo solo se
+  // recuperaba en el `finally` de `processAll()` — que un `processSurveyNow()`
+  // aislado nunca ejecuta.
+  async resetInFlightToRetryBySurveyId(surveyId: string): Promise<void> {
+    await db
+      .update(syncQueue)
+      .set({ status: 'pending' })
+      .where(and(eq(syncQueue.surveyId, surveyId), eq(syncQueue.status, 'in_flight')));
+  },
+
+  // Spec 81, Fase 3 — corrección de auditoría
+  // (docs/reports/auditorias/37-…): variante acotada a un `id` de entrada
+  // específico, para `resolveCampaignSession()`. Un mismo `surveyId` puede
+  // tener más de una entrada en la cola (p. ej. una `survey` y una
+  // `skip-step`, o dos intentos de resolución de sesión distintos) —
+  // `resetInFlightToRetryBySurveyId()` habría devuelto a `pending` una
+  // entrada hermana que sigue legítimamente en vuelo.
+  async resetInFlightToRetryById(id: string): Promise<void> {
+    await db
+      .update(syncQueue)
+      .set({ status: 'pending' })
+      .where(and(eq(syncQueue.id, id), eq(syncQueue.status, 'in_flight')));
   },
 
   async clearFailed(): Promise<number> {

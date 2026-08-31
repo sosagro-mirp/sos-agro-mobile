@@ -8,6 +8,7 @@
 import { delay, http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
 import { httpClient, NetworkError, ServerError } from '../api/httpClient';
+import { useSyncStatusStore } from '../store/useSyncStatusStore';
 
 jest.mock('expo-secure-store', () => ({
   getItemAsync: jest.fn().mockResolvedValue(null),
@@ -222,6 +223,29 @@ describe('Network failures', () => {
       expect(err).toBeInstanceOf(NetworkError);
       expect(err).not.toBeInstanceOf(ServerError);
     }
+  });
+
+  // Spec 81 — corrección de un bug real encontrado en la ronda manual
+  // (TC-081-003, 2026-08-29): una vez `reachability` caía en
+  // 'server_unreachable', nada la devolvía a 'online' tras una respuesta
+  // exitosa — el banner y el copy de error se quedaban diciendo "no pudimos
+  // contactar el servidor" indefinidamente aunque el backend ya respondiera.
+  it('recupera reachability tras un éxito, si estaba en server_unreachable', async () => {
+    useSyncStatusStore.getState().setReachability('server_unreachable');
+    server.use(http.get(`${BASE}/api/ping`, () => HttpResponse.json({ ok: true })));
+
+    await httpClient.get('/api/ping');
+
+    expect(useSyncStatusStore.getState().reachability).toBe('online');
+  });
+
+  it('no toca reachability cuando ya estaba en online', async () => {
+    useSyncStatusStore.getState().setReachability('online');
+    server.use(http.get(`${BASE}/api/ping`, () => HttpResponse.json({ ok: true })));
+
+    await httpClient.get('/api/ping');
+
+    expect(useSyncStatusStore.getState().reachability).toBe('online');
   });
 });
 

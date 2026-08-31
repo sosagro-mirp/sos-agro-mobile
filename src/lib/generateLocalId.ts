@@ -22,6 +22,6 @@ function uuidv4(): string {
 
 export { uuidv4 as generateUUID };
 
-export function generateLocalId(prefix: 'session' | 'survey' | 'farmer'): string {
+export function generateLocalId(prefix: 'session' | 'survey' | 'farmer' | 'consent'): string {
   return `local_${prefix}_${uuidv4()}`;
 }
