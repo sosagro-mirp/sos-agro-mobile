@@ -1,30 +1,41 @@
 # Pendientes de build EAS
 
 > Registro de cambios de código ya committeados que **todavía no se han verificado en un build EAS
-> real**, y que **exigen build nativo** (no alcanza con `eas update` por OTA — ver
-> `mobile/docs/ota-updates.md` para el criterio de qué va por cada vía). El plan Free de EAS tiene
-> cupo limitado (`https://expo.dev/accounts/{{cuenta}}/settings/billing`), así que no se genera un
-> build por cada commit: se acumulan aquí hasta que valga la pena gastar uno.
+> real** y que **exigen build nativo**. Desde el spec 80 el canal OTA es efectivo, así que un cambio
+> puramente JS ya **no** entra aquí: se publica con `eas update`. El criterio de qué va por cada vía
+> está en `mobile/docs/ota-updates.md`, junto con la trampa de las variables de entorno que costó un
+> incidente real el 2026-08-30 (se publicó al canal de las tablets un bundle con la URL del backend
+> de desarrollo incrustada).
 >
-> **Actualización 2026-08-31:** la fila del **spec 78** (consentimiento) se retiró tras
-> re-verificar sus 6 casos móviles en APK real contra producción — posible solo después de
-> desplegar el backend ese mismo día (hasta entonces `/api/consents` daba 404 en producción). Ver
-> `docs/testing/test-078-consentimiento-informado.md` → "Re-verificación en APK real".
->
-> **Build `versionCode 10014` generado el 2026-08-29** (build `8850317d-…`, rama
-> `deploy/preview-build-batch`) e instalado en el `SM-S931B`. Cubrió las 5 filas que había en esta
-> tabla. Las filas 1, 2 y 5 ya se verificaron en dispositivo y **se retiraron**; queda solo lo que
-> sigue sin comprobarse (ver abajo).
->
-> **Desde este build, el canal OTA es efectivo en el dispositivo de pruebas**, así que los cambios
-> puramente JS ya se publican con `eas update` en vez de esperar aquí — con la advertencia de
-> variables de entorno documentada en `mobile/docs/ota-updates.md`, que costó un incidente real el
-> 2026-08-30.
+> Entran en esta tabla: dependencias con código nativo, permisos, plugins de config, y cualquier
+> cambio de `version` en `app.config.ts`.
 
-**Última consulta de cuota:** 2026-08-29 — plan Free, 15 Android + 15 iOS por mes (cupos
-independientes, no intercambiables), **11/15 Android usados** este ciclo (quedan 4). Los 2 intentos
-fallidos del spec 80 (resolución de `@sentry/cli` bajo pnpm, luego slug de proyecto incorrecto)
-cuentan contra la cuota igual que uno exitoso — EAS cobra por intento, no por resultado.
+## Estado actual — sin pendientes (2026-08-31)
+
+**La tabla está vacía.** El build `versionCode 10014` (`8850317d-…`, 2026-08-29) cubrió las cinco
+filas que había, y las cinco quedaron verificadas en dispositivo real (`SM-S931B`):
+
+| Spec | Qué se verificó | Dónde consta |
+|---|---|---|
+| 76 | `TC-076-08`: logs agrupados por fecha y "Limpiar logs" sin resucitar el segmento | `docs/testing/test-076-arranque-tema-diagnostico.md` |
+| 78 | Los 6 casos móviles del consentimiento, **contra producción** | `docs/testing/test-078-consentimiento-informado.md` |
+| 80 | Ronda completa 10/10, incluidos sourcemaps y `ota_updates.is_enabled: true` | `docs/testing/test-080-expo-updates-canal-ota.md` |
+| 81 | 9 aprobados, 1 no ejecutado por redundante | `docs/testing/test-081-resiliencia-red.md` |
+
+La de spec 78 solo fue posible **después** de desplegar su backend ese mismo día: hasta entonces
+`/api/consents` devolvía 404 en producción y la app no podía registrar ninguna constancia
+(ver `docs/reports/deploys/01_plan_despliegue_specs_78_79.md`).
+
+## Cuota de EAS
+
+**Consultada el 2026-08-31** con `eas build:list`: **13 builds de Android en el ciclo de agosto**,
+de los cuales 1 quedó `canceled` (no debería facturarse) y 2 `errored` — los dos intentos fallidos
+del spec 80 (resolución de `@sentry/cli` bajo pnpm, y slug de proyecto incorrecto). **EAS cobra por
+intento, no por resultado**: un build fallido gasta cupo igual que uno exitoso.
+
+Plan Free: 15 Android + 15 iOS al mes, cupos independientes y no intercambiables. Quedan ~2-3
+Android en este ciclo. Por eso existe la verificación previa obligatoria de `mobile/CLAUDE.md`
+(§ "Verificación previa a un build EAS"): cada fallo evitable es cupo real perdido.
 
 ## Convención de esta lista
 
@@ -34,20 +45,7 @@ archiva) en cuanto un build lo cubre y la ronda manual correspondiente lo confir
 
 | # | Cambio | Commit | Spec / caso que lo verifica | Requiere build nativo (no solo JS) |
 |---|--------|--------|------------------------------|--------------------------------------|
-| — | *(tabla vacía)* | — | — | — |
-
-> **Sin pendientes al 2026-08-31.** El build `versionCode 10014` cubrió las 5
-> filas que había, y las cinco quedaron verificadas en dispositivo real:
-> spec 76 (`TC-076-08`), spec 78 (los 6 casos móviles, contra producción),
-> spec 80 (ronda completa, 10/10) y spec 81 (9 aprobados, 1 descartado por
-> redundante).
->
-> Desde este build el canal OTA es efectivo, así que **los cambios puramente JS
-> ya no se acumulan aquí**: se publican con `eas update` siguiendo el
-> procedimiento de `mobile/docs/ota-updates.md` — con su advertencia sobre las
-> variables de entorno, que costó un incidente real el 2026-08-30. Esta tabla
-> vuelve a llenarse solo con cambios que exijan build nativo (dependencias
-> nativas, permisos, plugins de config, cambio de `version`).
+| — | *(sin pendientes)* | — | — | — |
 
 ## Política: cuándo generar el siguiente build
 
