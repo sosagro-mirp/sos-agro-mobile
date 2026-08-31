@@ -21,6 +21,7 @@ import {
   getOtaStatus,
   type CheckOutcome,
 } from "../../src/lib/otaUpdates";
+import { captureError } from "../../src/lib/sentry";
 import { useSyncStatusStore } from "../../src/store/useSyncStatusStore";
 import { useInstrumentSurveyStore } from "../../src/store/useInstrumentSurveyStore";
 
@@ -62,6 +63,7 @@ export default function DevLogsScreen() {
   const [checkingOta, setCheckingOta] = useState(false);
   const [otaCheckResult, setOtaCheckResult] = useState<CheckOutcome | null>(null);
   const [otaDownloaded, setOtaDownloaded] = useState(false);
+  const [sentryTestResult, setSentryTestResult] = useState<string | null>(null);
   const [applyingOta, setApplyingOta] = useState(false);
 
   // Bug encontrado en la ronda manual del spec 76 (TC-076-08, 2026-08-29): esta
@@ -98,6 +100,26 @@ export default function DevLogsScreen() {
     const content = await logger.exportLogs();
     if (!content) return;
     Share.share({ message: content });
+  }
+
+  // Spec 80, TC-080-003 / TC-080-008 — disparador de diagnóstico para
+  // verificar la cadena de reporte a Sentry desde un build real: que el
+  // contexto `ota_updates.is_enabled` llegue en `true` (antes de este spec
+  // llegaba en `false` desde todas las tablets) y que el stack trace de un
+  // bundle entregado por OTA aparezca simbolizado (`src/…`) y no minificado.
+  //
+  // Vive en esta pantalla, que está oculta tras 5 toques en el título, y solo
+  // dispara al pulsarlo: el bundle NO queda roto. Es lo que permite verificar
+  // los sourcemaps sin publicar código defectuoso al canal `preview`, que es
+  // el de las tablets de campo (no hay canal de staging — ver spec/backlog.md).
+  function handleTestSentryError() {
+    const stamp = new Date().toISOString();
+    setSentryTestResult(`Evento enviado: ${stamp}`);
+    captureError(
+      new Error(`[TC-080-003/008] Error de prueba lanzado desde /dev/logs — ${stamp}`),
+      { origin: 'dev-logs-manual-test', triggeredAt: stamp },
+    );
+    logger.info(`[DevLogs] error de prueba enviado a Sentry — ${stamp}`);
   }
 
   async function handleViewFarmers() {
@@ -321,6 +343,14 @@ export default function DevLogsScreen() {
             </Pressable>
             {farmerClearResult ? (
               <Text style={styles.devResult}>{farmerClearResult}</Text>
+            ) : null}
+
+            {/* Spec 80 — diagnóstico de la cadena de reporte a Sentry (TC-080-003 / TC-080-008) */}
+            <Pressable style={styles.actionButton} onPress={handleTestSentryError}>
+              <Text style={styles.actionText}>Provocar error de prueba (Sentry)</Text>
+            </Pressable>
+            {sentryTestResult ? (
+              <Text style={styles.devResult}>{sentryTestResult}</Text>
             ) : null}
           </View>
         </ScrollView>
