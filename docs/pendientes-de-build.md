@@ -6,6 +6,11 @@
 > cupo limitado (`https://expo.dev/accounts/{{cuenta}}/settings/billing`), así que no se genera un
 > build por cada commit: se acumulan aquí hasta que valga la pena gastar uno.
 >
+> **Actualización 2026-08-31:** la fila del **spec 78** (consentimiento) se retiró tras
+> re-verificar sus 6 casos móviles en APK real contra producción — posible solo después de
+> desplegar el backend ese mismo día (hasta entonces `/api/consents` daba 404 en producción). Ver
+> `docs/testing/test-078-consentimiento-informado.md` → "Re-verificación en APK real".
+>
 > **Build `versionCode 10014` generado el 2026-08-29** (build `8850317d-…`, rama
 > `deploy/preview-build-batch`) e instalado en el `SM-S931B`. Cubrió las 5 filas que había en esta
 > tabla. Las filas 1, 2 y 5 ya se verificaron en dispositivo y **se retiraron**; queda solo lo que
@@ -29,8 +34,7 @@ archiva) en cuanto un build lo cubre y la ronda manual correspondiente lo confir
 
 | # | Cambio | Commit | Spec / caso que lo verifica | Requiere build nativo (no solo JS) |
 |---|--------|--------|------------------------------|--------------------------------------|
-| 1 | Consentimiento informado offline en mobile: pantalla/modal de consentimiento, caché del documento activo, cola de sync (`processConsentEntry`), aviso persistente en el orquestador y migración SQLite `0012_add_consent.sql`. `[DONE]`, pero sus casos mobile **solo se probaron en Expo Go** — nunca en un APK real | `d7b30f3`, `6ad2084`, `e988ff8`, `f90e151` | Spec 78 — repetir `TC-078-010, 011, 012, 013, 017, 020` en build real | Ya cubierto por el build 10014 — **falta ejecutar la ronda** |
-| 2 | Canal OTA + sourcemaps de Sentry para bundles OTA — **6 de 10 casos verificados**. ✅ En dispositivo (`SM-S931B`, 10014): `TC-080-002` (canal activo), `TC-080-004` (llegada automática en arranque en frío), `TC-080-005` (botón manual, 3 veces), `TC-080-006`, `TC-080-007` (las guardas de "Reiniciar ahora" protegen encuesta en curso y cola pendiente), `TC-080-010`. ⬜ Falta: `TC-080-001` (exige Expo Go, entorno distinto — no depende de este build), `TC-080-003` (`ota_updates.is_enabled` en Sentry — no hay eventos recientes, exige provocar un error controlado), `TC-080-008` (crash simbolizado — **exige publicar un crash deliberado al canal de las tablets**), `TC-080-009` (rollback — reinterpretar: las publicaciones vivas son fixes reales del spec 81, no de prueba) | `09ae322`, `87b9bc7`, `db1cdd7`, `b574690`, `e94b1df` | Spec 80 — `docs/testing/test-080-expo-updates-canal-ota.md` | Ya cubierto por el build 10014 — **falta cerrar 4 casos** |
+| 1 | Canal OTA + sourcemaps de Sentry para bundles OTA — **6 de 10 casos verificados**. ✅ En dispositivo (`SM-S931B`, 10014): `TC-080-002` (canal activo), `TC-080-004` (llegada automática en arranque en frío), `TC-080-005` (botón manual, 3 veces), `TC-080-006`, `TC-080-007` (las guardas de "Reiniciar ahora" protegen encuesta en curso y cola pendiente), `TC-080-010`. ⬜ Falta: `TC-080-001` (exige Expo Go, entorno distinto — no depende de este build), `TC-080-003` (`ota_updates.is_enabled` en Sentry — no hay eventos recientes, exige provocar un error controlado), `TC-080-008` (crash simbolizado — **exige publicar un crash deliberado al canal de las tablets**), `TC-080-009` (rollback — reinterpretar: las publicaciones vivas son fixes reales del spec 81, no de prueba) | `09ae322`, `87b9bc7`, `db1cdd7`, `b574690`, `e94b1df` | Spec 80 — `docs/testing/test-080-expo-updates-canal-ota.md` | Ya cubierto por el build 10014 — **falta cerrar 4 casos** |
 
 ## Política: cuándo generar el siguiente build
 
