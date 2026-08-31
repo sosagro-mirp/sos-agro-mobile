@@ -163,6 +163,54 @@ describe('Criterio 7 — el envoltorio degrada sin romper cuando no hay módulo 
       expect.objectContaining({ outcome: 'unavailable' }),
     );
   });
+
+  // ── Expo Go real (hallazgo de TC-080-001, 2026-08-31) ──────────────────
+  //
+  // Los dos casos de arriba simulan Expo Go haciendo que el `require`
+  // **lance**. Esa era la suposición del diseño original — y es falsa: en
+  // Expo Go el módulo se importa sin problema. Por eso ambos tests pasaban
+  // mientras la pantalla, en un Expo Go de verdad, reportaba «OTA activo: sí»
+  // con el `updateId` del bundle de Metro y el botón terminaba en error.
+  //
+  // Estos casos reproducen el comportamiento real: módulo presente, pero con
+  // el `runtimeVersion` de Expo Go (`exposdk:*`) en vez del de la app.
+  describe('Expo Go real: el módulo carga, pero no hay canal detrás', () => {
+    const expoGoUpdates = {
+      isEnabled: true,
+      channel: '',
+      runtimeVersion: 'exposdk:54.0.0',
+      updateId: '047fdcc7-0000-4000-8000-0000000000ff',
+      createdAt: new Date('2026-08-31T21:03:20.000Z'),
+      isEmbeddedLaunch: false,
+      checkForUpdateAsync: jest.fn(() => {
+        throw new Error('checkForUpdateAsync is not supported in Expo Go');
+      }),
+      fetchUpdateAsync: jest.fn(),
+      reloadAsync: jest.fn(),
+    };
+
+    beforeEach(() => {
+      jest.resetModules();
+      jest.doMock('expo-updates', () => expoGoUpdates, { virtual: true });
+    });
+
+    it('reporta `available: false` en vez de los datos del propio Expo Go', () => {
+      const status = getOtaStatus();
+      expect(status.available).toBe(false);
+      expect(status.isEnabled).toBeNull();
+      expect(status.updateId).toBeNull();
+      expect(status.runtimeVersion).toBeNull();
+    });
+
+    it('devuelve `unavailable` sin llegar a llamar a la API nativa', async () => {
+      await expect(checkAndFetchUpdate()).resolves.toEqual(
+        expect.objectContaining({ outcome: 'unavailable' }),
+      );
+      // Lo que importa: no se invoca la API. Antes sí se invocaba, fallaba, y
+      // su `catch` mandaba a Sentry un error que no es un problema real.
+      expect(expoGoUpdates.checkForUpdateAsync).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe('Criterio 5 — buscar y descargar una actualización', () => {

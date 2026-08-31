@@ -57,6 +57,31 @@ function loadUpdatesModule(): typeof import('expo-updates') | null {
 }
 
 /**
+ * ¿Estamos dentro de Expo Go? Hallazgo de la ronda manual del spec 80
+ * (`TC-080-001`, 2026-08-31): el diseño original asumía que en Expo Go el
+ * `require('expo-updates')` fallaría y `loadUpdatesModule()` devolvería
+ * `null`. **No falla**: el módulo se importa sin problema. Lo que revienta es
+ * la llamada a `checkForUpdateAsync()`, ya sin canal real detrás.
+ *
+ * El efecto era doble y ambos rompían el criterio 7:
+ *  1. La pantalla de diagnóstico reportaba «OTA activo: sí» y pintaba el
+ *     `updateId` del propio bundle de Metro, como si el canal estuviera vivo.
+ *  2. El botón quedaba habilitado, fallaba, y su `catch` mandaba a Sentry un
+ *     error que no es un problema real — ruido permanente en el panel.
+ *
+ * La señal para distinguirlo es el `runtimeVersion`: Expo Go reporta el suyo,
+ * basado en la versión del SDK (`exposdk:54.0.0`), mientras que la app usa
+ * `runtimeVersion: { policy: 'appVersion' }` en `app.config.ts` y por tanto
+ * reporta su `version` (`1.0.0`). Se prefiere esta señal sobre
+ * `Constants.executionEnvironment` para no añadir otra dependencia a un
+ * módulo que ya se carga de forma diferida a propósito.
+ */
+function isExpoGoRuntime(Updates: typeof import('expo-updates')): boolean {
+  return typeof Updates.runtimeVersion === 'string'
+    && Updates.runtimeVersion.startsWith('exposdk:');
+}
+
+/**
  * Estado actual del canal OTA, leído directamente del runtime — nunca de la
  * configuración declarada en `app.config.ts`. Es la causa raíz de este spec:
  * el bloque `updates` puede estar perfectamente escrito y el canal seguir
@@ -65,7 +90,7 @@ function loadUpdatesModule(): typeof import('expo-updates') | null {
  */
 export function getOtaStatus(): OtaStatus {
   const Updates = loadUpdatesModule();
-  if (!Updates) {
+  if (!Updates || isExpoGoRuntime(Updates)) {
     return {
       available: false,
       isEnabled: null,
@@ -128,7 +153,11 @@ export function canApplyUpdateNow(input: ApplyUpdateGuardInput): ApplyUpdateGuar
  */
 export async function checkAndFetchUpdate(): Promise<CheckResult> {
   const Updates = loadUpdatesModule();
-  if (!Updates) {
+  // Mismo motivo que en `getOtaStatus`: en Expo Go el módulo existe pero la
+  // API falla. Cortar aquí evita el error espurio y, sobre todo, el
+  // `captureError` del `catch` de abajo, que ensuciaba Sentry con un fallo
+  // que no lo es (ver `isExpoGoRuntime`).
+  if (!Updates || isExpoGoRuntime(Updates)) {
     return { outcome: 'unavailable' };
   }
 
@@ -157,7 +186,7 @@ export async function checkAndFetchUpdate(): Promise<CheckResult> {
  */
 export async function applyDownloadedUpdate(): Promise<void> {
   const Updates = loadUpdatesModule();
-  if (!Updates) return;
+  if (!Updates || isExpoGoRuntime(Updates)) return;
 
   try {
     logger.info('[OTA] Aplicando actualización descargada, recargando app');
