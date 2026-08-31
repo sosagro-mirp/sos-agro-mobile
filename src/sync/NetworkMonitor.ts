@@ -1,6 +1,7 @@
 import NetInfo, { type NetInfoState } from '@react-native-community/netinfo';
 import { useSyncStatusStore } from '../store/useSyncStatusStore';
 import { SyncQueueService } from './SyncQueueService';
+import { pingApi } from '../api/health';
 import { logger } from '../lib/logger';
 
 class NetworkMonitorClass {
@@ -61,6 +62,38 @@ class NetworkMonitorClass {
   // offline; `null` is treated as reachable.
   private static isReachable(state: NetInfoState): boolean {
     return state.isConnected === true && state.isInternetReachable !== false;
+  }
+
+  /**
+   * Spec 81, Fase 4 — sondeo **bajo demanda** (nunca en bucle) que distingue
+   * "sin conexión" de "servidor inalcanzable". Se llama tras un `NetworkError`
+   * con NetInfo declarando conectividad: el criterio de `isReachable()` de
+   * arriba (deliberadamente laxo, ver comentario) puede decir "hay red" con
+   * un portal cautivo, DNS caído o el backend caído — casos donde
+   * `httpClient` sí ve un `NetworkError` real. `GET /api/health` es el único
+   * dato que lo confirma.
+   *
+   * No toca `previouslyReachable` ni dispara `processAll()`: eso sigue
+   * siendo responsabilidad exclusiva de `handleStateChange()` ante una
+   * transición real de NetInfo.
+   */
+  async probeReachability(): Promise<void> {
+    const state = await NetInfo.fetch();
+    if (!NetworkMonitorClass.isReachable(state)) {
+      // NetInfo ya dice que no hay red — no hace falta el health-check, y
+      // publicar 'offline' aquí es consistente con `setOnline()`.
+      useSyncStatusStore.getState().setOnline(false);
+      return;
+    }
+
+    const ok = await pingApi();
+    const next = ok ? 'online' : 'server_unreachable';
+
+    logger.info(
+      `[NetworkMonitor] probeReachability isConnected=${state.isConnected} isInternetReachable=${state.isInternetReachable} pingApi=${ok} → reachability=${next}`,
+    );
+
+    useSyncStatusStore.getState().setReachability(next);
   }
 }
 

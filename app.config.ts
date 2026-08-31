@@ -21,6 +21,13 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ...config,
     name: 'Sos Agro 4.C',
     slug: 'sosagro-characterization',
+    // Spec 80: con runtimeVersion.policy = 'appVersion' (ver más abajo), este
+    // campo ES el runtime del canal OTA. Subirlo sin compilar e instalar un
+    // APK nuevo corta el canal para todo binario ya en campo, en silencio y
+    // sin error visible: el update se publica, el servidor lo sirve para el
+    // runtime nuevo, y ningún dispositivo en 1.0.0 lo recibe jamás. Regla de
+    // oro (mobile/docs/ota-updates.md): no tocar `version` salvo que se vaya
+    // a compilar e instalar un build nativo nuevo en las tablets.
     version: '1.0.0',
     // Spec 74, Fase 10 (aprobada 2026-08-26): antes 'portrait' bloqueaba
     // rotación en toda la app. Tablet necesita landscape para el layout de
@@ -39,11 +46,22 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     // funcionar sola. En iOS ya se aplicaría hoy.
     userInterfaceStyle: 'automatic',
     scheme: 'sosagro',
+    // Spec 80, decisión del 2026-08-30: se mantiene 'appVersion' en vez de
+    // pasar a 'fingerprint'. Cambio cero en configuración y un runtime legible
+    // en campo, a costa de que nada impide publicar por OTA JS que necesite un
+    // módulo nativo ausente, y de que `version` (arriba) se vuelve un campo
+    // peligroso — ver su comentario.
     runtimeVersion: { policy: 'appVersion' },
     updates: {
       url: 'https://u.expo.dev/a9915da7-c235-4537-a1a0-de31ac73d63b',
       enabled: true,
       fallbackToCacheTimeout: 0,
+      // Spec 80: verificar al cargar la app. En una zona sin cobertura no
+      // bloquea el arranque (fallbackToCacheTimeout: 0 ya lo garantiza); si
+      // hay red, la descarga corre en segundo plano y queda lista para el
+      // siguiente arranque en frío, o para aplicarse a mano desde el botón
+      // "Buscar actualización ahora" de la pantalla de diagnóstico.
+      checkAutomatically: 'ON_LOAD',
     },
     ios: {
       // Spec 74, Fase 10 — layout de dos paneles en tablet.
@@ -123,7 +141,13 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         '@sentry/react-native/expo',
         {
           organization: 'instituto-tecnologico-metropol',
-          project: 'sosagro-mobile',
+          // Corregido en el spec 80 (2026-08-29): el slug real del proyecto
+          // en Sentry es 'react-native', no 'sosagro-mobile'. Con el slug
+          // equivocado, la subida de sourcemaps fallaba en Gradle con
+          // "sentry reported an error: One or more projects are invalid
+          // (http status: 400)" — incluso con el binario de sentry-cli ya
+          // resuelto correctamente.
+          project: 'react-native',
         },
       ],
       [

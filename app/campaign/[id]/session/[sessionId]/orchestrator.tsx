@@ -15,6 +15,8 @@ import { surveyDraftStore } from "../../../../../src/storage/surveyDraftStore";
 import { syncQueueStorage } from "../../../../../src/storage/syncQueue";
 import { instrumentCacheStorage } from "../../../../../src/storage/instrumentCache";
 import { SyncQueueService } from "../../../../../src/sync/SyncQueueService";
+import { NetworkMonitor } from "../../../../../src/sync/NetworkMonitor";
+import { logger } from "../../../../../src/lib/logger";
 import { checkDuplicate } from "../../../../../src/storage/duplicateDetection";
 import { getNextStepOffline } from "../../../../../src/lib/getNextStepOffline";
 import { extractCropsOffline } from "../../../../../src/lib/extractCropsOffline";
@@ -29,6 +31,7 @@ import { sessionCropsStorage } from "../../../../../src/storage/sessionCropsStor
 import { DuplicateAlertModal } from "../../../../../src/components/campaign/DuplicateAlertModal";
 import { DocumentCollisionModal } from "../../../../../src/components/campaign/DocumentCollisionModal";
 import { NetworkError } from "../../../../../src/api/httpClient";
+import { withNetworkRetry } from "../../../../../src/lib/withNetworkRetry";
 import { advanceWithinCampaign, returnToPreSurvey } from "../../../../../src/lib/campaignNavigation";
 import { Fonts } from "../../../../../src/theme/fonts";
 import { useTheme } from "../../../../../src/theme/ThemeProvider";
@@ -47,12 +50,17 @@ export default function OrchestratorScreen() {
   const store = useCampaignSessionStore();
   const { downloadAndCache, instruments } = useCachedInstrumentsStore();
   const { initializeSurvey } = useInstrumentSurveyStore();
-  const { isOnline } = useSyncStatusStore();
+  const { isOnline, reachability } = useSyncStatusStore();
 
   const resolvedSessionId = sessionId !== "new" ? sessionId : store.sessionId;
 
   const [screenState, setScreenState] = useState<ScreenState>('loading');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // Spec 81, Fase 2 — número de reintento en curso (0 = ninguno) durante la
+  // extracción de agricultor/cultivos. Solo cambia mientras `screenState`
+  // sigue en 'loading': la UI muestra "reintentando" en vez del error de
+  // "sin conexión" que antes aparecía en el primer microcorte.
+  const [retryAttempt, setRetryAttempt] = useState(0);
   const [duplicatePending, setDuplicatePending] = useState<{
     instrument: { instrumentId: string; name: string };
     stepOrder: number;
@@ -251,6 +259,7 @@ export default function OrchestratorScreen() {
 
     setScreenState('loading');
     setErrorMessage(null);
+    setRetryAttempt(0);
 
     try {
       const { injectionPhase, s1SurveyId, s2SurveyId } =
@@ -275,7 +284,16 @@ export default function OrchestratorScreen() {
             );
           }
           try {
-            const { farmer } = await extractFarmer(realS1SurveyId);
+            // Spec 81, Fase 2 — un NetworkError aquí ya no revienta al
+            // primer microcorte: se reintenta con backoff antes de mostrar
+            // cualquier pantalla de error (ver backlog "NetworkError
+            // intermitente en extract-farmer muestra 'Sin conexión' con red
+            // sana").
+            const { farmer } = await withNetworkRetry(
+              () => extractFarmer(realS1SurveyId),
+              { onRetry: setRetryAttempt },
+            );
+            setRetryAttempt(0);
             await cacheFarmerIdentity({
               farmerId: farmer.farmerId,
               name: farmer.name,
@@ -362,7 +380,11 @@ export default function OrchestratorScreen() {
               `No se pudo sincronizar la encuesta S2 (${s2SurveyId}) antes de extraer los cultivos`,
             );
           }
-          const cropsResult = await extractCrops(realS2SurveyId);
+          const cropsResult = await withNetworkRetry(
+            () => extractCrops(realS2SurveyId),
+            { onRetry: setRetryAttempt },
+          );
+          setRetryAttempt(0);
           if (resolvedSessionId) {
             await sessionCropsStorage.save(resolvedSessionId, cropsResult.crops);
           }
@@ -416,6 +438,13 @@ export default function OrchestratorScreen() {
     } catch (err) {
       if (err instanceof NetworkError) {
         setScreenState('offline');
+        // Spec 81, Fase 4 — sondeo bajo demanda: un NetworkError con NetInfo
+        // declarando conectividad puede ser "servidor inalcanzable", no
+        // "sin conexión". `probeReachability()` corrige el estado publicado
+        // sin bloquear la navegación a la pantalla de error.
+        NetworkMonitor.probeReachability().catch((probeErr) =>
+          logger.error('[Orchestrator] probeReachability failed', probeErr),
+        );
       } else {
         const isInjectionError =
           useCampaignSessionStore.getState().injectionPhase !== 'none';
@@ -673,6 +702,31 @@ export default function OrchestratorScreen() {
     router.back();
   }, [router]);
 
+  // Spec 81, Fase 3 — el "Reintentar" de las pantallas de error fuerza un
+  // `processAll()` (y resetea el tope de fallos consecutivos) antes de
+  // reejecutar `run()`. Sin esto, tras 5 fallos de red seguidos
+  // `processAll()` se congela en silencio (`consecutiveNetworkFailures >=
+  // MAX_CONSECUTIVE_NETWORK_FAILURES`) hasta una transición offline→online
+  // real de NetInfo — que en campo, con la radio nunca totalmente caída, no
+  // llega nunca. `processSurveyNow()` ya no vuelve a chocar contra ese tope.
+  const handleRetry = useCallback(async () => {
+    SyncQueueService.resetNetworkFailures();
+    // Spec 81 — corrección de auditoría (docs/reports/auditorias/37-…): este
+    // `processAll()` se espera antes de `run()`. Sin el `await`, quedaba
+    // corriendo en paralelo con `processSurveyNow()` (dentro de `run()`), que
+    // ahora resetea `in_flight` → `pending` por `surveyId`: si `processAll()`
+    // ya había tomado esa misma entrada y estaba esperando la respuesta del
+    // POST, el reset se la devolvía al camino interactivo y ambos la volvían
+    // a procesar — ventana real de doble `POST /api/surveys` (criterio 11).
+    try {
+      await SyncQueueService.processAll();
+    } catch (err) {
+      logger.error('[Orchestrator] processAll on manual retry failed', err);
+    }
+    hasStarted.current = false;
+    run();
+  }, [run]);
+
   // ── effects ────────────────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -685,22 +739,31 @@ export default function OrchestratorScreen() {
   // Skip if the duplicate modal is open — user is in a decision flow.
   useEffect(() => {
     if (isOnline && screenState === 'offline') {
-      hasStarted.current = false;
-      run();
+      handleRetry();
     }
   }, [isOnline]);
 
   // ── render ─────────────────────────────────────────────────────────────────
 
   if (screenState === 'offline') {
+    // Spec 81, Fase 4 — mismo screenState, dos mensajes: "sin conexión" solo
+    // cuando la radio realmente está caída. Con red pero backend
+    // inalcanzable, decir "sin conexión" mandaba al encuestador a buscar
+    // señal en vano (ver backlog "NetworkError intermitente en
+    // extract-farmer muestra 'Sin conexión' con red sana").
+    const serverUnreachable = reachability === 'server_unreachable';
     return (
       <SafeAreaView style={styles.root}>
         <ErrorState
           icon={WifiOff}
-          title="Sin conexión"
-          description={"Necesitas conexión para continuar al siguiente paso.\nEl paso anterior ya fue guardado."}
+          title={serverUnreachable ? "No pudimos contactar el servidor" : "Sin conexión"}
+          description={
+            serverUnreachable
+              ? "Estamos reintentando. El paso anterior ya fue guardado."
+              : "Necesitas conexión para continuar al siguiente paso.\nEl paso anterior ya fue guardado."
+          }
           primaryLabel="Reintentar"
-          onPrimary={() => { hasStarted.current = false; run(); }}
+          onPrimary={handleRetry}
         />
       </SafeAreaView>
     );
@@ -714,7 +777,7 @@ export default function OrchestratorScreen() {
           title="No se pudo identificar al encuestado"
           description="No se pudo leer los datos del encuestado. Conéctate para continuar o continúa sin identificar."
           primaryLabel="Reintentar"
-          onPrimary={() => { hasStarted.current = false; run(); }}
+          onPrimary={handleRetry}
           secondaryLabel="Continuar sin identificar"
           onSecondary={() => {
             store.completeS2Injection();
@@ -735,7 +798,7 @@ export default function OrchestratorScreen() {
           errorDetail={errorMessage}
           description={"Debes identificar al encuestado antes de continuar.\nVuelve y regístralo si aún no existe en el sistema."}
           primaryLabel="Reintentar"
-          onPrimary={() => { hasStarted.current = false; run(); }}
+          onPrimary={handleRetry}
           secondaryLabel="Volver a identificar"
           secondaryIcon={ChevronLeft}
           onSecondary={() => returnToPreSurvey(router, id)}
@@ -752,7 +815,7 @@ export default function OrchestratorScreen() {
           title="Error inesperado"
           errorDetail={errorMessage}
           primaryLabel="Reintentar"
-          onPrimary={() => { hasStarted.current = false; run(); }}
+          onPrimary={handleRetry}
         />
       </SafeAreaView>
     );
@@ -794,7 +857,17 @@ export default function OrchestratorScreen() {
       />
       <View style={styles.center}>
         <SpinningLoader size={42} color={colors.brand} />
-        <Text style={styles.loadingLabel}>Cargando siguiente paso…</Text>
+        <Text style={styles.loadingLabel}>
+          {retryAttempt > 0
+            // Spec 81 — corrección de auditoría
+            // (docs/reports/auditorias/37-…): `withNetworkRetry` llama a
+            // `onRetry(attempt)` con el intento que acaba de fallar, justo
+            // antes de correr `attempt + 1` — mostrar `retryAttempt` a secas
+            // nunca llegaba a "(3 de 3)" aunque sí corriera el tercer
+            // intento.
+            ? `Reintentando (${retryAttempt + 1} de 3)…`
+            : "Cargando siguiente paso…"}
+        </Text>
         {stepLabel ? <Text style={styles.loadingSubLabel}>{stepLabel}</Text> : null}
         {store.currentStep ? (
           <View style={styles.loadingTrack}>

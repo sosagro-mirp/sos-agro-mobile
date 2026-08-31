@@ -333,16 +333,28 @@ El test E2E cubre: login → campaña → pre-encuesta → responder → kill de
 
 No borrar ni modificar tests existentes sin instrucción explícita.
 
+### Canal OTA (expo-updates)
+
+Desde el spec 80 (2026-08-29), `expo-updates` está instalado y el canal OTA es efectivo: la mayoría
+de los cambios puramente JS **ya no exigen build EAS** ni vuelta física por las tablets — se publican
+con `eas update`. Ver `mobile/docs/ota-updates.md` para el procedimiento completo (qué va por OTA,
+comando de publicación, verificación, rollback) y la regla de oro: **nunca tocar `version` en
+`app.config.ts` salvo que se vaya a compilar e instalar un build nativo nuevo**.
+
+**Pendiente del spec 80:** la Fase 4 (sourcemaps de Sentry para bundles OTA) ya tiene
+`SENTRY_AUTH_TOKEN` registrado como secreto de EAS y `SENTRY_DISABLE_AUTO_UPLOAD: false` en
+`eas.json`; falta verificarlo con un build y una publicación OTA reales (Fase 6).
+
 ### Pendientes de build EAS
 
-Este repositorio **no tiene OTA** (`expo-updates` no está instalado — ver `spec/backlog.md`), así
-que un cambio de código, aunque sea puramente JS, no llega a un APK ya instalado sin un build EAS
-nuevo. El plan de EAS tiene cupo limitado por mes, así que no se genera un build por cada commit.
+`mobile/docs/pendientes-de-build.md` lleva la lista de cambios que **sí** exigen build nativo (no
+alcanza con OTA — dependencias nativas, permisos, plugins de config, cambio de `version`; ver
+`mobile/docs/ota-updates.md` para el criterio completo) y que todavía no se han verificado en un
+build real. El plan de EAS tiene cupo limitado por mes, así que no se genera un build por cada
+cambio de ese tipo.
 
-- **`mobile/docs/pendientes-de-build.md`** lleva la lista de cambios ya committeados sin verificar
-  todavía en un build real.
-- Al cerrar cualquier cambio de código en `mobile/` que solo pueda probarse en un build EAS (no en
-  Expo Go), **agregar una fila a esa tabla** antes de continuar.
+- Al cerrar cualquier cambio de código en `mobile/` que exija build nativo, **agregar una fila a esa
+  tabla** antes de continuar.
 - **Cuando la tabla acumule 3 o más filas pendientes, o alguna sea bloqueante para una fecha
   comprometida** (ej. una ventana de instalación en tablets), señalarlo al usuario y **proponer**
   generar un build EAS `preview` que cubra todos los pendientes a la vez. Nunca generarlo sin esa
@@ -351,6 +363,43 @@ nuevo. El plan de EAS tiene cupo limitado por mes, así que no se genera un buil
   hayan acumulado.
 - Al confirmarse un build, vaciar de la tabla las filas que cubre y registrar el `versionCode`
   resultante en el archivo `docs/testing/test-NNN` de cada spec afectado.
+
+### Verificación previa a un build EAS
+
+> Añadido tras el spec 80 (2026-08-29): un build `preview` falló en la fase `Run gradlew` por un
+> problema de resolución de `@sentry/cli` bajo pnpm (`A problem occurred starting process
+> '.../node_modules/@sentry/cli/bin/sentry-cli'`) — un error que **sí era detectable localmente**
+> sin gastar cuota, y que ya se había topado una vez antes (2026-07-23, commit `b73119f`) sin
+> diagnosticarse a fondo. El cupo de EAS es limitado y compartido entre Android e iOS: cada build
+> fallido evitable es cupo real perdido.
+
+**Antes de proponer o lanzar cualquier `eas build`**, correr esta secuencia y no proceder hasta que
+todo pase:
+
+1. `pnpm typecheck && pnpm lint && pnpm test` — en verde, sin excepciones nuevas.
+2. `npx expo-doctor` — 18/18 (o el total vigente) sin issues.
+3. `npx eas-cli build:inspect -p android -s pre-build -o <tmp-dir> -e <profile> --force` — corre
+   `expo prebuild` y resuelve credenciales **sin subir nada a la cola de EAS** (no consume cupo).
+   Detecta errores de configuración (`app.config.ts`, plugins, credenciales) antes de la fase nativa.
+4. **Si hay Android SDK local** (`echo $ANDROID_HOME`, `ls ~/Library/Android/sdk` o equivalente),
+   **`df -h /` muestra al menos ~6 GB libres**, y el cambio toca algo que solo falla en la fase de
+   Gradle (dependencias nativas nuevas, plugins de config, tareas de Gradle de terceros como la de
+   Sentry) — correr `npx eas-cli build:inspect -p android -s post-build -o <tmp-dir> -e <profile>
+   --force`, que ejecuta el **build nativo completo** (Gradle + Android SDK) en la máquina local.
+   Esto sí reproduce fielmente fallos de Gradle que `pre-build` no detecta, y tampoco consume cupo
+   de EAS. Es más lento (varios minutos) y **pesado en disco**: la primera vez descarga la
+   distribución de Gradle completa a `~/.gradle` (~4 GB) además de copiar el proyecto entero a
+   `<tmp-dir>`. Verificar espacio libre **antes** de lanzarlo — se agotó el disco corriendo esto el
+   2026-08-29 (quedaba menos margen del que parecía) y tumbó otras herramientas hasta liberar
+   espacio. Borrar `<tmp-dir>` en cuanto termine la inspección, esté en verde o no.
+5. Si algo de lo anterior revela un error, diagnosticar y corregir **antes** de proponer el build al
+   usuario — no proponer "probemos en la nube a ver qué pasa" cuando el error es reproducible local.
+6. Recién entonces, señalar al usuario lo que cubre el build propuesto (specs, filas de
+   `pendientes-de-build.md`) y pedir su autorización explícita — sigue sin haber excepción a esa regla.
+
+Este flujo no reemplaza el build real: `pre-build` no ejecuta Gradle, y ni siquiera `post-build` local
+garantiza paridad 100% con el worker Linux de EAS (rutas, variante de OS, cachés). Pero cualquier
+fallo de configuración, dependencias o de las primeras fases de Gradle debería aparecer aquí primero.
 
 ---
 

@@ -25,7 +25,25 @@ export function captureError(error: unknown, context?: Record<string, unknown>):
   try {
     const Sentry = require('@sentry/react-native');
     Sentry.withScope((scope: { setExtras: (e: Record<string, unknown>) => void }) => {
-      if (context) scope.setExtras(context);
+      // Spec 80: adjunta el update en curso al contexto del evento. Sin esto,
+      // un crash provocado por un bundle publicado por OTA es indistinguible
+      // de uno del bundle embebido — y no se puede atribuir a la publicación
+      // concreta que lo introdujo. `require` diferido para evitar el ciclo de
+      // módulos con `otaUpdates.ts` (que a su vez importa `captureError`).
+      let otaExtras: Record<string, unknown> = {};
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { getOtaStatus } = require('./otaUpdates');
+        const ota = getOtaStatus();
+        otaExtras = {
+          ota_updateId: ota.updateId,
+          ota_channel: ota.channel,
+          ota_isEmbeddedLaunch: ota.isEmbeddedLaunch,
+        };
+      } catch {
+        // noop — no dejar que el contexto de OTA rompa el reporte del error real
+      }
+      scope.setExtras({ ...context, ...otaExtras });
       Sentry.captureException(error instanceof Error ? error : new Error(String(error)));
     });
   } catch {

@@ -27,6 +27,7 @@
     "expo-sqlite": "~16.0.10",
     "expo-status-bar": "~3.0.9",
     "expo-task-manager": "~14.0.9",
+    "expo-updates": "~29.0.20",
     "lucide-react-native": "^1.21.0",
     "react": "19.1.0",
     "react-native": "0.81.5",
@@ -36,8 +37,10 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@sentry/cli": "2.55.0",
     "@types/jest": "^29.5.12",
     "@types/react": "~19.1.17",
+    "babel-preset-expo": "54.0.12",
     "drizzle-kit": "^0.31.10",
     "eslint": "^9.39.5",
     "eslint-config-expo": "^10.0.0",
@@ -68,6 +71,7 @@
     "moduleNameMapper": {
       "^expo-sqlite$": "<rootDir>/src/__tests__/__mocks__/expo-sqlite.ts",
       "^expo-file-system/legacy$": "<rootDir>/src/__tests__/__mocks__/expo-file-system-legacy.ts",
+      "^expo-updates$": "<rootDir>/src/__tests__/__mocks__/expo-updates.ts",
       "^msw/node$": "<rootDir>/node_modules/msw/lib/node/index.js"
     },
     "testPathIgnorePatterns": [

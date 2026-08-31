@@ -148,6 +148,34 @@ export const syncQueueStorage = {
       .where(eq(syncQueue.status, 'in_flight'));
   },
 
+  // Spec 81, Fase 3 — variante acotada a un `surveyId`: `processSurveyNow()`
+  // la llama antes de consultar `getPendingBySurveyId()` para desatascar su
+  // propia entrada sin depender de un `processAll()` de fondo. Antes, una
+  // entrada dejada en `in_flight` por `resolveCampaignSession()` (sesión aún
+  // provisional) o por cualquier interrupción del camino interactivo solo se
+  // recuperaba en el `finally` de `processAll()` — que un `processSurveyNow()`
+  // aislado nunca ejecuta.
+  async resetInFlightToRetryBySurveyId(surveyId: string): Promise<void> {
+    await db
+      .update(syncQueue)
+      .set({ status: 'pending' })
+      .where(and(eq(syncQueue.surveyId, surveyId), eq(syncQueue.status, 'in_flight')));
+  },
+
+  // Spec 81, Fase 3 — corrección de auditoría
+  // (docs/reports/auditorias/37-…): variante acotada a un `id` de entrada
+  // específico, para `resolveCampaignSession()`. Un mismo `surveyId` puede
+  // tener más de una entrada en la cola (p. ej. una `survey` y una
+  // `skip-step`, o dos intentos de resolución de sesión distintos) —
+  // `resetInFlightToRetryBySurveyId()` habría devuelto a `pending` una
+  // entrada hermana que sigue legítimamente en vuelo.
+  async resetInFlightToRetryById(id: string): Promise<void> {
+    await db
+      .update(syncQueue)
+      .set({ status: 'pending' })
+      .where(and(eq(syncQueue.id, id), eq(syncQueue.status, 'in_flight')));
+  },
+
   async clearFailed(): Promise<number> {
     const result = await db
       .delete(syncQueue)
