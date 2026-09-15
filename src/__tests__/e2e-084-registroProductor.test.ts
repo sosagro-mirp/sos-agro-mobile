@@ -159,6 +159,7 @@ import { markSessionAsSynced } from '../api/campaignSessions';
 import { extractFarmer, extractCrops, DocumentIdCollisionError } from '../api/farmers';
 import { sessionCropsStorage } from '../storage/sessionCropsStorage';
 import { useSyncStatusStore } from '../store/useSyncStatusStore';
+import { useCampaignSessionStore } from '../store/useCampaignSessionStore';
 import { flattenSections } from '../lib/flattenSections';
 import { buildResponsesPayload } from '../lib/buildResponsesPayload';
 
@@ -330,6 +331,124 @@ describe('Criterio 6 — los borradores S1a y S1b siguen como antes', () => {
     await SyncQueueService.processAll();
 
     expect(mockExtractFarmer).not.toHaveBeenCalled();
+    expect(mockExtractCrops).toHaveBeenCalledWith('survey-1');
+  });
+});
+
+// ─── Colisión con el orquestador en primer plano ─────────────────────────────
+//
+// Auditoría 41 (hallazgo mayor 2), confirmado en el emulador el 2026-09-15:
+// con conexión, `enqueueSubmission()` dispara `processAll()` y el orquestador
+// llama a `processSurveyNow()` sobre la misma encuesta de Registro (o S1). Si
+// cualquiera de las dos corridas resolvía la colisión como `separate_person`,
+// el backend (extracción idempotente por encuesta, `10affd1`) ya no le
+// devolvía el 409 al orquestador y el aviso del spec 68 no aparecía nunca.
+// Cuando el orquestador en línea espera esa encuesta, la cola debe dejarle la
+// colisión sin resolver; sin nadie esperando (o sin conexión) sigue la
+// resolución diferida de siempre.
+
+describe('Colisión de documento con el orquestador esperando la encuesta (auditoría 41, mayor 2)', () => {
+  const sessionStoreGetState = useCampaignSessionStore.getState as jest.Mock;
+  const defaultSessionState = sessionStoreGetState();
+
+  const collision = () =>
+    new DocumentIdCollisionError({
+      documentId: '1084084084',
+      submittedName: 'Productora Registro',
+      existingFarmer: { farmerId: 'real-farmer-otro', name: 'Otra Persona' },
+    });
+
+  function givenOrchestratorAwaiting(phase: 'registro' | 's1', surveyId: string, isOnline: boolean) {
+    sessionStoreGetState.mockReturnValue({
+      ...defaultSessionState,
+      injectionPhase: phase,
+      registroSurveyId: phase === 'registro' ? surveyId : null,
+      s1SurveyId: phase === 's1' ? surveyId : null,
+    });
+    (useSyncStatusStore.getState as jest.Mock).mockReturnValue({
+      isOnline,
+      setSyncingId: jest.fn(),
+      markSyncCompleted: jest.fn(),
+      refreshPendingCount: jest.fn().mockResolvedValue(undefined),
+    });
+  }
+
+  afterEach(() => {
+    sessionStoreGetState.mockReturnValue(defaultSessionState);
+  });
+
+  it('Registro en processAll(): no resuelve la colisión ni extrae cultivos, y cierra la entrada sin fallo', async () => {
+    givenQueuedDraftOf('S_REG');
+    givenOrchestratorAwaiting('registro', 'survey-1', true);
+    mockExtractFarmer.mockRejectedValueOnce(collision());
+
+    await SyncQueueService.processAll();
+
+    expect(mockExtractFarmer).toHaveBeenCalledTimes(1);
+    expect(mockExtractFarmer).toHaveBeenCalledWith('survey-1');
+    expect(mockExtractFarmer).not.toHaveBeenCalledWith('survey-1', { resolution: 'separate_person' });
+    expect(mockExtractCrops).not.toHaveBeenCalled();
+    expect(mockMarkFailedValidation).not.toHaveBeenCalled();
+    expect(mockMarkSynced).toHaveBeenCalledWith('entry-1');
+  });
+
+  it('Registro en processSurveyNow(): tampoco la resuelve', async () => {
+    givenOrchestratorAwaiting('registro', 'survey-1', true);
+    mockLoadDraft.mockResolvedValue(makeDraft('inst-S_REG'));
+    mockInstrumentCacheGet.mockResolvedValue({
+      instrumentId: 'inst-S_REG',
+      code: 'S_REG',
+      sections: [{ sectionId: 's1', name: 'Section 1', order: 1, questions: [] }],
+    });
+    mockBuildResponsesPayload.mockReturnValue([{ surveyId: 'survey-1', questionId: 'q1', textValue: 'x' }]);
+    (syncQueueStorage.getPendingBySurveyId as jest.Mock).mockResolvedValueOnce(makeEntry());
+    mockExtractFarmer.mockRejectedValueOnce(collision());
+
+    await SyncQueueService.processSurveyNow('survey-1');
+
+    expect(mockExtractFarmer).toHaveBeenCalledTimes(1);
+    expect(mockExtractCrops).not.toHaveBeenCalled();
+    expect(mockMarkFailedValidation).not.toHaveBeenCalled();
+    expect(mockMarkSynced).toHaveBeenCalledWith('entry-1');
+  });
+
+  it('S1a heredado: tampoco la resuelve cuando el orquestador espera la fase s1', async () => {
+    givenQueuedDraftOf('S1a');
+    givenOrchestratorAwaiting('s1', 'survey-1', true);
+    mockExtractFarmer.mockRejectedValueOnce(collision());
+
+    await SyncQueueService.processAll();
+
+    expect(mockExtractFarmer).toHaveBeenCalledTimes(1);
+    expect(mockMarkFailedValidation).not.toHaveBeenCalled();
+    expect(mockMarkSynced).toHaveBeenCalledWith('entry-1');
+  });
+
+  it('sin conexión según el estado de red, mantiene la resolución diferida como separate_person', async () => {
+    givenQueuedDraftOf('S_REG');
+    givenOrchestratorAwaiting('registro', 'survey-1', false);
+    mockExtractFarmer.mockRejectedValueOnce(collision()).mockResolvedValueOnce({
+      farmer: { farmerId: 'real-farmer-2', name: 'Productora Registro', documentId: '1084084084' },
+      existed: false,
+    });
+
+    await SyncQueueService.processAll();
+
+    expect(mockExtractFarmer).toHaveBeenNthCalledWith(2, 'survey-1', { resolution: 'separate_person' });
+    expect(mockExtractCrops).toHaveBeenCalledWith('survey-1');
+  });
+
+  it('si el orquestador espera otra encuesta, mantiene la resolución diferida como separate_person', async () => {
+    givenQueuedDraftOf('S_REG');
+    givenOrchestratorAwaiting('registro', 'local_survey_otra', true);
+    mockExtractFarmer.mockRejectedValueOnce(collision()).mockResolvedValueOnce({
+      farmer: { farmerId: 'real-farmer-2', name: 'Productora Registro', documentId: '1084084084' },
+      existed: false,
+    });
+
+    await SyncQueueService.processAll();
+
+    expect(mockExtractFarmer).toHaveBeenNthCalledWith(2, 'survey-1', { resolution: 'separate_person' });
     expect(mockExtractCrops).toHaveBeenCalledWith('survey-1');
   });
 });

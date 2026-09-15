@@ -675,21 +675,47 @@ class SyncQueueServiceClass {
     // borradores viejos ya en la cola de tabletas con esos instrumentos).
     const code = resolveRegistrationFlowCode(instrument.code);
     if (code === 'REG') {
-      await this.extractFarmerForEntry(realSurveyId);
-      await this.extractCropsForEntry(entry, realSurveyId);
+      // Si la colisión quedó para el orquestador, los cultivos también: los
+      // extrae `resolveDocumentCollision` después de la decisión del
+      // encuestador, sobre la misma encuesta.
+      const farmerExtracted = await this.extractFarmerForEntry(entry, realSurveyId);
+      if (farmerExtracted) {
+        await this.extractCropsForEntry(entry, realSurveyId);
+      }
     } else if (code === 'S1') {
-      await this.extractFarmerForEntry(realSurveyId);
+      await this.extractFarmerForEntry(entry, realSurveyId);
     } else if (code === 'S2') {
       await this.extractCropsForEntry(entry, realSurveyId);
     }
   }
 
-  private async extractFarmerForEntry(realSurveyId: string): Promise<void> {
+  // Devuelve `false` si la colisión de documento se dejó sin resolver para
+  // el orquestador (ver `isAwaitedByOnlineOrchestrator`); `true` si el
+  // productor quedó extraído.
+  private async extractFarmerForEntry(entry: SyncQueueEntry, realSurveyId: string): Promise<boolean> {
     let farmer: Awaited<ReturnType<typeof extractFarmer>>['farmer'];
     try {
       ({ farmer } = await extractFarmer(realSurveyId));
     } catch (err) {
       if (!(err instanceof DocumentIdCollisionError)) throw err;
+
+      // Auditoría 41 (hallazgo mayor 2) / spec 68, Fase 9 — el encuestador
+      // SÍ está frente al agricultor: el orquestador en línea espera esta
+      // misma encuesta para llamar a `extractFarmer()` y mostrar el aviso.
+      // Resolverla aquí dejaba al backend (idempotente por encuesta,
+      // `10affd1`) devolviéndole el productor ya creado, sin 409 ni aviso.
+      // No se resuelve nada: el backend ya registró la colisión pendiente al
+      // responder el 409, y la entrada se cierra igual (las respuestas ya
+      // están en el backend). Da igual si la extracción llega por
+      // `processAll()` (disparado por `enqueueSubmission()`) o por
+      // `processSurveyNow()`: ambos corren sobre la misma encuesta.
+      if (this.isAwaitedByOnlineOrchestrator(entry.surveyId)) {
+        logger.warn(
+          `[Sync] documentId collision for survey ${realSurveyId} (document ${err.documentId}) — ` +
+            'left unresolved for the online orchestrator to ask the pollster',
+        );
+        return false;
+      }
 
       // Spec 68, Fase 5 — colisión de documentId descubierta solo al
       // sincronizar: el encuestador ya no está frente al agricultor, no
@@ -770,6 +796,22 @@ class SyncQueueServiceClass {
     }
 
     logger.info(`[Sync] extractFarmer completed for survey ${realSurveyId}`);
+    return true;
+  }
+
+  // ¿Hay una sesión en primer plano, con conexión, cuya fase de inyección
+  // (Registro o S1) espera justo esta encuesta? `registroSurveyId` y
+  // `s1SurveyId` guardan el mismo id local con el que `enqueueSubmission()`
+  // encola la entrada. Sin conexión el orquestador toma la rama local
+  // (`extractFarmerLocally()`) y no volvería a consultar al backend, así que
+  // ahí — y en cualquier sincronización sin sesión activa — se mantiene la
+  // resolución diferida del spec 68, Fase 5.
+  private isAwaitedByOnlineOrchestrator(localSurveyId: string): boolean {
+    const { injectionPhase, registroSurveyId, s1SurveyId } = useCampaignSessionStore.getState();
+    const awaited =
+      (injectionPhase === 'registro' && registroSurveyId === localSurveyId) ||
+      (injectionPhase === 's1' && s1SurveyId === localSurveyId);
+    return awaited && useSyncStatusStore.getState().isOnline === true;
   }
 
   private async extractCropsForEntry(entry: SyncQueueEntry, realSurveyId: string): Promise<void> {
