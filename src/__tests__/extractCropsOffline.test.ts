@@ -231,3 +231,211 @@ describe('extractCropsOffline', () => {
     expect(result).toEqual([{ cropId: 'crop-1', name: 'Café' }]);
   });
 });
+
+// ─── Spec 84 — farm.mainCrop (opción con metadataId = cropId) ────────────────
+//
+// `extractCropsOffline` hace dos lecturas de `responses` con `.all()`:
+//   1) respuestas con booleanValue = true (preguntas `crop.*` Sí/No),
+//   2) todas las respuestas de la encuesta (para `farm.mainCrop` por optionId).
+// Como el mock de db comparte la cadena, se encadenan con mockResolvedValueOnce
+// en ese orden, simulando lo que devolvería SQLite para cada filtro.
+
+const MAIN_CROP_QUESTION_ID = 'q-main-crop';
+
+function makeRegistroInstrument(opts: {
+  cropFields?: Record<string, string>;
+  mainCropOptions?: { optionId: string; metadataId?: string | null }[];
+  extraQuestions?: {
+    questionId: string;
+    systemField?: string;
+    options?: { optionId: string; metadataId?: string | null }[];
+  }[];
+}) {
+  const cropQuestions = Object.entries(opts.cropFields ?? {}).map(([questionId, systemField]) => ({
+    questionId,
+    systemField,
+  }));
+  const mainCropQuestion = opts.mainCropOptions
+    ? [
+        {
+          questionId: MAIN_CROP_QUESTION_ID,
+          systemField: 'farm.mainCrop',
+          options: opts.mainCropOptions.map((o) => ({ text: o.optionId, value: null, ...o })),
+        },
+      ]
+    : [];
+  return {
+    instrumentId: INSTRUMENT_ID,
+    sections: [
+      {
+        sectionId: 's1',
+        questions: [...cropQuestions, ...mainCropQuestion, ...(opts.extraQuestions ?? [])],
+      },
+    ],
+  };
+}
+
+const CAFE = { cropId: 'crop-cafe', name: 'Café' };
+const CACAO = { cropId: 'crop-cacao', name: 'Cacao' };
+
+describe('extractCropsOffline — spec 84, farm.mainCrop', () => {
+  beforeEach(() => {
+    mockGet.mockResolvedValue({ instrumentId: INSTRUMENT_ID });
+  });
+
+  it('resuelve el cultivo cuando la opción elegida en farm.mainCrop tiene metadataId = cropId', async () => {
+    mockInstrumentCacheGet.mockResolvedValue(
+      makeRegistroInstrument({
+        mainCropOptions: [
+          { optionId: 'opt-cafe', metadataId: CAFE.cropId },
+          { optionId: 'opt-cacao', metadataId: CACAO.cropId },
+        ],
+      }),
+    );
+    mockAll
+      .mockResolvedValueOnce([]) // sin respuestas booleanas
+      .mockResolvedValueOnce([{ questionId: MAIN_CROP_QUESTION_ID, optionId: 'opt-cacao' }]);
+    mockCampaignCacheGet.mockResolvedValue(makeCampaign([CAFE, CACAO]));
+
+    const result = await extractCropsOffline(SURVEY_ID, CAMPAIGN_ID);
+
+    expect(result).toEqual([CACAO]);
+  });
+
+  it('sigue resolviendo las preguntas crop.* Sí/No cuando el instrumento también trae farm.mainCrop sin responder', async () => {
+    mockInstrumentCacheGet.mockResolvedValue(
+      makeRegistroInstrument({
+        cropFields: { 'q-cafe': 'crop.cafe' },
+        mainCropOptions: [{ optionId: 'opt-cacao', metadataId: CACAO.cropId }],
+      }),
+    );
+    mockAll
+      .mockResolvedValueOnce([{ questionId: 'q-cafe' }])
+      .mockResolvedValueOnce([{ questionId: 'q-cafe', optionId: null }]);
+    mockCampaignCacheGet.mockResolvedValue(makeCampaign([CAFE, CACAO]));
+
+    const result = await extractCropsOffline(SURVEY_ID, CAMPAIGN_ID);
+
+    expect(result).toEqual([CAFE]);
+  });
+
+  it('combina crop.* y farm.mainCrop cuando apuntan a cultivos distintos', async () => {
+    mockInstrumentCacheGet.mockResolvedValue(
+      makeRegistroInstrument({
+        cropFields: { 'q-cafe': 'crop.cafe' },
+        mainCropOptions: [{ optionId: 'opt-cacao', metadataId: CACAO.cropId }],
+      }),
+    );
+    mockAll
+      .mockResolvedValueOnce([{ questionId: 'q-cafe' }])
+      .mockResolvedValueOnce([
+        { questionId: 'q-cafe', optionId: null },
+        { questionId: MAIN_CROP_QUESTION_ID, optionId: 'opt-cacao' },
+      ]);
+    mockCampaignCacheGet.mockResolvedValue(makeCampaign([CAFE, CACAO]));
+
+    const result = await extractCropsOffline(SURVEY_ID, CAMPAIGN_ID);
+
+    expect(result).toHaveLength(2);
+    expect(result).toEqual(expect.arrayContaining([CAFE, CACAO]));
+  });
+
+  it('no duplica el cultivo cuando crop.* y farm.mainCrop resuelven al mismo cropId', async () => {
+    mockInstrumentCacheGet.mockResolvedValue(
+      makeRegistroInstrument({
+        cropFields: { 'q-cafe': 'crop.cafe' },
+        mainCropOptions: [{ optionId: 'opt-cafe', metadataId: CAFE.cropId }],
+      }),
+    );
+    mockAll
+      .mockResolvedValueOnce([{ questionId: 'q-cafe' }])
+      .mockResolvedValueOnce([
+        { questionId: 'q-cafe', optionId: null },
+        { questionId: MAIN_CROP_QUESTION_ID, optionId: 'opt-cafe' },
+      ]);
+    mockCampaignCacheGet.mockResolvedValue(makeCampaign([CAFE, CACAO]));
+
+    const result = await extractCropsOffline(SURVEY_ID, CAMPAIGN_ID);
+
+    expect(result).toEqual([CAFE]);
+  });
+
+  it('resuelve varias respuestas de opción de farm.mainCrop y las deduplica', async () => {
+    mockInstrumentCacheGet.mockResolvedValue(
+      makeRegistroInstrument({
+        mainCropOptions: [
+          { optionId: 'opt-cafe', metadataId: CAFE.cropId },
+          { optionId: 'opt-cacao', metadataId: CACAO.cropId },
+        ],
+      }),
+    );
+    mockAll
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { questionId: MAIN_CROP_QUESTION_ID, optionId: 'opt-cafe' },
+        { questionId: MAIN_CROP_QUESTION_ID, optionId: 'opt-cacao' },
+        { questionId: MAIN_CROP_QUESTION_ID, optionId: 'opt-cafe' },
+      ]);
+    mockCampaignCacheGet.mockResolvedValue(makeCampaign([CAFE, CACAO]));
+
+    const result = await extractCropsOffline(SURVEY_ID, CAMPAIGN_ID);
+
+    expect(result).toHaveLength(2);
+    expect(result).toEqual(expect.arrayContaining([CAFE, CACAO]));
+  });
+
+  it('devuelve [] y no consulta la campaña cuando la opción elegida no tiene metadataId', async () => {
+    mockInstrumentCacheGet.mockResolvedValue(
+      makeRegistroInstrument({
+        mainCropOptions: [{ optionId: 'opt-otro', metadataId: null }],
+      }),
+    );
+    mockAll
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ questionId: MAIN_CROP_QUESTION_ID, optionId: 'opt-otro' }]);
+
+    const result = await extractCropsOffline(SURVEY_ID, CAMPAIGN_ID);
+
+    expect(result).toEqual([]);
+    expect(mockCampaignCacheGet).not.toHaveBeenCalled();
+  });
+
+  it('excluye el cropId de farm.mainCrop que no está en availableCrops de la campaña', async () => {
+    mockInstrumentCacheGet.mockResolvedValue(
+      makeRegistroInstrument({
+        mainCropOptions: [{ optionId: 'opt-canamo', metadataId: 'crop-canamo' }],
+      }),
+    );
+    mockAll
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ questionId: MAIN_CROP_QUESTION_ID, optionId: 'opt-canamo' }]);
+    mockCampaignCacheGet.mockResolvedValue(makeCampaign([CAFE]));
+
+    const result = await extractCropsOffline(SURVEY_ID, CAMPAIGN_ID);
+
+    expect(result).toEqual([]);
+  });
+
+  it('ignora opciones con metadataId de preguntas cuyo systemField no es farm.mainCrop', async () => {
+    mockInstrumentCacheGet.mockResolvedValue(
+      makeRegistroInstrument({
+        extraQuestions: [
+          {
+            questionId: 'q-departamento',
+            systemField: 'farm.department',
+            options: [{ optionId: 'opt-dep', metadataId: CAFE.cropId }],
+          },
+        ],
+      }),
+    );
+    mockAll
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ questionId: 'q-departamento', optionId: 'opt-dep' }]);
+    mockCampaignCacheGet.mockResolvedValue(makeCampaign([CAFE]));
+
+    const result = await extractCropsOffline(SURVEY_ID, CAMPAIGN_ID);
+
+    expect(result).toEqual([]);
+    expect(mockCampaignCacheGet).not.toHaveBeenCalled();
+  });
+});
