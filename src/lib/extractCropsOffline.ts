@@ -29,10 +29,18 @@ export async function extractCropsOffline(
   if (!instrument) return [];
 
   const systemFieldByQuestionId = new Map<string, string>();
+  // Spec 84 — instrumento de Registro (S_REG): cultivo principal como
+  // pregunta de selección única, con `metadataId` = cropId (igual que el
+  // backend en `surveys.service.ts`). Convive con las preguntas `crop.*`
+  // (Sí/No) que ya usa S2/el taller.
+  const optionMetadataById = new Map<string, string | null | undefined>();
   for (const section of instrument.sections) {
     for (const question of section.questions) {
       if (question.systemField) {
         systemFieldByQuestionId.set(question.questionId, question.systemField);
+      }
+      for (const option of question.options ?? []) {
+        optionMetadataById.set(option.optionId, option.metadataId);
       }
     }
   }
@@ -48,7 +56,21 @@ export async function extractCropsOffline(
     .filter((sf): sf is string => !!sf && sf.startsWith('crop.'))
     .map((sf) => sf.split('.')[1]);
 
-  if (cropNames.length === 0) return [];
+  // Spec 84 — segunda consulta, separada de la anterior: `farm.mainCrop` es
+  // una respuesta de opción (optionId), no un booleano, así que no encaja en
+  // el filtro `booleanValue = true` de arriba.
+  const optionResponses = await db
+    .select({ questionId: responses.questionId, optionId: responses.optionId })
+    .from(responses)
+    .where(eq(responses.surveyId, s2SurveyId))
+    .all();
+
+  const mainCropIds = optionResponses
+    .filter((r) => r.optionId && systemFieldByQuestionId.get(r.questionId) === 'farm.mainCrop')
+    .map((r) => optionMetadataById.get(r.optionId as string))
+    .filter((id): id is string => !!id);
+
+  if (cropNames.length === 0 && mainCropIds.length === 0) return [];
 
   const campaign = await campaignCacheStorage.get(campaignId);
   if (!campaign) return [];
@@ -58,7 +80,7 @@ export async function extractCropsOffline(
   // instead of hardcoding a name map, so the catalog stays the single source
   // of truth and a new crop resolves without touching this file, as long as
   // it follows that convention.
-  const resolvedCrops = cropNames
+  const cropsByName = cropNames
     .map((name) =>
       campaign.availableCrops.find(
         (c) => normalizeSearchText(c.name) === normalizeSearchText(name),
@@ -66,6 +88,12 @@ export async function extractCropsOffline(
     )
     .filter((c): c is CropSummary => c !== undefined);
 
-  const uniqueCropsById = new Map(resolvedCrops.map((c) => [c.cropId, c]));
+  const cropsByMainCrop = mainCropIds
+    .map((cropId) => campaign.availableCrops.find((c) => c.cropId === cropId))
+    .filter((c): c is CropSummary => c !== undefined);
+
+  const uniqueCropsById = new Map(
+    [...cropsByName, ...cropsByMainCrop].map((c) => [c.cropId, c]),
+  );
   return Array.from(uniqueCropsById.values());
 }

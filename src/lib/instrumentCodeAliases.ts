@@ -23,3 +23,18 @@ export function resolveLegacyInstrumentCode(code: string | null | undefined): 'S
   if (code === 'S2' || code === LEGACY_INSTRUMENT_CODE_ALIASES.S2) return 'S2';
   return null;
 }
+
+/**
+ * Spec 84 — código del flujo de registro de un instrumento cacheado:
+ * `'REG'` para el instrumento de Registro (`S_REG`, un solo instrumento que
+ * reemplaza a S1+S2), o el alias legado `'S1'`/`'S2'` mientras ese
+ * instrumento no exista en el backend (respaldo, ver `registrationFlow.ts`).
+ * Superconjunto de `resolveLegacyInstrumentCode`: ambas conviven porque el
+ * respaldo S1/S2 sigue funcionando igual que antes del spec 84.
+ */
+export function resolveRegistrationFlowCode(
+  code: string | null | undefined,
+): 'REG' | 'S1' | 'S2' | null {
+  if (code === 'S_REG') return 'REG';
+  return resolveLegacyInstrumentCode(code);
+}

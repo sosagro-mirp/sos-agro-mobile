@@ -139,14 +139,17 @@ export const useCachedCampaignsStore = create<CachedCampaignsState>((set, get) =
         }));
       }
 
-      // ── Phase 3: pre-cache S1 and S2 (always refresh) ────────────────────
-      for (const code of ['S1', 'S2'] as const) {
+      // ── Phase 3: pre-cache S_REG, S1 and S2 (always refresh) ─────────────
+      // Spec 84 — S_REG reemplaza a S1+S2, pero mientras no exista en el
+      // backend (no promovido todavía) un 404 se ignora igual que ya se
+      // ignoraba S1/S2 sin configurar: el respaldo legado sigue funcionando.
+      for (const code of ['S_REG', 'S1', 'S2'] as const) {
         try {
           const meta = await fetchInstrumentByCode(code);
           const instrument = await fetchInstrumentRender(meta.instrumentId);
           await instrumentCacheStorage.save(instrument);
         } catch {
-          // S1/S2 not configured in backend — ignore silently
+          // Instrumento no configurado en el backend — ignorar en silencio
         }
       }
 
