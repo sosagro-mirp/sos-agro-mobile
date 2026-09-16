@@ -11,6 +11,8 @@ export interface LocalFarmerDraft {
   documentId: string | null;
   phone: string | null;
   farmName: string | null;
+  /** Spec 84 — campo del instrumento de Registro (S_REG). */
+  corregimiento: string | null;
   isProvisional: boolean;
   // Spec 68 — presente cuando el documentId coincide con una entrada de
   // `farmerCache` cuyo nombre no corresponde al recién digitado. El
@@ -41,6 +43,7 @@ export async function extractFarmerLocally(s1SurveyId: string): Promise<LocalFar
   let producerPhone: string | null = null;
   let isRespondent: boolean | null = null;
   let farmName: string | null = null;
+  let corregimiento: string | null = null;
 
   for (const { question } of flatQuestions) {
     if (!question.systemField) continue;
@@ -76,6 +79,9 @@ export async function extractFarmerLocally(s1SurveyId: string): Promise<LocalFar
       case 'farm.name':
         farmName = answer.textValue ?? null;
         break;
+      case 'farm.corregimiento':
+        corregimiento = answer.textValue ?? null;
+        break;
     }
   }
 
@@ -107,6 +113,7 @@ export async function extractFarmerLocally(s1SurveyId: string): Promise<LocalFar
           documentId: cached.documentId ?? null,
           phone: cached.phone ?? null,
           farmName,
+          corregimiento,
           isProvisional: false,
         };
       }
@@ -123,6 +130,7 @@ export async function extractFarmerLocally(s1SurveyId: string): Promise<LocalFar
         documentId: farmerDocumentId,
         phone: farmerPhone,
         farmName,
+        corregimiento,
         isProvisional: true,
         collision: {
           documentId: farmerDocumentId,
@@ -140,6 +148,7 @@ export async function extractFarmerLocally(s1SurveyId: string): Promise<LocalFar
     documentId: farmerDocumentId,
     phone: farmerPhone,
     farmName,
+    corregimiento,
     isProvisional: true,
   };
 }

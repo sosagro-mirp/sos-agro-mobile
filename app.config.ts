@@ -82,12 +82,24 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         // RECORD_AUDIO lo inyecta el config plugin de expo-audio
         // (recordAudioAndroid, true por defecto). Antes había aquí un
         // 'MICROPHONE' que no corresponde a ningún permiso real de Android.
-        'READ_MEDIA_IMAGES',
-        'READ_MEDIA_VIDEO',
-        'READ_MEDIA_AUDIO',
+        // READ_EXTERNAL_STORAGE (y WRITE_EXTERNAL_STORAGE, que inyectan
+        // expo-image-picker y expo-file-system) se mantienen: en Android <= 12
+        // `requestMediaLibraryPermissionsAsync()` los pide antes de abrir la
+        // galería. Android 13+ los ignora.
         'READ_EXTERNAL_STORAGE',
         'ACCESS_FINE_LOCATION',
         'ACCESS_COARSE_LOCATION',
+      ],
+      // Spec 35, D3: nada los usa. La galería abre el selector del sistema
+      // (PickVisualMedia, sin permiso en Android 13+), los documentos van por
+      // SAF y el audio solo necesita RECORD_AUDIO. Bloquearlos evita la
+      // declaración de permisos de fotos y videos en Google Play.
+      // SYSTEM_ALERT_WINDOW solo lo usa el overlay de depuración de React Native.
+      blockedPermissions: [
+        'android.permission.READ_MEDIA_IMAGES',
+        'android.permission.READ_MEDIA_VIDEO',
+        'android.permission.READ_MEDIA_AUDIO',
+        'android.permission.SYSTEM_ALERT_WINDOW',
       ],
       versionCode,
     },

@@ -5,5 +5,7 @@ import type { InstrumentResponse } from "../types";
 export const fetchInstrumentRender = (id: string) =>
   httpClient.get<InstrumentResponse>(endpoints.instrumentRender(id));
 
-export const fetchInstrumentByCode = (code: 'S1' | 'S2'): Promise<{ instrumentId: string; name: string }> =>
+export const fetchInstrumentByCode = (
+  code: 'S1' | 'S2' | 'S_REG',
+): Promise<{ instrumentId: string; name: string }> =>
   httpClient.get(endpoints.instrumentByCode(code));

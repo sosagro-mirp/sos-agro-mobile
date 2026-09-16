@@ -25,7 +25,8 @@ import { extractFarmerLocally } from "../../../../../src/lib/extractFarmerLocall
 import type { LocalFarmerDraft } from "../../../../../src/lib/extractFarmerLocally";
 import { flattenSections } from "../../../../../src/lib/flattenSections";
 import { cacheFarmerIdentity } from "../../../../../src/lib/cacheFarmerIdentity";
-import { resolveLegacyInstrumentCode } from "../../../../../src/lib/instrumentCodeAliases";
+import { resolveRegistrationFlowCode } from "../../../../../src/lib/instrumentCodeAliases";
+import { chooseRegistrationFlow } from "../../../../../src/lib/registrationFlow";
 import { applyPendingConsentToFarmer } from "../../../../../src/lib/applyPendingConsentToFarmer";
 import { sessionCropsStorage } from "../../../../../src/storage/sessionCropsStorage";
 import { DuplicateAlertModal } from "../../../../../src/components/campaign/DuplicateAlertModal";
@@ -79,6 +80,10 @@ export default function OrchestratorScreen() {
     existingFarmerName: string;
     offline: boolean;
     localDraft?: LocalFarmerDraft;
+    // Spec 84 — de qué fase vino la colisión: decide si al resolverla se
+    // inyecta S2 (legado) o se sigue con la extracción de cultivos sobre la
+    // misma encuesta (Registro).
+    phase: 'registro' | 's1';
   } | null>(null);
   const hasStarted = useRef(false);
   const { colors } = useTheme();
@@ -92,10 +97,14 @@ export default function OrchestratorScreen() {
     return downloadAndCache(instrumentId);
   }, [instruments, downloadAndCache]);
 
-  const injectInstrumentOnline = useCallback(async (code: 'S1' | 'S2') => {
+  const injectInstrumentOnline = useCallback(async (code: 'REG' | 'S1' | 'S2') => {
     if (!resolvedSessionId) return;
 
-    const { instrumentId, name } = await fetchInstrumentByCode(code);
+    // Spec 84 — 'REG' pide el instrumento de Registro (S_REG); si el backend
+    // todavía no lo tiene, esto lanza (404) y el llamador decide caer al
+    // flujo legado S1/S2 en vez de tratarlo como un error de inyección.
+    const backendCode = code === 'REG' ? 'S_REG' : code;
+    const { instrumentId, name } = await fetchInstrumentByCode(backendCode);
     const instrument = await getOrDownloadInstrument(instrumentId);
 
     // Spec 70, Fase 4 (vector 3) — igual que `injectInstrumentOffline`: el
@@ -112,7 +121,9 @@ export default function OrchestratorScreen() {
       campaignSessionId: resolvedSessionId,
     });
 
-    if (code === 'S1') {
+    if (code === 'REG') {
+      store.setInjectionRegistroSurveyId(surveyId);
+    } else if (code === 'S1') {
       store.setInjectionS1SurveyId(surveyId);
     } else {
       store.setInjectionS2SurveyId(surveyId);
@@ -129,11 +140,11 @@ export default function OrchestratorScreen() {
     advanceWithinCampaign(router, id, `/instrument/${instrumentId}/question/0`);
   }, [resolvedSessionId, getOrDownloadInstrument, store, initializeSurvey, router, id]);
 
-  const injectInstrumentOffline = useCallback(async (code: 'S1' | 'S2') => {
+  const injectInstrumentOffline = useCallback(async (code: 'REG' | 'S1' | 'S2') => {
     if (!resolvedSessionId) return;
 
     const allInstruments = await instrumentCacheStorage.list();
-    const instrument = allInstruments.find((i) => resolveLegacyInstrumentCode(i.code) === code);
+    const instrument = allInstruments.find((i) => resolveRegistrationFlowCode(i.code) === code);
 
     if (!instrument) {
       setScreenState('injection_error');
@@ -152,7 +163,9 @@ export default function OrchestratorScreen() {
     // NO enqueue here — enqueueSubmission() handles this when the user completes the survey,
     // same as the online flow (injectInstrumentOnline never enqueues at injection time either).
 
-    if (code === 'S1') {
+    if (code === 'REG') {
+      store.setInjectionRegistroSurveyId(localSurveyId);
+    } else if (code === 'S1') {
       store.setInjectionS1SurveyId(localSurveyId);
     } else {
       store.setInjectionS2SurveyId(localSurveyId);
@@ -169,13 +182,51 @@ export default function OrchestratorScreen() {
     advanceWithinCampaign(router, id, `/instrument/${instrument.instrumentId}/question/0`);
   }, [resolvedSessionId, store, initializeSurvey, router, id]);
 
-  const injectInstrument = useCallback(async (code: 'S1' | 'S2') => {
+  const injectInstrument = useCallback(async (code: 'REG' | 'S1' | 'S2') => {
     if (isOnline) {
       await injectInstrumentOnline(code);
     } else {
       await injectInstrumentOffline(code);
     }
   }, [isOnline, injectInstrumentOnline, injectInstrumentOffline]);
+
+  /**
+   * Spec 84 — primera inyección de la sesión: intenta el Registro (un solo
+   * instrumento) y cae al flujo legado S1/S2 si no está disponible.
+   *   - En línea: `injectInstrumentOnline('REG')` lanza si el backend no
+   *     tiene `S_REG` (no promovido todavía); un `NetworkError` se relanza
+   *     tal cual (lo maneja el catch de `run()`, pantalla "sin conexión"),
+   *     cualquier otro fallo (404) cae al respaldo.
+   *   - Sin conexión: se decide de antemano, sin intentar la inyección,
+   *     mirando si `S_REG` ya está en la caché del dispositivo.
+   */
+  const injectRegistrationOrFallback = useCallback(async () => {
+    if (isOnline) {
+      try {
+        await injectInstrumentOnline('REG');
+        return;
+      } catch (err) {
+        if (err instanceof NetworkError) throw err;
+        logger.warn(
+          `[Orchestrator] S_REG no disponible en el backend, usando el flujo S1/S2: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    } else {
+      const allInstruments = await instrumentCacheStorage.list();
+      const registrationCached = allInstruments.some(
+        (i) => resolveRegistrationFlowCode(i.code) === 'REG',
+      );
+      const flow = chooseRegistrationFlow({ registrationCached, isOnline: false });
+      if (flow === 'registro') {
+        await injectInstrumentOffline('REG');
+        return;
+      }
+    }
+    store.setNewFarmerMode('s1');
+    await injectInstrument('S1');
+  }, [isOnline, injectInstrumentOnline, injectInstrumentOffline, injectInstrument, store]);
 
   // Offline-only duplicate check: preserves the original navigation logic (instrument! is safe
   // because callers already guard against missing instrument) while adding duplicate detection.
@@ -262,10 +313,124 @@ export default function OrchestratorScreen() {
     setRetryAttempt(0);
 
     try {
-      const { injectionPhase, s1SurveyId, s2SurveyId } =
+      const { injectionPhase, registroSurveyId, s1SurveyId, s2SurveyId } =
         useCampaignSessionStore.getState();
 
-      if (injectionPhase === 's1') {
+      // Spec 84 — Registro: un solo instrumento reemplaza a S1+S2. Al
+      // volver, extrae productor y luego cultivos sobre la misma encuesta,
+      // en línea o sin conexión.
+      if (injectionPhase === 'registro') {
+        if (!registroSurveyId) {
+          await injectRegistrationOrFallback();
+        } else if (isOnline) {
+          // `registroSurveyId` es local (spec 70, Fase 4) — processSurveyNow()
+          // lo materializa en el backend antes de extraer nada.
+          await SyncQueueService.processSurveyNow(registroSurveyId);
+          const realRegistroSurveyId = await surveyDraftStore.getBackendSurveyId(registroSurveyId);
+          if (!realRegistroSurveyId) {
+            throw new Error(
+              `No se pudo sincronizar la encuesta de Registro (${registroSurveyId}) antes de extraer el agricultor`,
+            );
+          }
+          try {
+            const { farmer } = await withNetworkRetry(
+              () => extractFarmer(realRegistroSurveyId),
+              { onRetry: setRetryAttempt },
+            );
+            setRetryAttempt(0);
+            await cacheFarmerIdentity({
+              farmerId: farmer.farmerId,
+              name: farmer.name,
+              documentId: farmer.documentId,
+              phone: farmer.phone,
+              farmName: farmer.farm?.name,
+              crops: farmer.farm?.crops ?? undefined,
+            });
+            if (resolvedSessionId) {
+              await applyPendingConsentToFarmer(resolvedSessionId, farmer.farmerId);
+            }
+            const cropsResult = await withNetworkRetry(
+              () => extractCrops(realRegistroSurveyId),
+              { onRetry: setRetryAttempt },
+            );
+            setRetryAttempt(0);
+            if (resolvedSessionId) {
+              await sessionCropsStorage.save(resolvedSessionId, cropsResult.crops);
+            }
+            store.completeRegistroInjection(farmer.farmerId, farmer.name);
+            const nextStep = await getNextStep(resolvedSessionId);
+            store.applyNextStep(nextStep);
+            await checkAndNavigate(nextStep);
+          } catch (err) {
+            // Spec 68 — igual que en la rama S1: nunca fusionar en silencio.
+            if (err instanceof DocumentIdCollisionError) {
+              setDocumentCollisionPending({
+                documentId: err.documentId,
+                submittedName: err.submittedName,
+                existingFarmerName: err.existingFarmerName,
+                offline: false,
+                phase: 'registro',
+              });
+              setScreenState('document_collision_pending');
+              return;
+            }
+            throw err;
+          }
+        } else {
+          // Offline: extraer productor y luego cultivos localmente, sobre la
+          // misma encuesta.
+          const draft = await extractFarmerLocally(registroSurveyId);
+          if (draft) {
+            if (draft.collision) {
+              setDocumentCollisionPending({
+                documentId: draft.collision.documentId,
+                submittedName: draft.collision.submittedName,
+                existingFarmerName: draft.collision.existingName,
+                offline: true,
+                localDraft: draft,
+                phase: 'registro',
+              });
+              setScreenState('document_collision_pending');
+              return;
+            }
+
+            await cacheFarmerIdentity({
+              farmerId: draft.farmerId,
+              name: draft.name,
+              documentId: draft.documentId,
+              phone: draft.phone,
+              farmName: draft.farmName,
+            });
+            if (resolvedSessionId) {
+              await applyPendingConsentToFarmer(resolvedSessionId, draft.farmerId);
+            }
+            store.applyLocalFarmer(draft);
+
+            const { campaign } = useCampaignSessionStore.getState();
+            if (campaign?.campaignId && resolvedSessionId) {
+              const offlineCrops = await extractCropsOffline(registroSurveyId, campaign.campaignId);
+              if (offlineCrops.length > 0) {
+                await sessionCropsStorage.save(resolvedSessionId, offlineCrops);
+              }
+            }
+            store.completeRegistroInjection(draft.farmerId, draft.name);
+
+            if (!campaign?.campaignId) {
+              advanceWithinCampaign(router, id, `/campaign/${id}/session/${resolvedSessionId}/completed`);
+              return;
+            }
+            const nextStep = await getNextStepOffline(campaign.campaignId, resolvedSessionId, -1);
+            if (!nextStep || (!nextStep.stepId && !nextStep.instrument)) {
+              advanceWithinCampaign(router, id, `/campaign/${id}/session/${resolvedSessionId}/completed`);
+              return;
+            }
+            store.applyNextStep(nextStep);
+            await checkDuplicateAndNavigateOffline(nextStep);
+          } else {
+            setScreenState('offline_extraction_pending');
+          }
+        }
+      } else if (injectionPhase === 's1') {
         if (!s1SurveyId) {
           await injectInstrument('S1');
         } else if (isOnline) {
@@ -317,6 +482,7 @@ export default function OrchestratorScreen() {
                 submittedName: err.submittedName,
                 existingFarmerName: err.existingFarmerName,
                 offline: false,
+                phase: 's1',
               });
               setScreenState('document_collision_pending');
               return;
@@ -338,6 +504,7 @@ export default function OrchestratorScreen() {
                 existingFarmerName: draft.collision.existingName,
                 offline: true,
                 localDraft: draft,
+                phase: 's1',
               });
               setScreenState('document_collision_pending');
               return;
@@ -452,7 +619,7 @@ export default function OrchestratorScreen() {
         setErrorMessage(err instanceof Error ? err.message : "Error inesperado");
       }
     }
-  }, [resolvedSessionId, id, injectInstrument, store, checkAndNavigate, checkDuplicateAndNavigateOffline, isOnline, getOrDownloadInstrument, router]);
+  }, [resolvedSessionId, id, injectInstrument, injectRegistrationOrFallback, store, checkAndNavigate, checkDuplicateAndNavigateOffline, isOnline, getOrDownloadInstrument, router]);
 
   // ── duplicate handlers ─────────────────────────────────────────────────────
 
@@ -575,14 +742,16 @@ export default function OrchestratorScreen() {
 
   // ── document collision handlers (spec 68) ─────────────────────────────────
 
-  // "Corregir el documento": vuelve a la pregunta farmer.documentId de S1a
-  // con las respuestas ya digitadas intactas (el store de la encuesta S1
-  // sigue inicializado — no hace falta re-crear nada). Funciona igual
+  // "Corregir el documento": vuelve a la pregunta farmer.documentId del
+  // instrumento que disparó la colisión — el Registro (spec 84) o, en el
+  // respaldo legado, S1a — con las respuestas ya digitadas intactas (su
+  // store sigue inicializado, no hace falta re-crear nada). Funciona igual
   // online y offline: no requiere red. Criterio 9.
   const handleCorrectDocument = useCallback(async () => {
     setModalLoading(true);
     try {
-      const { instrumentId } = await fetchInstrumentByCode('S1');
+      const code = documentCollisionPending?.phase === 'registro' ? 'REG' : 'S1';
+      const { instrumentId } = await fetchInstrumentByCode(code === 'REG' ? 'S_REG' : code);
       const instrument = await getOrDownloadInstrument(instrumentId);
       const flatQuestions = flattenSections(instrument.sections);
       const docIndex = flatQuestions.findIndex(
@@ -605,7 +774,7 @@ export default function OrchestratorScreen() {
       setScreenState('error');
       setErrorMessage(err instanceof Error ? err.message : 'Error al volver al documento');
     }
-  }, [getOrDownloadInstrument, router, run]);
+  }, [documentCollisionPending, getOrDownloadInstrument, router, run]);
 
   // "Es la misma persona" / "Registrar aparte". Offline solo la segunda
   // tiene sentido (el modal oculta la primera, ver `allowSamePerson`):
@@ -614,9 +783,13 @@ export default function OrchestratorScreen() {
   // queda registrada (criterios 4 y 5).
   const resolveDocumentCollision = useCallback(async (resolution: 'same_person' | 'separate_person') => {
     if (!documentCollisionPending) return;
+    const isRegistro = documentCollisionPending.phase === 'registro';
     setModalLoading(true);
 
     try {
+      let resolvedFarmerId: string;
+      let resolvedFarmerName: string;
+
       if (documentCollisionPending.offline) {
         const draft = documentCollisionPending.localDraft;
         if (!draft) {
@@ -633,32 +806,48 @@ export default function OrchestratorScreen() {
           farmName: draft.farmName,
         });
         store.applyLocalFarmer(draft);
-        store.completeS1Injection(draft.farmerId, draft.name);
+        resolvedFarmerId = draft.farmerId;
+        resolvedFarmerName = draft.name;
+
+        // Spec 84 — sin conexión, la misma encuesta de Registro ya trae
+        // también las respuestas de cultivo: hay que extraerlas aquí,
+        // porque `run()` no vuelve a pasar por la fase 'registro' (el
+        // farmer ya quedó resuelto arriba).
+        if (isRegistro) {
+          const { registroSurveyId, campaign } = useCampaignSessionStore.getState();
+          if (registroSurveyId && campaign?.campaignId && resolvedSessionId) {
+            const offlineCrops = await extractCropsOffline(registroSurveyId, campaign.campaignId);
+            if (offlineCrops.length > 0) {
+              await sessionCropsStorage.save(resolvedSessionId, offlineCrops);
+            }
+          }
+        }
       } else {
-        const { s1SurveyId } = useCampaignSessionStore.getState();
-        if (!s1SurveyId) {
+        const { registroSurveyId, s1SurveyId } = useCampaignSessionStore.getState();
+        const localSurveyId = isRegistro ? registroSurveyId : s1SurveyId;
+        if (!localSurveyId) {
           setModalLoading(false);
           return;
         }
-        // `s1SurveyId` es siempre el id local (spec 70, Fase 4) — nunca lo
-        // remapea nada en el store. Para cuando este modal aparece online, S1
-        // ya se sincronizó (es como `run()` detectó la colisión en primer
-        // lugar, llamando a `extractFarmer()` con el id real), así que
+        // El id local (spec 70, Fase 4) nunca lo remapea nada en el store.
+        // Para cuando este modal aparece online, la encuesta ya se
+        // sincronizó (es como `run()` detectó la colisión en primer lugar,
+        // llamando a `extractFarmer()` con el id real), así que
         // `getBackendSurveyId()` debe resolverlo. Mismo patrón que `run()`
         // usa en su propio llamador — bug hallado en la auditoría del
         // 2026-08-24 (informe 31): este segundo llamador quedó con el id
-        // local tras el merge del spec 68, y `extractFarmer(s1SurveyId, …)`
+        // local tras el merge del spec 68, y `extractFarmer(surveyId, …)`
         // fallaba con 404 siempre, dejando la pantalla en 'error'.
-        const realS1SurveyId = await surveyDraftStore.getBackendSurveyId(s1SurveyId);
-        if (!realS1SurveyId) {
+        const realSurveyId = await surveyDraftStore.getBackendSurveyId(localSurveyId);
+        if (!realSurveyId) {
           setModalLoading(false);
           setScreenState('error');
           setErrorMessage(
-            `No se pudo sincronizar la encuesta S1 (${s1SurveyId}) antes de resolver la colisión`,
+            `No se pudo sincronizar la encuesta (${localSurveyId}) antes de resolver la colisión`,
           );
           return;
         }
-        const { farmer } = await extractFarmer(realS1SurveyId, { resolution });
+        const { farmer } = await extractFarmer(realSurveyId, { resolution });
         await cacheFarmerIdentity({
           farmerId: farmer.farmerId,
           name: farmer.name,
@@ -667,13 +856,35 @@ export default function OrchestratorScreen() {
           farmName: farmer.farm?.name,
           crops: farmer.farm?.crops ?? undefined,
         });
-        store.completeS1Injection(farmer.farmerId, farmer.name);
+        resolvedFarmerId = farmer.farmerId;
+        resolvedFarmerName = farmer.name;
+
+        // Spec 84 — el Registro sigue con la extracción de cultivos sobre la
+        // misma encuesta, en vez de inyectar un segundo instrumento.
+        if (isRegistro) {
+          const cropsResult = await extractCrops(realSurveyId);
+          if (resolvedSessionId) {
+            await sessionCropsStorage.save(resolvedSessionId, cropsResult.crops);
+          }
+        }
+      }
+
+      if (isRegistro) {
+        store.completeRegistroInjection(resolvedFarmerId, resolvedFarmerName);
+      } else {
+        store.completeS1Injection(resolvedFarmerId, resolvedFarmerName);
       }
 
       setDocumentCollisionPending(null);
       setModalLoading(false);
       setScreenState('loading');
-      await injectInstrument('S2');
+
+      if (isRegistro) {
+        hasStarted.current = false;
+        run();
+      } else {
+        await injectInstrument('S2');
+      }
     } catch (err) {
       setModalLoading(false);
       setScreenState('error');
@@ -681,7 +892,7 @@ export default function OrchestratorScreen() {
         err instanceof Error ? err.message : 'Error al resolver la colisión de documento',
       );
     }
-  }, [documentCollisionPending, store, injectInstrument]);
+  }, [documentCollisionPending, resolvedSessionId, store, injectInstrument, run]);
 
   const handleSamePerson = useCallback(
     () => resolveDocumentCollision('same_person'),

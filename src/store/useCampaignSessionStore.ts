@@ -7,7 +7,9 @@ import type {
 import type { LocalFarmerDraft } from '../lib/extractFarmerLocally';
 
 type SessionPhase = 'idle' | 'pre_survey' | 'in_step' | 'completed';
-type InjectionPhase = 'none' | 's1' | 's2';
+// Spec 84 — 'registro' es el flujo nuevo (un solo instrumento S_REG);
+// 's1'/'s2' se conservan como respaldo mientras S_REG no esté disponible.
+type InjectionPhase = 'none' | 'registro' | 's1' | 's2';
 
 interface CurrentStep {
   stepId: string;
@@ -30,8 +32,9 @@ interface CampaignSessionState {
   farmerName: string | null;
   isNewFarmer: boolean;
 
-  // S1/S2 injection tracking
+  // S1/S2 injection tracking (registro: spec 84, un solo instrumento)
   injectionPhase: InjectionPhase;
+  registroSurveyId: string | null;
   s1SurveyId: string | null;
   s2SurveyId: string | null;
 
@@ -57,10 +60,13 @@ interface CampaignSessionState {
   reset: () => void;
 
   // Farmer identification actions
-  setNewFarmerMode: () => void;
+  setNewFarmerMode: (flow?: 'registro' | 's1') => void;
   setSelectedFarmer: (farmerId: string, farmerName: string) => void;
+  setInjectionRegistroSurveyId: (surveyId: string) => void;
   setInjectionS1SurveyId: (surveyId: string) => void;
   setInjectionS2SurveyId: (surveyId: string) => void;
+  /** Spec 84 — el Registro resuelve productor y cultivos de una vez; no encadena a una segunda fase. */
+  completeRegistroInjection: (farmerId: string, farmerName: string) => void;
   completeS1Injection: (farmerId: string, farmerName: string) => void;
   completeS2Injection: () => void;
   // Offline session actions
@@ -81,6 +87,7 @@ const initialState = {
   farmerName: null,
   isNewFarmer: false,
   injectionPhase: 'none' as InjectionPhase,
+  registroSurveyId: null,
   s1SurveyId: null,
   s2SurveyId: null,
   isOfflineSession: false,
@@ -142,12 +149,16 @@ export const useCampaignSessionStore = create<CampaignSessionState>((set, get) =
     set(initialState);
   },
 
-  setNewFarmerMode() {
-    set({ isNewFarmer: true, injectionPhase: 's1', farmerId: null, farmerName: null });
+  setNewFarmerMode(flow = 'registro') {
+    set({ isNewFarmer: true, injectionPhase: flow, farmerId: null, farmerName: null });
   },
 
   setSelectedFarmer(farmerId, farmerName) {
     set({ isNewFarmer: false, injectionPhase: 'none', farmerId, farmerName });
+  },
+
+  setInjectionRegistroSurveyId(surveyId) {
+    set({ registroSurveyId: surveyId });
   },
 
   setInjectionS1SurveyId(surveyId) {
@@ -156,6 +167,10 @@ export const useCampaignSessionStore = create<CampaignSessionState>((set, get) =
 
   setInjectionS2SurveyId(surveyId) {
     set({ s2SurveyId: surveyId });
+  },
+
+  completeRegistroInjection(farmerId, farmerName) {
+    set({ injectionPhase: 'none', farmerId, farmerName });
   },
 
   completeS1Injection(farmerId, farmerName) {
