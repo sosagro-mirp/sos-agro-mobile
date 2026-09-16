@@ -10,9 +10,9 @@
 > Entran en esta tabla: dependencias con código nativo, permisos, plugins de config, y cualquier
 > cambio de `version` en `app.config.ts`.
 
-## Estado actual — sin pendientes (2026-08-31)
+## Último build verificado (2026-08-31)
 
-**La tabla está vacía.** El build `versionCode 10014` (`8850317d-…`, 2026-08-29) cubrió las cinco
+El build `versionCode 10014` (`8850317d-…`, 2026-08-29) cubrió las cinco
 filas que había, y las cinco quedaron verificadas en dispositivo real (`SM-S931B`):
 
 | Spec | Qué se verificó | Dónde consta |
@@ -45,7 +45,8 @@ archiva) en cuanto un build lo cubre y la ronda manual correspondiente lo confir
 
 | # | Cambio | Commit | Spec / caso que lo verifica | Requiere build nativo (no solo JS) |
 |---|--------|--------|------------------------------|--------------------------------------|
-| — | *(sin pendientes)* | — | — | — |
+| 1 | Spec 35, D3: `blockedPermissions` para `READ_MEDIA_IMAGES`, `READ_MEDIA_VIDEO`, `READ_MEDIA_AUDIO` y `SYSTEM_ALERT_WINDOW` en `app.config.ts`. Verificar en el AAB que no aparecen en el manifiesto y que galería, cámara, documento y audio siguen funcionando | *(rama `deploy/v1.0.0-google-play`)* | Spec 35, Fase 5 (TC-035-005 a TC-035-008) | Sí — manifiesto nativo |
+| 2 | Spec 35: `autoIncrement: true` en el perfil `production` de `eas.json`. Confirmar `versionCode` ≥ 10015 en la salida del build | *(rama `deploy/v1.0.0-google-play`)* | Spec 35, Fase 5 | Sí — solo afecta builds |
 
 ## Política: cuándo generar el siguiente build
 
