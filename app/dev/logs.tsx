@@ -24,6 +24,11 @@ import {
 import { captureError } from "../../src/lib/sentry";
 import { useSyncStatusStore } from "../../src/store/useSyncStatusStore";
 import { useInstrumentSurveyStore } from "../../src/store/useInstrumentSurveyStore";
+import { getLocalPendingCounts } from "../../src/storage/localPendingCounts";
+import {
+  evaluateUninstallReadiness,
+  type LocalPendingCounts,
+} from "../../src/lib/uninstallReadiness";
 
 interface LogFileMeta {
   date: string;
@@ -66,6 +71,12 @@ export default function DevLogsScreen() {
   const [sentryTestResult, setSentryTestResult] = useState<string | null>(null);
   const [applyingOta, setApplyingOta] = useState(false);
 
+  // Spec 35 — bloque "Cambio de app".
+  const [pendingCounts, setPendingCounts] = useState<LocalPendingCounts | null>(null);
+  const [loadingCounts, setLoadingCounts] = useState(false);
+  const [countsError, setCountsError] = useState(false);
+  const [countsUpdatedAt, setCountsUpdatedAt] = useState<Date | null>(null);
+
   // Bug encontrado en la ronda manual del spec 76 (TC-076-08, 2026-08-29): esta
   // pantalla leía `LOG_DIR` a mano y listaba **cada segmento** como una fila
   // ("2026-08-29.000", "2026-08-29.001", ...), en vez de un día por fila. La
@@ -85,9 +96,26 @@ export default function DevLogsScreen() {
     }
   }
 
+  async function loadPendingCounts() {
+    setLoadingCounts(true);
+    setCountsError(false);
+    try {
+      setPendingCounts(await getLocalPendingCounts());
+      setCountsUpdatedAt(new Date());
+    } catch (e) {
+      // Sin conteos no hay veredicto: la UI muestra "No listo" y el error.
+      setPendingCounts(null);
+      setCountsError(true);
+      logger.error("[DevLogs] pendingCounts error", e);
+    } finally {
+      setLoadingCounts(false);
+    }
+  }
+
   useFocusEffect(
     useCallback(() => {
       loadFileList();
+      loadPendingCounts();
     }, [])
   );
 
@@ -293,6 +321,57 @@ export default function DevLogsScreen() {
             })() : null}
           </View>
 
+          {/* Spec 35 — Cambio de app: verificación previa a migrar la tableta */}
+          <View style={styles.otaBox}>
+            <Text style={styles.otaTitle}>Cambio de app</Text>
+            {pendingCounts && !countsError ? (() => {
+              const verdict = evaluateUninstallReadiness(pendingCounts);
+              return (
+                <>
+                  <Text style={verdict.ready ? styles.readyText : styles.notReadyText}>
+                    {verdict.ready ? "Listo" : "No listo"}
+                  </Text>
+                  {verdict.ready ? (
+                    <Text style={styles.otaLine}>No hay datos locales sin sincronizar.</Text>
+                  ) : (
+                    verdict.reasons.map((reason) => (
+                      <Text key={reason} style={styles.otaWarning}>• {reason}</Text>
+                    ))
+                  )}
+                  <Text style={styles.otaLine}>
+                    Borradores {pendingCounts.surveysDraft} · Completadas {pendingCounts.surveysCompleted}
+                    {"\n"}Envíos: pendientes {pendingCounts.syncPending} · en curso {pendingCounts.syncInFlight} · con error {pendingCounts.syncFailedValidation}
+                    {"\n"}Adjuntos: pendientes {pendingCounts.mediaPending} · subiendo {pendingCounts.mediaInFlight} · con error {pendingCounts.mediaFailed}
+                    {"\n"}Sesiones: pendientes {pendingCounts.sessionsPending} · con error {pendingCounts.sessionsFailed}
+                    {"\n"}Solicitudes de cambio sin enviar {pendingCounts.changeRequestsPendingSync}
+                    {"\n"}Consentimientos: pendientes {pendingCounts.consentsPending} · con error {pendingCounts.consentsFailed}
+                    {"\n"}Lotes en borrador {pendingCounts.farmPlotsDraft}
+                  </Text>
+                </>
+              );
+            })() : (
+              <>
+                <Text style={styles.notReadyText}>No listo</Text>
+                <Text style={styles.otaWarning}>
+                  {countsError ? "No se pudieron leer los datos locales." : "Conteos aún no cargados."}
+                </Text>
+              </>
+            )}
+            {countsUpdatedAt ? (
+              <Text style={styles.otaLine}>Actualizado: {countsUpdatedAt.toLocaleString()}</Text>
+            ) : null}
+            <Pressable
+              style={[styles.actionButton, styles.otaButton, loadingCounts && styles.buttonDisabled]}
+              onPress={loadPendingCounts}
+              disabled={loadingCounts}
+            >
+              {loadingCounts
+                ? <ActivityIndicator color="#fff" size="small" />
+                : <Text style={styles.actionText}>Actualizar conteos</Text>
+              }
+            </Pressable>
+          </View>
+
           {/* Actions */}
           <View style={styles.actions}>
             <View style={styles.actionsRow}>
@@ -462,6 +541,16 @@ const styles = StyleSheet.create({
   },
   otaButton: {
     marginTop: 8,
+  },
+  readyText: {
+    color: "#4ADE80",
+    fontFamily: Fonts.semiBold,
+    fontSize: 18,
+  },
+  notReadyText: {
+    color: "#F87171",
+    fontFamily: Fonts.semiBold,
+    fontSize: 18,
   },
   actions: {
     gap: 10,
