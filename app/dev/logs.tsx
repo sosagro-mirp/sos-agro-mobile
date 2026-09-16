@@ -338,11 +338,14 @@ export default function DevLogsScreen() {
                       <Text key={reason} style={styles.otaWarning}>• {reason}</Text>
                     ))
                   )}
+                  {verdict.notices.map((notice) => (
+                    <Text key={notice} style={styles.otaLine}>ⓘ {notice}</Text>
+                  ))}
                   <Text style={styles.otaLine}>
                     Borradores {pendingCounts.surveysDraft} · Completadas {pendingCounts.surveysCompleted}
                     {"\n"}Envíos: pendientes {pendingCounts.syncPending} · en curso {pendingCounts.syncInFlight} · con error {pendingCounts.syncFailedValidation}
                     {"\n"}Adjuntos: pendientes {pendingCounts.mediaPending} · subiendo {pendingCounts.mediaInFlight} · con error {pendingCounts.mediaFailed}
-                    {"\n"}Sesiones: pendientes {pendingCounts.sessionsPending} · con error {pendingCounts.sessionsFailed}
+                    {"\n"}Sesiones: pendientes {pendingCounts.sessionsPending} · con error y datos {pendingCounts.sessionsFailed} · con error sin datos {pendingCounts.sessionsFailedOrphan}
                     {"\n"}Solicitudes de cambio sin enviar {pendingCounts.changeRequestsPendingSync}
                     {"\n"}Consentimientos: pendientes {pendingCounts.consentsPending} · con error {pendingCounts.consentsFailed}
                     {"\n"}Lotes en borrador {pendingCounts.farmPlotsDraft}
