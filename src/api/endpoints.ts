@@ -51,9 +51,6 @@ export const endpoints = {
   changeRequests: '/api/change-requests',
   changeRequestsMyResolved: '/api/change-requests/my-resolved',
 
-  // Question options (dynamic creation)
-  questionOptions: (questionId: string) => `/api/questions/${questionId}/options`,
-
   // Consent (spec 78)
   consentDocumentActive: '/api/consent-documents/active',
   consents: '/api/consents',
