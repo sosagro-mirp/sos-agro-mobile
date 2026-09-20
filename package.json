@@ -4,6 +4,7 @@
   "main": "expo-router/entry",
   "dependencies": {
     "@expo-google-fonts/jetbrains-mono": "^0.4.1",
+    "@noble/hashes": "^2.4.0",
     "@react-native-community/netinfo": "11.4.1",
     "@sentry/react-native": "^7.2.0",
     "@tanstack/react-query": "^5.101.0",
@@ -60,7 +61,7 @@
   "jest": {
     "preset": "jest-expo",
     "transformIgnorePatterns": [
-      "node_modules/(?!\\.pnpm)(?!((jest-)?react-native|@react-native(-community)?)|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|drizzle-orm|rettime|@open-draft/.*|headers-polyfill|until-async)"
+      "node_modules/(?!\\.pnpm)(?!((jest-)?react-native|@react-native(-community)?)|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|drizzle-orm|@noble/.*|rettime|@open-draft/.*|headers-polyfill|until-async)"
     ],
     "transform": {
       "\\.mjs$": "babel-jest"
