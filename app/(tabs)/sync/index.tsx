@@ -34,6 +34,7 @@ import { consentRecordStore } from "../../../src/storage/consentRecordStore";
 import { instrumentCacheStorage } from "../../../src/storage/instrumentCache";
 import { farmerCacheStorage } from "../../../src/storage/farmerCache";
 import { NetworkMonitor } from "../../../src/sync/NetworkMonitor";
+import { describeNumericUnitRecovery } from "../../../src/lib/describeFailedSyncCause";
 import { MediaUploadService } from "../../../src/sync/MediaUploadService";
 import { Fonts } from "../../../src/theme/fonts";
 import { useTheme } from "../../../src/theme/ThemeProvider";
@@ -327,7 +328,11 @@ export default function SyncScreen() {
                     {who || "Instrumento no disponible"}
                   </Text>
                   <Text style={styles.failedWhen}>{when}</Text>
-                  {entry.errorDetail ? (
+                  {describeNumericUnitRecovery(entry.errorDetail) ? (
+                    <Text style={styles.failedError}>
+                      {describeNumericUnitRecovery(entry.errorDetail)}
+                    </Text>
+                  ) : entry.errorDetail ? (
                     <Text style={styles.failedError}>{entry.errorDetail}</Text>
                   ) : null}
                 </View>
