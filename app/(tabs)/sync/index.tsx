@@ -20,11 +20,15 @@ import {
   Paperclip,
   RefreshCw,
   Trash2,
+  UserRound,
 } from "lucide-react-native";
 import { useSnackbar } from "../../../src/components/common/Snackbar";
 import { DestructiveButton } from "../../../src/components/common/DestructiveButton";
 import { useSyncStatusStore } from "../../../src/store/useSyncStatusStore";
 import { syncQueueStorage, type SyncQueueEntry } from "../../../src/storage/syncQueue";
+import { secureStorage } from "../../../src/storage/secureStorage";
+import { offlineCredentialStorage } from "../../../src/storage/offlineCredentialStorage";
+import { isTokenExpired } from "../../../src/lib/jwt";
 import {
   mediaUploadQueueStorage,
   type MediaUploadEntry,
@@ -140,6 +144,8 @@ export default function SyncScreen() {
   const [isPurging, setIsPurging] = useState(false);
   const [isClearingFailed, setIsClearingFailed] = useState(false);
   const [isClearingFailedMedia, setIsClearingFailedMedia] = useState(false);
+  // Spec 86 (CA-16): encuestadores con pendientes que esperan ingresar con conexión.
+  const [waitingNames, setWaitingNames] = useState<string[]>([]);
 
   const refreshData = async () => {
     await refreshPendingCount();
@@ -147,6 +153,26 @@ export default function SyncScreen() {
     setFailedEntries(failed);
     const failedMediaEntries = await mediaUploadQueueStorage.listFailed();
     setFailedMedia(failedMediaEntries);
+
+    // Spec 86 (CA-16): pendientes de OTROS encuestadores cuyo token falta o venció
+    // no se envían con el de quien esté al frente; esperan su propio ingreso.
+    try {
+      const [owners, known, activeId] = await Promise.all([
+        syncQueueStorage.listPendingOwners(),
+        offlineCredentialStorage.listKnownUsers(),
+        secureStorage.getActiveUserId(),
+      ]);
+      const waiting: string[] = [];
+      for (const owner of owners) {
+        if (!owner || owner === activeId) continue;
+        const token = await secureStorage.getTokenFor(owner);
+        if (token && !isTokenExpired(token)) continue;
+        waiting.push(known.find((k) => k.userId === owner)?.name ?? "otro encuestador");
+      }
+      setWaitingNames(waiting);
+    } catch {
+      setWaitingNames([]);
+    }
 
     const surveyIds = [...new Set([...failed.map((e) => e.surveyId), ...failedMediaEntries.map((e) => e.surveyId)])];
     const resolved = await Promise.all(surveyIds.map((id) => resolveEntryIdentity(id)));
@@ -267,6 +293,15 @@ export default function SyncScreen() {
             <Text style={styles.lastSync}>Sin sincronizaciones en esta sesión</Text>
           )}
         </View>
+
+        {waitingNames.map((name, i) => (
+          <View key={`${name}-${i}`} style={styles.waitingCard}>
+            <UserRound size={16} color={colors.infoFg} />
+            <Text style={styles.waitingText}>
+              Esperando que {name} ingrese con conexión para enviar sus encuestas
+            </Text>
+          </View>
+        ))}
 
         <View style={styles.countersRow}>
           <CounterCard label="Pendientes" value={pendingCount} tone="warning" />
@@ -459,6 +494,15 @@ function CounterCard({
 
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
+    waitingCard: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      backgroundColor: colors.infoBg,
+      borderRadius: 10,
+      padding: 12,
+    },
+    waitingText: { flex: 1, fontFamily: Fonts.medium, fontSize: 13, color: colors.infoFg, lineHeight: 18 },
     root: { flex: 1, backgroundColor: colors.surfaceMuted },
     header: {
       paddingHorizontal: 20,

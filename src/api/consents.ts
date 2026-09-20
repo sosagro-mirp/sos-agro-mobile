@@ -1,4 +1,4 @@
-import { httpClient } from './httpClient';
+import { httpClient, type RequestOptions } from './httpClient';
 import { endpoints } from './endpoints';
 
 export interface ConsentDocument {
@@ -42,8 +42,11 @@ export interface ConsentRecordResponse {
 export const fetchActiveConsentDocument = (): Promise<ConsentDocument> =>
   httpClient.get(endpoints.consentDocumentActive);
 
-export const submitConsent = (payload: CreateConsentPayload): Promise<ConsentRecordResponse> =>
-  httpClient.post(endpoints.consents, payload);
+export const submitConsent = (
+  payload: CreateConsentPayload,
+  opts?: RequestOptions,
+): Promise<ConsentRecordResponse> =>
+  httpClient.post(endpoints.consents, payload, ...(opts ? [opts] : []));
 
 export const fetchFarmerConsentStatus = (farmerId: string): Promise<ConsentVigency> =>
   httpClient.get(endpoints.farmerConsentStatus(farmerId));

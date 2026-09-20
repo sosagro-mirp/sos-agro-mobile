@@ -1,6 +1,7 @@
-import { eq, and, asc } from 'drizzle-orm';
+import { eq, and, asc, isNull, or } from 'drizzle-orm';
 import { db } from './db/db';
 import { syncQueue } from './db/schema';
+import { secureStorage } from './secureStorage';
 
 export type SyncStatus = 'pending' | 'in_flight' | 'failed_validation';
 
@@ -27,6 +28,11 @@ export interface SyncQueueEntry {
   // Solo lo usan las entradas 'skip-step' (spec 70, Fase 10): el instrumento
   // del paso que se saltó, que POST /api/surveys/skip-step exige.
   instrumentId?: string;
+  // Spec 86 — dueño del ítem; `undefined` = sin dueño (anterior a m0013).
+  ownerUserId?: string;
+  // Spec 86 — solo en memoria (nunca se persiste): token del dueño con el que
+  // la sync debe enviar este ítem. Lo adjunta `SyncQueueService.processEntry`.
+  authToken?: string;
 }
 
 export interface EnqueueParams {
@@ -37,10 +43,13 @@ export interface EnqueueParams {
   payloadPath?: string;
   itemType?: ItemType;
   instrumentId?: string;
+  // Spec 86 — por defecto el usuario activo al momento de encolar.
+  ownerUserId?: string;
 }
 
 export const syncQueueStorage = {
   async enqueue(params: EnqueueParams): Promise<void> {
+    const ownerUserId = params.ownerUserId ?? (await secureStorage.getActiveUserId()) ?? null;
     await db.insert(syncQueue).values({
       id: params.id,
       surveyId: params.surveyId,
@@ -54,14 +63,28 @@ export const syncQueueStorage = {
       createdAt: new Date(),
       itemType: params.itemType ?? 'survey',
       instrumentId: params.instrumentId ?? null,
+      ownerUserId,
     });
   },
 
-  async dequeueNextPending(): Promise<SyncQueueEntry | null> {
+  // Spec 86 — `ownerUserId` undefined = sin filtro (comportamiento anterior);
+  // `null` = solo registros sin dueño; string = solo los de ese dueño.
+  async dequeueNextPending(ownerUserId?: string | null): Promise<SyncQueueEntry | null> {
+    const ownerFilter =
+      ownerUserId === undefined
+        ? undefined
+        : ownerUserId === null
+          ? isNull(syncQueue.ownerUserId)
+          : eq(syncQueue.ownerUserId, ownerUserId);
+
     const row = await db
       .select()
       .from(syncQueue)
-      .where(eq(syncQueue.status, 'pending'))
+      .where(
+        ownerFilter
+          ? and(eq(syncQueue.status, 'pending'), ownerFilter)
+          : eq(syncQueue.status, 'pending'),
+      )
       .orderBy(asc(syncQueue.createdAt))
       .limit(1)
       .get();
@@ -106,11 +129,29 @@ export const syncQueueStorage = {
       .where(eq(syncQueue.id, id));
   },
 
-  async countPending(): Promise<number> {
+  /** Spec 86 — dueños distintos con ítems pendientes (`null` = sin dueño). */
+  async listPendingOwners(): Promise<(string | null)[]> {
+    const rows = await db
+      .select({ owner: syncQueue.ownerUserId })
+      .from(syncQueue)
+      .where(eq(syncQueue.status, 'pending'))
+      .all();
+    return [...new Set(rows.map((r) => r.owner ?? null))];
+  },
+
+  // Spec 86 — con `ownerUserId`, solo los del encuestador activo más los sin dueño.
+  async countPending(ownerUserId?: string): Promise<number> {
     const rows = await db
       .select({ id: syncQueue.id })
       .from(syncQueue)
-      .where(eq(syncQueue.status, 'pending'))
+      .where(
+        ownerUserId === undefined
+          ? eq(syncQueue.status, 'pending')
+          : and(
+              eq(syncQueue.status, 'pending'),
+              or(eq(syncQueue.ownerUserId, ownerUserId), isNull(syncQueue.ownerUserId)),
+            ),
+      )
       .all();
     return rows.length;
   },
@@ -233,5 +274,6 @@ function mapRow(row: typeof syncQueue.$inferSelect): SyncQueueEntry {
     createdAt: row.createdAt,
     itemType: (row.itemType ?? 'survey') as ItemType,
     instrumentId: row.instrumentId ?? undefined,
+    ownerUserId: row.ownerUserId ?? undefined,
   };
 }

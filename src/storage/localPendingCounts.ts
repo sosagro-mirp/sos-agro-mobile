@@ -1,4 +1,4 @@
-import { count, sql } from 'drizzle-orm';
+import { and, count, eq, isNull, or, sql } from 'drizzle-orm';
 import type { SQLiteColumn, SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { db } from './db/db';
 import {
@@ -11,6 +11,7 @@ import {
   syncQueue,
 } from './db/schema';
 import type { LocalPendingCounts } from '../lib/uninstallReadiness';
+import type { OwnerPendingCounts } from '../lib/logoutGuard';
 
 /**
  * Spec 35, Fase 2 — conteos por tabla y estado para el veredicto «Cambio de
@@ -86,5 +87,49 @@ export async function getLocalPendingCounts(): Promise<LocalPendingCounts> {
     consentsPending: cn.pending ?? 0,
     consentsFailed: cn.failed ?? 0,
     farmPlotsDraft: fp.draft ?? 0,
+  };
+}
+
+/**
+ * Spec 86 — pendientes de UN encuestador (para la advertencia de "Olvidar esta
+ * tablet"). Incluye los registros sin dueño (anteriores a m0013), que se
+ * procesan con la sesión activa. Los consentimientos, lotes y saltos de paso
+ * viajan por `sync_queue`, así que se distinguen por `item_type`.
+ */
+export async function getOwnerPendingCounts(ownerUserId: string): Promise<OwnerPendingCounts> {
+  const ownedQueue = or(eq(syncQueue.ownerUserId, ownerUserId), isNull(syncQueue.ownerUserId));
+  const queueRows = await db
+    .select({ itemType: syncQueue.itemType, total: count() })
+    .from(syncQueue)
+    .where(ownedQueue)
+    .groupBy(syncQueue.itemType);
+  const byType: Record<string, number> = {};
+  for (const r of queueRows) byType[String(r.itemType)] = Number(r.total);
+
+  const [draftRow] = await db
+    .select({ total: count() })
+    .from(surveys)
+    .where(
+      and(
+        eq(surveys.status, 'draft'),
+        or(eq(surveys.ownerUserId, ownerUserId), isNull(surveys.ownerUserId)),
+      ),
+    );
+  const [crRow] = await db
+    .select({ total: count() })
+    .from(changeRequests)
+    .where(
+      and(
+        eq(changeRequests.status, 'pending_sync'),
+        or(eq(changeRequests.ownerUserId, ownerUserId), isNull(changeRequests.ownerUserId)),
+      ),
+    );
+
+  return {
+    queue: (byType.survey ?? 0) + (byType['skip-step'] ?? 0),
+    drafts: Number(draftRow?.total ?? 0),
+    changeRequests: Number(crRow?.total ?? 0),
+    consents: byType.consent ?? 0,
+    plots: byType['farm-plot'] ?? 0,
   };
 }

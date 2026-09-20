@@ -15,6 +15,7 @@ import { useCachedInstrumentsStore } from "../src/store/useCachedInstrumentsStor
 import { runMigrations } from "../src/storage/db/db";
 import { syncQueueStorage } from "../src/storage/syncQueue";
 import { surveyDraftStore } from "../src/storage/surveyDraftStore";
+import { runOwnershipBackfill } from "../src/storage/ownershipBackfill";
 import { pendingSessionStorage } from "../src/storage/pendingSessions";
 import { NetworkMonitor } from "../src/sync/NetworkMonitor";
 import { BackgroundSync } from "../src/sync/BackgroundSync";
@@ -85,6 +86,7 @@ function AppStack() {
       <Stack.Screen name="login" />
       <Stack.Screen name="index" />
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      <Stack.Screen name="account" />
       <Stack.Screen name="campaign/[id]/pre-survey" />
       <Stack.Screen name="campaign/[id]/session/[sessionId]/orchestrator" />
       <Stack.Screen name="campaign/[id]/session/[sessionId]/completed" />
@@ -219,18 +221,33 @@ export default function RootLayout() {
       .then((count) => { if (count > 0) logger.info(`Purged ${count} old synced surveys`); })
       .catch((err) => logger.error('[App] purgeSyncedSurveys failed', err));
 
-    NetworkMonitor.start();
-    BackgroundSync.register().catch(() => {
-      // expo-background-fetch not available in Expo Go — silently ignored
-    });
+    // Spec 86 (CA-19): los registros anteriores a m0013 reciben dueño ANTES de
+    // que arranque cualquier sync, para que salgan con el token correcto.
+    let cancelled = false;
+    runOwnershipBackfill()
+      .catch((err) => {
+        captureError(err);
+        logger.error('[App] runOwnershipBackfill failed', err);
+      })
+      .then(() => {
+        if (cancelled) return;
 
-    // Cold start: process queue if network is available.
-    NetworkMonitor.checkAndSync().catch((err) => {
-      captureError(err);
-      logger.error('[App] checkAndSync failed', err);
-    });
+        NetworkMonitor.start();
+        BackgroundSync.register().catch(() => {
+          // expo-background-fetch not available in Expo Go — silently ignored
+        });
 
-    return () => NetworkMonitor.stop();
+        // Cold start: process queue if network is available.
+        NetworkMonitor.checkAndSync().catch((err) => {
+          captureError(err);
+          logger.error('[App] checkAndSync failed', err);
+        });
+      });
+
+    return () => {
+      cancelled = true;
+      NetworkMonitor.stop();
+    };
   }, [dbReady]);
 
   // El árbol se renderiza SIEMPRE; la pantalla de error sustituye al stack de
