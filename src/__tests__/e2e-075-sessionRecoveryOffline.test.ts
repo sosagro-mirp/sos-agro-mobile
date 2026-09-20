@@ -4,22 +4,25 @@
  * Cubre los criterios de aceptación de
  * `spec/75_recuperacion_sesion_sin_conexion.md`.
  *
- * ARRANCA EN ROJO: `src/lib/jwt.ts` y `src/storage/userStorage.ts` todavía no
- * existen (Fase 2); `useAuthStore.restoreSession()` todavía no distingue
- * NetworkError/ServerError 401/ServerError 5xx (Fase 3).
- *
- * Contexto del bug: `restoreSession()` depende de `GET /api/auth/me` para
- * decidir si la sesión sigue viva y borra el token ante cualquier error del
- * catch desnudo — incluida la simple ausencia de conexión. Estos casos fijan
- * el contrato de la validación local de expiración del JWT y de las cuatro
- * ramas que debe distinguir `restoreSession()`.
+ * Actualizado por el spec 86 (autorizado por el usuario, 2026-09-20): el token
+ * ya no es único sino por usuario (`secureStorage.getActiveUserId/getTokenFor…`)
+ * y un token vencido dejó de cerrar la sesión local — el criterio "token
+ * vencido → login" del spec 75 quedó REEMPLAZADO por `e2e-086-authSessionDecoupling`
+ * (la sesión se conserva y pasa a `reauth_required`). Los demás criterios del
+ * spec 75 (token vigente offline, 401, 404, 5xx, persistencia del `user`) se
+ * conservan aquí sobre la nueva API de almacenamiento.
  */
 
 jest.mock('../storage/secureStorage', () => ({
   secureStorage: {
+    migrateLegacyToken: jest.fn(),
+    getActiveUserId: jest.fn(),
+    setActiveUserId: jest.fn(),
+    clearActiveUserId: jest.fn(),
+    getTokenFor: jest.fn(),
+    saveTokenFor: jest.fn(),
+    deleteTokenFor: jest.fn(),
     getToken: jest.fn(),
-    saveToken: jest.fn(),
-    deleteToken: jest.fn(),
   },
 }));
 
@@ -31,10 +34,38 @@ jest.mock('../storage/userStorage', () => ({
   },
 }));
 
+jest.mock('../storage/offlineCredentialStorage', () => ({
+  offlineCredentialStorage: {
+    getCredential: jest.fn(),
+    findByEmail: jest.fn(),
+    saveCredential: jest.fn(),
+    deleteCredential: jest.fn(),
+    markRequiresOnlineLogin: jest.fn(),
+    upsertKnownUser: jest.fn(),
+    removeKnownUser: jest.fn(),
+    listKnownUsers: jest.fn(),
+  },
+}));
+
+jest.mock('../lib/offlineCredential', () => ({
+  ...jest.requireActual('../lib/offlineCredential'),
+  createOfflineCredential: jest.fn().mockResolvedValue({}),
+}));
+
 jest.mock('../api/auth', () => ({
   login: jest.fn(),
   me: jest.fn(),
 }));
+
+jest.mock('../sync/SyncQueueService', () => ({ SyncQueueService: { processAll: jest.fn() } }));
+jest.mock('../store/useCampaignSessionStore', () => ({
+  useCampaignSessionStore: { getState: () => ({ reset: jest.fn() }) },
+}));
+jest.mock('../store/useInstrumentSurveyStore', () => ({
+  useInstrumentSurveyStore: { getState: () => ({ reset: jest.fn() }) },
+}));
+jest.mock('../storage/syncQueue', () => ({ syncQueueStorage: {} }));
+jest.mock('../storage/mediaUploadQueueStorage', () => ({ mediaUploadQueueStorage: {} }));
 
 import { secureStorage } from '../storage/secureStorage';
 import { userStorage } from '../storage/userStorage';
@@ -43,12 +74,8 @@ import { NetworkError, ServerError } from '../api/httpClient';
 import { useAuthStore } from '../store/useAuthStore';
 import { getJwtExpiry, isTokenExpired } from '../lib/jwt';
 
-const mockGetToken = secureStorage.getToken as jest.Mock;
-const mockDeleteToken = secureStorage.deleteToken as jest.Mock;
-const mockSaveToken = secureStorage.saveToken as jest.Mock;
-const mockGetUser = userStorage.getUser as jest.Mock;
-const mockSaveUser = userStorage.saveUser as jest.Mock;
-const mockDeleteUser = userStorage.deleteUser as jest.Mock;
+const ss = secureStorage as unknown as Record<string, jest.Mock>;
+const us = userStorage as unknown as Record<string, jest.Mock>;
 const mockApiMe = apiMe as jest.Mock;
 const mockApiLogin = apiLogin as jest.Mock;
 
@@ -74,12 +101,19 @@ const NOW_SECONDS = Math.floor(Date.now() / 1000);
 const VALID_TOKEN = fakeJwt(NOW_SECONDS + 60 * 60); // vence en 1h
 const EXPIRED_TOKEN = fakeJwt(NOW_SECONDS - 60 * 60); // venció hace 1h
 
+function storedSession(token: string) {
+  ss.getActiveUserId.mockResolvedValue(CACHED_USER.userId);
+  ss.getTokenFor.mockResolvedValue(token);
+  us.getUser.mockResolvedValue(CACHED_USER);
+}
+
 beforeEach(() => {
   jest.clearAllMocks();
-  mockDeleteToken.mockResolvedValue(undefined);
-  mockDeleteUser.mockResolvedValue(undefined);
-  mockSaveToken.mockResolvedValue(undefined);
-  mockSaveUser.mockResolvedValue(undefined);
+  for (const m of [...Object.values(ss), ...Object.values(us)]) m.mockResolvedValue(undefined);
+  ss.migrateLegacyToken.mockResolvedValue(null);
+  mockApiMe.mockReset();
+  mockApiMe.mockRejectedValue(new NetworkError());
+  useAuthStore.setState({ token: null, user: null, serverState: 'unknown', error: null });
 });
 
 describe('spec75 / jwt.ts — validación local de expiración', () => {
@@ -107,8 +141,7 @@ describe('spec75 / jwt.ts — validación local de expiración', () => {
 
 describe('spec75 / useAuthStore.restoreSession — Criterio: reapertura sin conexión, token vigente', () => {
   it('restaura token y user cacheados sin depender de apiMe()', async () => {
-    mockGetToken.mockResolvedValue(VALID_TOKEN);
-    mockGetUser.mockResolvedValue(CACHED_USER);
+    storedSession(VALID_TOKEN);
     mockApiMe.mockRejectedValue(new NetworkError());
 
     await useAuthStore.getState().restoreSession();
@@ -116,52 +149,28 @@ describe('spec75 / useAuthStore.restoreSession — Criterio: reapertura sin cone
     const state = useAuthStore.getState();
     expect(state.token).toBe(VALID_TOKEN);
     expect(state.user).toEqual(CACHED_USER);
-    expect(mockDeleteToken).not.toHaveBeenCalled();
+    expect(ss.deleteTokenFor).not.toHaveBeenCalled();
     expect(state.isRestoring).toBe(false);
   });
 });
 
-describe('spec75 / useAuthStore.restoreSession — Criterio: token realmente vencido', () => {
-  it('borra token y user, deja la sesión sin restaurar', async () => {
-    mockGetToken.mockResolvedValue(EXPIRED_TOKEN);
-    mockGetUser.mockResolvedValue(CACHED_USER);
+describe('spec75 / useAuthStore.restoreSession — Criterio: token vencido (reemplazado por spec 86)', () => {
+  it('ya NO borra la sesión: la conserva y queda por renovar con el servidor', async () => {
+    storedSession(EXPIRED_TOKEN);
 
     await useAuthStore.getState().restoreSession();
 
     const state = useAuthStore.getState();
-    expect(state.token).toBeNull();
-    expect(state.user).toBeNull();
-    expect(mockDeleteToken).toHaveBeenCalledTimes(1);
-    expect(mockDeleteUser).toHaveBeenCalledTimes(1);
-    // No debe intentar validar contra el backend un token ya vencido localmente.
-    expect(mockApiMe).not.toHaveBeenCalled();
-  });
-});
-
-describe('spec75 / useAuthStore.restoreSession — Criterio: 401 real del backend', () => {
-  it('borra token y user cuando apiMe() responde 401', async () => {
-    mockGetToken.mockResolvedValue(VALID_TOKEN);
-    mockGetUser.mockResolvedValue(CACHED_USER);
-    mockApiMe.mockRejectedValue(new ServerError(401, 'Unauthorized'));
-
-    await useAuthStore.getState().restoreSession();
-
-    // La restauración local ocurre primero; la limpieza por 401 es asíncrona
-    // (best-effort en segundo plano) — se espera a que se resuelva.
-    await new Promise((r) => setTimeout(r, 0));
-
-    const state = useAuthStore.getState();
-    expect(state.token).toBeNull();
-    expect(state.user).toBeNull();
-    expect(mockDeleteToken).toHaveBeenCalledTimes(1);
-    expect(mockDeleteUser).toHaveBeenCalledTimes(1);
+    expect(state.user).toEqual(CACHED_USER);
+    expect(state.serverState).toBe('reauth_required');
+    expect(ss.deleteTokenFor).not.toHaveBeenCalled();
+    expect(us.deleteUser).not.toHaveBeenCalled();
   });
 });
 
 describe('spec75 / useAuthStore.restoreSession — Criterio: usuario borrado (404 del backend)', () => {
-  it('borra token y user cuando apiMe() responde 404 (TC-075-03, hallazgo de la ronda manual)', async () => {
-    mockGetToken.mockResolvedValue(VALID_TOKEN);
-    mockGetUser.mockResolvedValue(CACHED_USER);
+  it('cierra la sesión y borra el token del usuario cuando apiMe() responde 404 (TC-075-03)', async () => {
+    storedSession(VALID_TOKEN);
     mockApiMe.mockRejectedValue(new ServerError(404, 'User not found'));
 
     await useAuthStore.getState().restoreSession();
@@ -170,15 +179,13 @@ describe('spec75 / useAuthStore.restoreSession — Criterio: usuario borrado (40
     const state = useAuthStore.getState();
     expect(state.token).toBeNull();
     expect(state.user).toBeNull();
-    expect(mockDeleteToken).toHaveBeenCalledTimes(1);
-    expect(mockDeleteUser).toHaveBeenCalledTimes(1);
+    expect(ss.deleteTokenFor).toHaveBeenCalledWith(CACHED_USER.userId);
   });
 });
 
 describe('spec75 / useAuthStore.restoreSession — Criterio: backend caído (5xx/timeout)', () => {
   it('conserva la sesión restaurada localmente ante un ServerError 5xx', async () => {
-    mockGetToken.mockResolvedValue(VALID_TOKEN);
-    mockGetUser.mockResolvedValue(CACHED_USER);
+    storedSession(VALID_TOKEN);
     mockApiMe.mockRejectedValue(new ServerError(503, 'Service unavailable'));
 
     await useAuthStore.getState().restoreSession();
@@ -187,27 +194,21 @@ describe('spec75 / useAuthStore.restoreSession — Criterio: backend caído (5xx
     const state = useAuthStore.getState();
     expect(state.token).toBe(VALID_TOKEN);
     expect(state.user).toEqual(CACHED_USER);
-    expect(mockDeleteToken).not.toHaveBeenCalled();
-    expect(mockDeleteUser).not.toHaveBeenCalled();
+    expect(ss.deleteTokenFor).not.toHaveBeenCalled();
+    expect(us.deleteUser).not.toHaveBeenCalled();
   });
 });
 
 describe('spec75 / useAuthStore.login — persiste user localmente', () => {
-  it('guarda el user en userStorage además del token en secureStorage', async () => {
+  it('guarda el user en userStorage además del token por usuario en secureStorage', async () => {
     mockApiLogin.mockResolvedValue({ accessToken: VALID_TOKEN, user: CACHED_USER });
 
     await useAuthStore.getState().login('maria@sosagro.test', 'secret');
 
-    expect(mockSaveToken).toHaveBeenCalledWith(VALID_TOKEN);
-    expect(mockSaveUser).toHaveBeenCalledWith(CACHED_USER);
+    expect(ss.saveTokenFor).toHaveBeenCalledWith(CACHED_USER.userId, VALID_TOKEN);
+    expect(us.saveUser).toHaveBeenCalledWith(CACHED_USER);
   });
 });
 
-describe('spec75 / useAuthStore.logout — limpia user cacheado', () => {
-  it('borra tanto el token como el user cacheado', async () => {
-    await useAuthStore.getState().logout();
-
-    expect(mockDeleteToken).toHaveBeenCalledTimes(1);
-    expect(mockDeleteUser).toHaveBeenCalledTimes(1);
-  });
-});
+// El 401 "rechazado" (firma inválida) y `logout()` (ahora `switchUser()` /
+// `forgetDevice()`) quedan cubiertos en `e2e-086-authSessionDecoupling`.
