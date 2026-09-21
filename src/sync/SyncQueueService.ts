@@ -21,6 +21,7 @@ import { useSyncStatusStore } from '../store/useSyncStatusStore';
 import { useCampaignSessionStore } from '../store/useCampaignSessionStore';
 import { useAuthStore } from '../store/useAuthStore';
 import { shouldRetrySessionLater } from './planSessionRecovery';
+import { resolveDraftFarmerId } from './resolveDraftFarmerId';
 import { NetworkError, ServerError, httpClient } from '../api/httpClient';
 import { endpoints } from '../api/endpoints';
 import { logger } from '../lib/logger';
@@ -678,11 +679,21 @@ class SyncQueueServiceClass {
     // inestable — el escenario real de `TC-070-04`), el siguiente intento
     // reenvía el mismo id local y el backend devuelve la encuesta ya creada
     // en vez de duplicarla. Sin esto, cada reintento generaba una fila nueva.
+    // Spec 90 — el `farmerId` del borrador puede ser provisional
+    // (`local_farmer_…`) si esta encuesta no es de registro y por tanto nunca
+    // pasó por `extractFarmer`. Enviarlo tal cual lo rechaza el backend con un
+    // 400 (`@IsUUID`) y condena la encuesta entera. Se resuelve al id real por
+    // documento, y si no hay forma se omite el campo.
+    const farmerIdParaBackend = await resolveDraftFarmerId(draft.farmerId, {
+      documentoDe: async (id) => (await farmerCacheStorage.get(id))?.documentId ?? null,
+      idRealDe: async (doc) => (await farmerCacheStorage.getByDocumentId(doc))?.farmerId ?? null,
+    });
+
     const { surveyId: realSurveyId } = await createSurvey({
       instrumentIds: [draft.instrumentId],
       campaignSessionId: entry.campaignSessionId,
       clientSurveyId: entry.surveyId,
-      ...(draft.farmerId != null ? { farmerId: draft.farmerId } : {}),
+      ...(farmerIdParaBackend ? { farmerId: farmerIdParaBackend } : {}),
       ...(entry.stepOrder != null ? { stepOrder: entry.stepOrder } : {}),
     });
 
