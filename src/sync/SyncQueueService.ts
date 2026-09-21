@@ -17,6 +17,8 @@ import { resolveOtherOptions } from '../lib/resolveOtherOptions';
 import { isLocalId } from '../lib/isLocalId';
 import { useSyncStatusStore } from '../store/useSyncStatusStore';
 import { useCampaignSessionStore } from '../store/useCampaignSessionStore';
+import { useAuthStore } from '../store/useAuthStore';
+import { shouldRetrySessionLater } from './planSessionRecovery';
 import { NetworkError, ServerError, httpClient } from '../api/httpClient';
 import { endpoints } from '../api/endpoints';
 import { logger } from '../lib/logger';
@@ -45,6 +47,17 @@ class SyncQueueServiceClass {
   async processAll(): Promise<void> {
     if (this.isProcessing) return;
     if (this.consecutiveNetworkFailures >= MAX_CONSECUTIVE_NETWORK_FAILURES) return;
+
+    // Spec 88, criterio 8 — sin token no se procesa nada. `NetworkMonitor`,
+    // `checkAndSync()` y `BackgroundSync` arrancan haya sesión o no: al abrir
+    // la app, el sync corría antes de que `restoreSession()` hidratara el
+    // token, el servidor respondía 401 y ese 401 condenaba la sesión de
+    // campaña y, con ella, todas sus encuestas. Esperar a que haya sesión no
+    // pierde nada: la cola es persistente y se procesa en la siguiente corrida.
+    if (!useAuthStore.getState().token) {
+      logger.info('[Sync] sin sesión iniciada, no se procesa la cola');
+      return;
+    }
 
     this.isProcessing = true;
     const { setSyncingId, markSyncCompleted, refreshPendingCount } =
@@ -214,8 +227,18 @@ class SyncQueueServiceClass {
 
         logger.info(`[Sync] resolved local session ${localSessionId} → ${realSessionId}`);
       } catch (err) {
-        if (err instanceof NetworkError) {
-          logger.error('[Sync] network error resolving session, will retry later', err);
+        // Spec 88, criterio 7 — antes solo `NetworkError` se consideraba
+        // transitorio, así que un 401 (o un 429 con varias tabletas en el
+        // mismo wifi) marcaba la sesión como `failed`. Como
+        // `resolveLocalSessions()` solo itera `listPending()`, esa sesión no
+        // se reintentaba nunca y arrastraba a `failed_validation` todas las
+        // encuestas encoladas contra ella. Ese fue el incidente del 17-18 de
+        // septiembre de 2026 (Sentry REACT-NATIVE-F y REACT-NATIVE-G).
+        if (shouldRetrySessionLater(err)) {
+          logger.error(
+            `[Sync] error transitorio resolviendo la sesión ${session.localSessionId}, sigue pendiente y se reintenta luego`,
+            err,
+          );
           break;
         } else {
           logger.error(`[Sync] failed to resolve session ${session.localSessionId}`, err);
