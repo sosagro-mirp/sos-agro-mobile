@@ -141,6 +141,16 @@ jest.mock('../store/useChangeRequestStore', () => ({
   },
 }));
 
+// Spec 88 — `processAll()` no procesa la cola sin sesión iniciada (criterio 8).
+// Estas suites ejercitan el sync directamente, así que necesitan un token
+// simulado. Mock agregado con autorización explícita del usuario (2026-09-21);
+// ninguna aserción de estas suites cambió.
+jest.mock('../store/useAuthStore', () => ({
+  useAuthStore: {
+    getState: jest.fn().mockReturnValue({ token: 'test-token' }),
+  },
+}));
+
 jest.mock('../store/useCampaignSessionStore', () => ({
   useCampaignSessionStore: {
     getState: jest.fn().mockReturnValue({
@@ -997,5 +1007,36 @@ describe('processEntry — skip-step', () => {
       expect.stringContaining('Instrument not found'),
     );
     expect(mockMarkSynced).not.toHaveBeenCalledWith('skip-entry-5');
+  });
+
+  // Spec 88 — regresión del congelamiento encontrado en la ronda manual del
+  // test-088 (2026-09-21). `resolveCampaignSession()` devuelve a `pending` la
+  // entrada que aplaza, así que si el bucle vuelve a pedir la más antigua sin
+  // excluir las ya atendidas, recibe la misma para siempre: gira sin esperar
+  // por red y bloquea el hilo de JS. La app quedaba pintada pero muerta.
+  //
+  // Se simula la cola real: `dequeueNextPending(excluidas)` respeta la lista de
+  // exclusión. Si `processAll()` no la usara, este caso no terminaría nunca.
+  it('no gira indefinidamente cuando una entrada vuelve a quedar pendiente', async () => {
+    const entry = makeEntry({
+      id: 'entry-aplazada',
+      surveyId: 'draft-aplazado',
+      campaignSessionId: 'local_session_sin_resolver',
+      itemType: 'survey',
+    });
+
+    let entregas = 0;
+    mockDequeueNextPending.mockImplementation(async (excluidas: string[] = []) => {
+      entregas += 1;
+      // Red de seguridad: si el bucle no excluye, cortamos a mano y el
+      // `expect` de abajo delata la regresión en vez de colgar la suite.
+      if (entregas > 20) return null;
+      return excluidas.includes(entry.id) ? null : entry;
+    });
+
+    await SyncQueueService.processAll();
+
+    // Dos llamadas: la que entrega la entrada y la que ya no tiene nada que dar.
+    expect(entregas).toBeLessThanOrEqual(2);
   });
 });

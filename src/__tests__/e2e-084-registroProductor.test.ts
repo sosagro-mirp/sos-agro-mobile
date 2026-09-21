@@ -130,6 +130,16 @@ jest.mock('../store/useChangeRequestStore', () => ({
   },
 }));
 
+// Spec 88 — `processAll()` no procesa la cola sin sesión iniciada (criterio 8).
+// Estas suites ejercitan el sync directamente, así que necesitan un token
+// simulado. Mock agregado con autorización explícita del usuario (2026-09-21);
+// ninguna aserción de estas suites cambió.
+jest.mock('../store/useAuthStore', () => ({
+  useAuthStore: {
+    getState: jest.fn().mockReturnValue({ token: 'test-token' }),
+  },
+}));
+
 jest.mock('../store/useCampaignSessionStore', () => ({
   useCampaignSessionStore: {
     getState: jest.fn().mockReturnValue({
