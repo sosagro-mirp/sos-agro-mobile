@@ -78,13 +78,20 @@ class SyncQueueServiceClass {
         logger.error('[Sync] flushPendingChangeRequests failed, continuing anyway', err);
       }
 
-      let entry = await syncQueueStorage.dequeueNextPending();
+      // Spec 88 — una entrada por corrida. `resolveCampaignSession()` devuelve a
+      // `pending` la entrada que aplaza (spec 81), así que sin esta lista el
+      // bucle la recibiría de nuevo en el siguiente `dequeueNextPending()` y
+      // giraría indefinidamente, bloqueando el hilo de JS. Se detectó
+      // congelando la app en la ronda manual del test-088.
+      const yaAtendidas: string[] = [];
+      let entry = await syncQueueStorage.dequeueNextPending(yaAtendidas);
 
       while (entry) {
         setSyncingId(entry.id);
+        yaAtendidas.push(entry.id);
         await this.processEntry(entry);
         await refreshPendingCount();
-        entry = await syncQueueStorage.dequeueNextPending();
+        entry = await syncQueueStorage.dequeueNextPending(yaAtendidas);
       }
       // Pull resolved change requests after the survey loop.
       try {
