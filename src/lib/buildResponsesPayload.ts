@@ -4,6 +4,8 @@ import type {
   InstrumentDraftAnswer,
 } from "../types";
 import { isQuestionVisible } from "./isQuestionVisible";
+import { isAnswerConsistent } from "./isAnswerConsistent";
+import { logger } from "./logger";
 
 export function buildResponsesPayload(
   surveyId: string,
@@ -19,6 +21,18 @@ export function buildResponsesPayload(
       const answer = answers[question.questionId];
 
       if (!answer) return;
+
+      // Spec 87 (D4, CA-13): un numeric_with_unit a medias tumba el lote completo
+      // (400 del backend dentro de una transacción → `failed_validation`). Es
+      // preferible perder UNA respuesta que la encuesta entera. Con la
+      // validación de "Siguiente" no debería llegar ninguna; puede venir de un
+      // borrador guardado antes del arreglo.
+      if (!isAnswerConsistent(question, answer)) {
+        logger.warn(
+          `[Payload] omitted incomplete numeric_with_unit answer — questionId: ${question.questionId}, surveyId: ${surveyId}`,
+        );
+        return;
+      }
 
       if (question.type.name === "multiple_choice") {
         const selectedOptionIds = answer.optionIds ?? [];

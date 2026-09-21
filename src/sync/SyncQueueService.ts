@@ -13,6 +13,8 @@ import { extractFarmer, extractCrops, DocumentIdCollisionError } from '../api/fa
 import { cacheFarmerIdentity } from '../lib/cacheFarmerIdentity';
 import { buildResponsesPayload } from '../lib/buildResponsesPayload';
 import { flattenSections } from '../lib/flattenSections';
+import { findIncompleteNumericUnitAnswers } from '../lib/findIncompleteNumericUnitAnswers';
+import { discardedAnswersStorage } from '../storage/discardedAnswersStorage';
 import { resolveOtherOptions } from '../lib/resolveOtherOptions';
 import { isLocalId } from '../lib/isLocalId';
 import { useSyncStatusStore } from '../store/useSyncStatusStore';
@@ -865,6 +867,17 @@ class SyncQueueServiceClass {
     );
 
     const flattenedQuestions = flattenSections(instrument.sections);
+
+    // Spec 87 (D7): `buildResponsesPayload` omite las respuestas número + unidad a
+    // medias para no tumbar el lote. Se registra antes el valor que se descarta,
+    // para que pueda reingresarse a mano.
+    const discarded = findIncompleteNumericUnitAnswers(flattenedQuestions, draft.answers);
+    if (discarded.length > 0) {
+      logger.warn(
+        `[Sync] survey ${entry.surveyId}: ${discarded.length} incomplete numeric_with_unit answer(s) sent without value`,
+      );
+      await discardedAnswersStorage.record(entry.surveyId, realSurveyId, discarded);
+    }
 
     const resolvedAnswers = await resolveOtherOptions(flattenedQuestions, draft.answers);
 

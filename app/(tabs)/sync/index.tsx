@@ -36,6 +36,9 @@ import { consentRecordStore } from "../../../src/storage/consentRecordStore";
 import { instrumentCacheStorage } from "../../../src/storage/instrumentCache";
 import { farmerCacheStorage } from "../../../src/storage/farmerCache";
 import { NetworkMonitor } from "../../../src/sync/NetworkMonitor";
+import { describeNumericUnitRecovery } from "../../../src/lib/describeFailedSyncCause";
+import { discardedAnswersStorage, type DiscardedAnswer } from "../../../src/storage/discardedAnswersStorage";
+import { describeDiscardedValue } from "../../../src/lib/findIncompleteNumericUnitAnswers";
 import { MediaUploadService } from "../../../src/sync/MediaUploadService";
 import { hasStuckSessions, recoverStuckSessions } from "../../../src/sync/recoverStuckSessions";
 import { Fonts } from "../../../src/theme/fonts";
@@ -136,6 +139,8 @@ export default function SyncScreen() {
   const [failedEntries, setFailedEntries] = useState<SyncQueueEntry[]>([]);
   const [failedMedia, setFailedMedia] = useState<MediaUploadEntry[]>([]);
   const [identities, setIdentities] = useState<Record<string, EntryIdentity>>({});
+  // Spec 87 (D7): respuestas número + unidad que se enviaron sin su valor a medias.
+  const [discarded, setDiscarded] = useState<DiscardedAnswer[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [retryingMediaId, setRetryingMediaId] = useState<string | null>(null);
@@ -162,7 +167,16 @@ export default function SyncScreen() {
     const failedMediaEntries = await mediaUploadQueueStorage.listFailed();
     setFailedMedia(failedMediaEntries);
 
-    const surveyIds = [...new Set([...failed.map((e) => e.surveyId), ...failedMediaEntries.map((e) => e.surveyId)])];
+    const discardedList = await discardedAnswersStorage.list();
+    setDiscarded(discardedList);
+
+    const surveyIds = [
+      ...new Set([
+        ...failed.map((e) => e.surveyId),
+        ...failedMediaEntries.map((e) => e.surveyId),
+        ...discardedList.map((d) => d.localSurveyId),
+      ]),
+    ];
     const resolved = await Promise.all(surveyIds.map((id) => resolveEntryIdentity(id)));
     setIdentities(Object.fromEntries(surveyIds.map((id, i) => [id, resolved[i]])));
   };
@@ -416,7 +430,11 @@ export default function SyncScreen() {
                     {who || "Instrumento no disponible"}
                   </Text>
                   <Text style={styles.failedWhen}>{when}</Text>
-                  {entry.errorDetail ? (
+                  {describeNumericUnitRecovery(entry.errorDetail) ? (
+                    <Text style={styles.failedError}>
+                      {describeNumericUnitRecovery(entry.errorDetail)}
+                    </Text>
+                  ) : entry.errorDetail ? (
                     <Text style={styles.failedError}>{entry.errorDetail}</Text>
                   ) : null}
                 </View>
@@ -443,6 +461,51 @@ export default function SyncScreen() {
               </View>
               );
             })}
+          </View>
+        ) : null}
+
+        {discarded.length > 0 ? (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <CircleAlert size={15} color={colors.warningFg} strokeWidth={2.4} />
+              <Text style={styles.sectionTitleWarning}>
+                RESPUESTAS ENVIADAS A MEDIAS ({discarded.length})
+              </Text>
+              <Pressable
+                onPress={async () => {
+                  await discardedAnswersStorage.clear();
+                  setDiscarded([]);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Limpiar avisos de respuestas enviadas a medias"
+              >
+                <Text style={styles.clearFailedBtnWarning}>Limpiar</Text>
+              </Pressable>
+            </View>
+            <View style={styles.attachmentsBox}>
+              {discarded.map((item, index) => {
+                const identity = identities[item.localSurveyId];
+                return (
+                  <View
+                    key={`${item.localSurveyId}-${item.questionId}`}
+                    style={[
+                      styles.attachmentRow,
+                      index !== discarded.length - 1 && styles.attachmentRowDivider,
+                    ]}
+                  >
+                    <View style={styles.attachmentInfo}>
+                      <Text style={styles.attachmentFile} numberOfLines={2}>
+                        {item.questionText}
+                      </Text>
+                      <Text style={styles.attachmentMeta} numberOfLines={2}>
+                        Se envió sin esta respuesta: {describeDiscardedValue(item)} ·{" "}
+                        {identity?.farmerName ?? identity?.instrumentName ?? "Sin identificar"}
+                      </Text>
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
           </View>
         ) : null}
 
