@@ -14,6 +14,6 @@ export function describeNumericUnitRecovery(errorDetail?: string | null): string
   if (!isNumericUnitValidationError(errorDetail)) return null;
   return (
     "Una respuesta de valor con unidad quedó sin unidad y el servidor rechazó la encuesta. " +
-    "Toca Reintentar: se enviará completa, sin esa respuesta."
+    "Toca Reintentar: se enviará sin esa respuesta y el valor quedará anotado en esta pantalla."
   );
 }

@@ -15,6 +15,21 @@
  * cálculo del tope; lo visual va en `docs/testing/test-087-…md`.
  */
 
+// Archivo en memoria para probar el registro de valores descartados sin tocar el
+// sistema de archivos real.
+const mockFiles: Record<string, string> = {};
+jest.mock('expo-file-system/legacy', () => ({
+  documentDirectory: 'file:///mock-documents/',
+  getInfoAsync: jest.fn(async (path: string) => ({ exists: path in mockFiles })),
+  readAsStringAsync: jest.fn(async (path: string) => mockFiles[path]),
+  writeAsStringAsync: jest.fn(async (path: string, content: string) => {
+    mockFiles[path] = content;
+  }),
+  deleteAsync: jest.fn(async (path: string) => {
+    delete mockFiles[path];
+  }),
+}));
+
 import { buildResponsesPayload } from '../lib/buildResponsesPayload';
 import { isAnswerComplete } from '../lib/isAnswerComplete';
 import { isAnswerConsistent } from '../lib/isAnswerConsistent';
@@ -23,6 +38,11 @@ import {
   describeNumericUnitRecovery,
   isNumericUnitValidationError,
 } from '../lib/describeFailedSyncCause';
+import {
+  describeDiscardedValue,
+  findIncompleteNumericUnitAnswers,
+} from '../lib/findIncompleteNumericUnitAnswers';
+import { discardedAnswersStorage } from '../storage/discardedAnswersStorage';
 import type { InstrumentDraftAnswer, InstrumentQuestion } from '../types';
 
 function makeQuestion(
@@ -210,5 +230,87 @@ describe('spec87 / CA-15 — se distinguen los envíos atascados por esta causa'
   it('da al encuestador un texto que dice qué hacer, y solo para esta causa', () => {
     expect(describeNumericUnitRecovery(BACKEND_ERROR)).toMatch(/Reintentar/);
     expect(describeNumericUnitRecovery('Forbidden')).toBeNull();
+  });
+});
+
+describe('spec87 / D7 (opción B) — no se pierde el valor descartado', () => {
+  const flattened = (...questions: InstrumentQuestion[]) =>
+    questions.map((question) => ({ sectionId: 's1', sectionName: 'Sección', question }));
+
+  beforeEach(() => {
+    for (const k of Object.keys(mockFiles)) delete mockFiles[k];
+  });
+
+  it('localiza el número que se iba a descartar, con su pregunta', () => {
+    const q = makeQuestion({ text: 'Tiempo hasta la finca' });
+    const found = findIncompleteNumericUnitAnswers(flattened(q), { q1: NUMBER_ONLY });
+
+    expect(found).toEqual([
+      {
+        questionId: 'q1',
+        questionText: 'Tiempo hasta la finca',
+        numericValue: 45,
+        unitText: undefined,
+        missing: 'unit',
+      },
+    ]);
+    expect(describeDiscardedValue(found[0])).toBe('45 (sin unidad)');
+  });
+
+  it('localiza también la unidad suelta sin número', () => {
+    const found = findIncompleteNumericUnitAnswers(flattened(makeQuestion()), { q1: UNIT_ONLY });
+
+    expect(found[0]).toMatchObject({ missing: 'number', unitText: 'Minutos' });
+    expect(describeDiscardedValue(found[0])).toBe('Minutos (sin valor)');
+  });
+
+  it('no reporta respuestas completas, vacías ni de otros tipos', () => {
+    const otra = makeQuestion({ questionId: 'q2', typeName: 'open_text' });
+    const found = findIncompleteNumericUnitAnswers(flattened(makeQuestion(), otra), {
+      q1: COMPLETE,
+      q2: { questionId: 'q2', textValue: 'hola' },
+    });
+    expect(found).toEqual([]);
+    expect(findIncompleteNumericUnitAnswers(flattened(makeQuestion()), {})).toEqual([]);
+  });
+
+  it('guarda lo descartado y lo devuelve al listar', async () => {
+    const q = makeQuestion({ text: 'Tiempo hasta la finca' });
+    const items = findIncompleteNumericUnitAnswers(flattened(q), { q1: NUMBER_ONLY });
+
+    await discardedAnswersStorage.record('local_survey_1', 'real-survey-1', items);
+    const listed = await discardedAnswersStorage.list();
+
+    expect(listed).toHaveLength(1);
+    expect(listed[0]).toMatchObject({
+      localSurveyId: 'local_survey_1',
+      surveyId: 'real-survey-1',
+      questionId: 'q1',
+      numericValue: 45,
+    });
+    expect(typeof listed[0].discardedAt).toBe('string');
+  });
+
+  it('un reintento no duplica el registro de la misma encuesta y pregunta', async () => {
+    const items = findIncompleteNumericUnitAnswers(flattened(makeQuestion()), { q1: NUMBER_ONLY });
+
+    await discardedAnswersStorage.record('local_survey_1', 'real-survey-1', items);
+    await discardedAnswersStorage.record('local_survey_1', 'real-survey-1', items);
+
+    expect(await discardedAnswersStorage.list()).toHaveLength(1);
+  });
+
+  it('limpiar vacía la lista', async () => {
+    const items = findIncompleteNumericUnitAnswers(flattened(makeQuestion()), { q1: NUMBER_ONLY });
+    await discardedAnswersStorage.record('local_survey_1', 'real-survey-1', items);
+
+    await discardedAnswersStorage.clear();
+
+    expect(await discardedAnswersStorage.list()).toEqual([]);
+  });
+
+  it('un archivo corrupto no rompe: se lee como vacío', async () => {
+    mockFiles['file:///mock-documents/discarded-answers.json'] = '{no-es-json';
+    expect(await discardedAnswersStorage.list()).toEqual([]);
   });
 });
