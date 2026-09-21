@@ -3,9 +3,11 @@
  * respuesta (fila de la opción isOther, campo textValue). La app ya no crea
  * opciones nuevas en el instrumento durante la sincronización.
  *
- * ESTAS PRUEBAS NACEN EN ROJO: hoy buildResponsesPayload descarta otherText
- * (lo resolvía resolveOtherOptions creando una opción vía
- * POST /api/questions/:id/options) y endpoints.questionOptions sigue existiendo.
+ * Nacieron en rojo con el spec: buildResponsesPayload descartaba otherText (lo
+ * resolvía resolveOtherOptions creando una opción vía
+ * POST /api/questions/:id/options) y endpoints.questionOptions existía. Se
+ * pusieron en verde al implementarlo. La reanudación de borradores con texto de
+ * «Otros» se cubre en surveyDraftStore.test.ts.
  */
 
 import * as fs from 'fs';
