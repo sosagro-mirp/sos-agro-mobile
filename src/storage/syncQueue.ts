@@ -1,4 +1,4 @@
-import { eq, and, asc } from 'drizzle-orm';
+import { eq, and, asc, notInArray } from 'drizzle-orm';
 import { db } from './db/db';
 import { syncQueue } from './db/schema';
 
@@ -57,11 +57,22 @@ export const syncQueueStorage = {
     });
   },
 
-  async dequeueNextPending(): Promise<SyncQueueEntry | null> {
+  // Spec 88 — `excludeIds` evita que una misma corrida de `processAll()` vuelva
+  // a servir una entrada que ya atendió. Sin eso hay bloqueo en vivo: una
+  // entrada que `resolveCampaignSession()` aplaza vuelve a `pending` de
+  // inmediato (spec 81) y el bucle la recibe otra vez, sin esperar por red,
+  // girando para siempre y congelando el hilo de JS. Cada entrada recibe un
+  // intento por corrida; si necesita otro, lo tendrá en la siguiente.
+  async dequeueNextPending(excludeIds: string[] = []): Promise<SyncQueueEntry | null> {
+    const condicion =
+      excludeIds.length > 0
+        ? and(eq(syncQueue.status, 'pending'), notInArray(syncQueue.id, excludeIds))
+        : eq(syncQueue.status, 'pending');
+
     const row = await db
       .select()
       .from(syncQueue)
-      .where(eq(syncQueue.status, 'pending'))
+      .where(condicion)
       .orderBy(asc(syncQueue.createdAt))
       .limit(1)
       .get();
