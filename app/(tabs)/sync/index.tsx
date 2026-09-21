@@ -36,7 +36,7 @@ import { consentRecordStore } from "../../../src/storage/consentRecordStore";
 import { instrumentCacheStorage } from "../../../src/storage/instrumentCache";
 import { farmerCacheStorage } from "../../../src/storage/farmerCache";
 import { NetworkMonitor } from "../../../src/sync/NetworkMonitor";
-import { describeNumericUnitRecovery } from "../../../src/lib/describeFailedSyncCause";
+import { describeSyncFailure } from "../../../src/lib/describeFailedSyncCause";
 import { discardedAnswersStorage, type DiscardedAnswer } from "../../../src/storage/discardedAnswersStorage";
 import { describeDiscardedValue } from "../../../src/lib/findIncompleteNumericUnitAnswers";
 import { MediaUploadService } from "../../../src/sync/MediaUploadService";
@@ -430,12 +430,13 @@ export default function SyncScreen() {
                     {who || "Instrumento no disponible"}
                   </Text>
                   <Text style={styles.failedWhen}>{when}</Text>
-                  {describeNumericUnitRecovery(entry.errorDetail) ? (
+                  {/* Spec 90 — una sola resolución para todas las causas
+                      conocidas; si no reconocemos el error, se muestra el texto
+                      crudo del backend antes que dejar al encuestador sin nada. */}
+                  {describeSyncFailure(entry.errorDetail) ?? entry.errorDetail ? (
                     <Text style={styles.failedError}>
-                      {describeNumericUnitRecovery(entry.errorDetail)}
+                      {describeSyncFailure(entry.errorDetail) ?? entry.errorDetail}
                     </Text>
-                  ) : entry.errorDetail ? (
-                    <Text style={styles.failedError}>{entry.errorDetail}</Text>
                   ) : null}
                 </View>
                 <View style={styles.failedFooter}>
