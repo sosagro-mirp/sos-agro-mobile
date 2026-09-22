@@ -16,6 +16,7 @@ jest.mock('../storage/syncQueue', () => ({
     getPendingBySurveyId: jest.fn(),
     getActiveBySurveyId: jest.fn(),
     resetInFlightToRetry: jest.fn(),
+    resetInFlightToRetryBySurveyId: jest.fn(),
   },
 }));
 
@@ -204,6 +205,9 @@ const mockMarkInFlight = syncQueueStorage.markInFlight as jest.Mock;
 const mockMarkSynced = syncQueueStorage.markSynced as jest.Mock;
 const mockMarkFailedValidation = syncQueueStorage.markFailedValidation as jest.Mock;
 const mockIncrementAttempts = syncQueueStorage.incrementAttempts as jest.Mock;
+const mockGetPendingBySurveyId = syncQueueStorage.getPendingBySurveyId as jest.Mock;
+const mockGetActiveBySurveyId = syncQueueStorage.getActiveBySurveyId as jest.Mock;
+const mockResetInFlightToRetryBySurveyId = syncQueueStorage.resetInFlightToRetryBySurveyId as jest.Mock;
 
 const mockLoadDraft = surveyDraftStore.loadDraft as jest.Mock;
 const mockMarkSyncedDraft = surveyDraftStore.markSynced as jest.Mock;
@@ -398,6 +402,58 @@ describe('processAll', () => {
     expect(mockSetSyncingId).toHaveBeenCalledWith(entry.id);
     expect(mockSetSyncingId).toHaveBeenCalledWith(null);
     expect(mockMarkSyncCompleted).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ─── processSurveyNow: no debe duplicar el envío de un processAll() en vuelo ──
+// Spec 91 — encontrado en la ronda manual de test-091 (TC-091-006): con red
+// lenta, el `processAll()` de fondo que dispara `enqueueSubmission()` y el
+// `processSurveyNow()` del orquestador podían competir por la misma entrada,
+// produciendo dos POST /api/surveys para el mismo borrador.
+
+describe('processSurveyNow — no compite con un processAll() en vuelo', () => {
+  it('no resetea ni reprocesa la entrada mientras processAll() sigue corriendo', async () => {
+    // `dequeueNextPending` no resuelve todavía: simula que processAll() sigue
+    // en vuelo (isProcessing = true, que se fija de forma síncrona antes de
+    // este await) esperando su primer paso.
+    let releaseDequeue: (value: unknown) => void = () => {};
+    const hangingDequeue = new Promise((resolve) => {
+      releaseDequeue = resolve;
+    });
+    mockDequeueNextPending.mockReturnValueOnce(hangingDequeue);
+
+    const processAllPromise = SyncQueueService.processAll();
+
+    // Deja correr el event loop lo justo para que processAll() llegue a su
+    // primer `await dequeueNextPending(...)` y fije isProcessing = true.
+    await Promise.resolve();
+
+    // Mientras tanto, el orquestador pide procesar la misma encuesta.
+    mockGetActiveBySurveyId.mockResolvedValue(null); // resuelve el bucle de espera de inmediato
+    await SyncQueueService.processSurveyNow('survey-1');
+
+    // No debe haber tocado la entrada: eso es lo que antes producía el
+    // segundo POST.
+    expect(mockResetInFlightToRetryBySurveyId).not.toHaveBeenCalled();
+    expect(mockGetPendingBySurveyId).not.toHaveBeenCalled();
+    expect(mockGetActiveBySurveyId).toHaveBeenCalledWith('survey-1');
+
+    // Cerrar processAll() para no dejar una promesa colgada.
+    releaseDequeue(null);
+    await processAllPromise;
+  });
+
+  it('sí resetea y reprocesa cuando no hay ningún processAll() en vuelo', async () => {
+    const entry = makeEntry();
+    mockGetPendingBySurveyId.mockResolvedValue(entry);
+    mockLoadDraft.mockResolvedValue(makeDraft());
+    mockInstrumentCacheGet.mockResolvedValue(makeInstrument());
+
+    await SyncQueueService.processSurveyNow('survey-1');
+
+    expect(mockResetInFlightToRetryBySurveyId).toHaveBeenCalledWith('survey-1');
+    expect(mockGetPendingBySurveyId).toHaveBeenCalledWith('survey-1');
+    expect(mockMarkSynced).toHaveBeenCalledWith(entry.id);
   });
 });
 

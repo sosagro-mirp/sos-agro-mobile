@@ -938,9 +938,23 @@ class SyncQueueServiceClass {
     // consultar es lo que permite que un segundo "Reintentar" del
     // encuestador sí avance, sin depender de que corra un `processAll()` de
     // fondo ni de reiniciar la app.
-    await syncQueueStorage.resetInFlightToRetryBySurveyId(surveyId);
+    //
+    // Spec 91 — pero solo cuando ese `in_flight` está realmente abandonado.
+    // Desde que el orquestador empezó a llamar a este método justo después
+    // de `enqueueSubmission()` (que ya disparó su propio `processAll()` de
+    // fondo, sin esperarlo), un `in_flight` puede ser el de esa corrida en
+    // vuelo en este mismo momento — no una sobra de una sesión anterior.
+    // Resetearlo igual duplicaba el envío: dos POST /api/surveys para el
+    // mismo borrador, con el mismo `clientSurveyId`, casi al mismo tiempo
+    // (visto en la ronda manual de test-091, TC-091-006, con red lenta:
+    // ambos llegaron a crear una fila cada uno en el backend). Si
+    // `isProcessing` es true, un `processAll()` de esta misma sesión sigue
+    // corriendo — no tocar la entrada, solo esperarla en el bucle de abajo.
+    if (!this.isProcessing) {
+      await syncQueueStorage.resetInFlightToRetryBySurveyId(surveyId);
+    }
 
-    const entry = await syncQueueStorage.getPendingBySurveyId(surveyId);
+    const entry = this.isProcessing ? null : await syncQueueStorage.getPendingBySurveyId(surveyId);
 
     if (entry) {
       await this.processEntry(entry, true);
