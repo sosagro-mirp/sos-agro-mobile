@@ -44,18 +44,23 @@ export function planNextStepAfterCompletion(params: {
     return { action: 'use-backend' };
   }
 
+  // Corrección de auditoría (docs/reports/auditorias/45-…): extraído a una
+  // constante propia para que TypeScript conserve el `instrument` no-nulo
+  // dentro del closure de `.some()` sin necesitar un `!`.
+  const { order: backendOrder, instrument: backendInstrument } = backendStep;
+
   const alreadyCompleted = completedLocally.some((step) => {
     // Comparar primero por stepOrder: es el identificador que usa el propio
     // backend (`completedOrders`) y evita que dos pasos distintos que
     // comparten instrumento (spec no contempla hoy este caso, pero no cuesta
     // nada protegerlo) se confundan entre sí.
-    if (step.stepOrder != null && backendStep.order != null) {
-      return step.stepOrder === backendStep.order;
+    if (step.stepOrder != null && backendOrder != null) {
+      return step.stepOrder === backendOrder;
     }
     // Sin stepOrder en el borrador (encuesta vieja, o creada fuera de
     // campaña) caemos a comparar por instrumento — más débil, pero mejor que
     // no detectar nada.
-    return step.instrumentId === backendStep.instrument!.instrumentId;
+    return step.instrumentId === backendInstrument.instrumentId;
   });
 
   return alreadyCompleted ? { action: 'fallback-local' } : { action: 'use-backend' };

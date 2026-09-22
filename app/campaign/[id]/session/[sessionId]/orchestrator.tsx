@@ -620,6 +620,15 @@ export default function OrchestratorScreen() {
           // tiene la encuesta (campaign-sessions.service.ts:242-255).
           const { lastCompletedSurveyId } = useCampaignSessionStore.getState();
           if (lastCompletedSurveyId) {
+            // Spec 91 — corrección de auditoría (docs/reports/auditorias/45-…):
+            // limpiar ANTES del `await`, no en el `finally`. Si el
+            // componente se desmonta y remonta durante la espera (el
+            // encuestador sale y vuelve a entrar), el nuevo `run()` no debe
+            // volver a leer este mismo `surveyId` y disparar otro
+            // `processSurveyNow()` para él — `SyncQueueService` ya protege
+            // contra esa reentrada con su propio candado, pero evitarla acá
+            // ahorra la espera redundante.
+            store.clearLastCompletedSurveyId();
             setSavingStep(true);
             try {
               await withTimeout(
@@ -636,7 +645,6 @@ export default function OrchestratorScreen() {
                 }`,
               );
             } finally {
-              store.clearLastCompletedSurveyId();
               setSavingStep(false);
             }
           }
