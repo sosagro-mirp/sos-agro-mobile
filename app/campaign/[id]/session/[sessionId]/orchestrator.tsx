@@ -35,6 +35,7 @@ import { NetworkError } from "../../../../../src/api/httpClient";
 import { withNetworkRetry } from "../../../../../src/lib/withNetworkRetry";
 import { advanceWithinCampaign, returnToPreSurvey } from "../../../../../src/lib/campaignNavigation";
 import { planNextStepAfterCompletion } from "../../../../../src/lib/planNextStepAfterCompletion";
+import type { NextStepResponse } from "../../../../../src/types";
 import { Fonts } from "../../../../../src/theme/fonts";
 import { useTheme } from "../../../../../src/theme/ThemeProvider";
 import type { ThemeColors } from "../../../../../src/theme/colors";
@@ -640,9 +641,38 @@ export default function OrchestratorScreen() {
             }
           }
 
-          const nextStep = await getNextStep(resolvedSessionId);
-
           const { campaign } = useCampaignSessionStore.getState();
+
+          // Spec 91 — si el backend está totalmente inalcanzable (no solo
+          // lento para recibir este bloque), getNextStep() mismo falla. No
+          // hay respuesta del backend que comparar, así que se recalcula
+          // localmente directo, igual que si isOnline fuera false — el
+          // borrador de este bloque ya quedó `status: 'completed'` en SQLite
+          // sin importar si el envío llegó a tiempo. Encontrado en la ronda
+          // manual de test-091 (TC-091-003): antes, un backend caído dejaba
+          // al encuestador en la pantalla "sin conexión" en vez de avanzar.
+          let nextStep: NextStepResponse | null;
+          try {
+            nextStep = await getNextStep(resolvedSessionId);
+          } catch (err) {
+            if (err instanceof NetworkError && campaign?.campaignId) {
+              logger.warn(
+                `[Orchestrator] getNextStep() inalcanzable, recalculando localmente: ${
+                  err instanceof Error ? err.message : String(err)
+                }`,
+              );
+              const nextStepLocal = await getNextStepOffline(campaign.campaignId, resolvedSessionId, -1);
+              if (!nextStepLocal || (!nextStepLocal.stepId && !nextStepLocal.instrument)) {
+                advanceWithinCampaign(router, id, `/campaign/${id}/session/${resolvedSessionId}/completed`);
+                return;
+              }
+              store.applyNextStep(nextStepLocal);
+              await checkDuplicateAndNavigateOffline(nextStepLocal);
+              return;
+            }
+            throw err;
+          }
+
           const completedLocally = campaign?.campaignId
             ? await surveyDraftStore.listCompletedStepsForSession(resolvedSessionId)
             : [];
