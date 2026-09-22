@@ -12,8 +12,8 @@ import type { ThemeColors } from "../../../src/theme/colors";
 
 export default function InstrumentCompletedScreen() {
   const router = useRouter();
-  const { instrumentName, campaignSessionId, reset } = useInstrumentSurveyStore();
-  const { campaign, currentStep, sessionId, farmerName, markStepCompleted } =
+  const { instrumentName, campaignSessionId, surveyId, reset } = useInstrumentSurveyStore();
+  const { campaign, currentStep, sessionId, farmerName, markStepCompleted, setLastCompletedSurveyId } =
     useCampaignSessionStore();
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -25,6 +25,13 @@ export default function InstrumentCompletedScreen() {
     : "0%";
 
   const handleContinue = () => {
+    // Spec 91 — registrar el surveyId antes de reset() (que lo borra del
+    // store de la encuesta): el orquestador lo usa para esperar a que este
+    // bloque llegue al backend antes de pedir el siguiente paso, evitando la
+    // carrera que reabría el mismo bloque.
+    if (isInsideCampaign && surveyId) {
+      setLastCompletedSurveyId(surveyId);
+    }
     reset();
     if (isInsideCampaign && sessionId) {
       markStepCompleted();

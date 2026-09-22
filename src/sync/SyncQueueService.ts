@@ -46,6 +46,13 @@ const BACKOFF_MAX_MS = 60_000;
 class SyncQueueServiceClass {
   private isProcessing = false;
   private consecutiveNetworkFailures = 0;
+  // Spec 91 — corrección de auditoría (docs/reports/auditorias/45-…):
+  // `surveyId`s que un `processSurveyNow()` interactivo tiene genuinamente
+  // en vuelo ahora mismo, más allá de si el orquestador que lo llamó ya dejó
+  // de esperar (su `withTimeout()` no cancela esta promesa). Se usa para que
+  // el `resetInFlightToRetry()` global de `processAll()` no le quite la
+  // entrada a un envío que sigue en curso.
+  private interactiveInFlightSurveyIds = new Set<string>();
 
   async processAll(): Promise<void> {
     if (this.isProcessing) return;
@@ -117,7 +124,9 @@ class SyncQueueServiceClass {
       // Reset any entries left in_flight (e.g., deferred due to unresolved session)
       // so they're retried on the next sync run.
       try {
-        await syncQueueStorage.resetInFlightToRetry();
+        await syncQueueStorage.resetInFlightToRetry(
+          Array.from(this.interactiveInFlightSurveyIds),
+        );
       } catch (err) {
         logger.error('[Sync] resetInFlightToRetry failed', err);
       }
@@ -930,29 +939,59 @@ class SyncQueueServiceClass {
   }
 
   async processSurveyNow(surveyId: string): Promise<void> {
-    // Spec 81, Fase 3 — un intento anterior (este mismo camino interactivo,
-    // o un `processAll()` interrumpido) puede haber dejado la entrada de
-    // este `surveyId` en `in_flight`. `getPendingBySurveyId()` no la vería
-    // (filtra por `status = 'pending'`) y este método caería directo al
-    // bucle de espera de más abajo sin procesarla nunca. Repararla antes de
-    // consultar es lo que permite que un segundo "Reintentar" del
-    // encuestador sí avance, sin depender de que corra un `processAll()` de
-    // fondo ni de reiniciar la app.
-    await syncQueueStorage.resetInFlightToRetryBySurveyId(surveyId);
-
-    const entry = await syncQueueStorage.getPendingBySurveyId(surveyId);
-
-    if (entry) {
-      await this.processEntry(entry, true);
+    // Spec 91 — corrección de auditoría (docs/reports/auditorias/45-…): si
+    // esta misma encuesta ya tiene otra llamada interactiva en vuelo en esta
+    // sesión (p. ej. una reentrada al orquestador mientras la primera
+    // todavía no termina), no competir por la entrada — solo esperarla,
+    // igual que se espera a un `processAll()` de fondo.
+    if (this.interactiveInFlightSurveyIds.has(surveyId)) {
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        const active = await syncQueueStorage.getActiveBySurveyId(surveyId);
+        if (!active) return;
+        await sleep(300);
+      }
       return;
     }
 
-    // Entry may be in_flight (processAll already picked it up); wait up to 10s.
-    const deadline = Date.now() + 10_000;
-    while (Date.now() < deadline) {
-      const active = await syncQueueStorage.getActiveBySurveyId(surveyId);
-      if (!active) return;
-      await sleep(300);
+    this.interactiveInFlightSurveyIds.add(surveyId);
+    try {
+      // Spec 91 — reclamación atómica: leer y marcar `in_flight` en una
+      // transición `UPDATE … WHERE status = 'pending'` re-verificada, en vez
+      // del `getPendingBySurveyId()` + `processEntry()` de antes. Ese camino
+      // anterior tenía una ventana entre leer y procesar donde un
+      // `processAll()` de fondo (disparado por `enqueueSubmission()` justo
+      // antes de este método) podía tomar la misma entrada primero — con
+      // esta reclamación, solo uno de los dos se la queda; el otro cae al
+      // bucle de espera de abajo, sin reenviar nada.
+      let entry = await syncQueueStorage.claimPendingBySurveyId(surveyId);
+
+      // Spec 81, Fase 3 — un intento anterior (este mismo camino
+      // interactivo, o un `processAll()` interrumpido) puede haber dejado la
+      // entrada en `in_flight` sin que nadie la esté procesando de verdad
+      // ahora mismo. Spec 91 — resetear solo si no hay un `processAll()`
+      // vivo en esta sesión (`isProcessing`): si lo hay, cualquier
+      // `in_flight` le pertenece a esa corrida, no está abandonado.
+      if (!entry && !this.isProcessing) {
+        await syncQueueStorage.resetInFlightToRetryBySurveyId(surveyId);
+        entry = await syncQueueStorage.claimPendingBySurveyId(surveyId);
+      }
+
+      if (entry) {
+        await this.processEntry(entry, true);
+        return;
+      }
+
+      // La entrada ya está en manos de otra corrida (processAll() en vuelo,
+      // u otra llamada interactiva), o ya se sincronizó. Esperar hasta 10s.
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        const active = await syncQueueStorage.getActiveBySurveyId(surveyId);
+        if (!active) return;
+        await sleep(300);
+      }
+    } finally {
+      this.interactiveInFlightSurveyIds.delete(surveyId);
     }
   }
 
