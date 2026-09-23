@@ -65,7 +65,9 @@ function AuthGuard() {
       // `replace` solo cambia la pantalla de arriba: sin vaciar la pila, el botón
       // "atrás" de Android dejaba ver las pantallas del encuestador anterior sin
       // sesión (test-086, TC-086-07).
-      if (router.canDismiss()) router.dismissAll();
+      // En el arranque (`prevId === undefined`) el navegador aún no está montado y
+      // no hay pila que vaciar.
+      if (prevId !== undefined && router.canDismiss()) router.dismissAll();
       router.replace("/login");
     } else {
       router.replace("/campaign");
