@@ -1,6 +1,6 @@
 import { httpClient } from "./httpClient";
 import { endpoints } from "./endpoints";
-import type { SurveyResponse } from "../types";
+import type { MySurveysPage, RemoteSurveyResponseRow, SurveyResponse } from "../types";
 
 export interface CreateSurveyPayload {
   instrumentIds: string[];
@@ -52,3 +52,24 @@ export interface SkipStepResponse {
 
 export const skipStepApi = (payload: SkipStepPayload) =>
   httpClient.post<SkipStepResponse>(endpoints.surveySkipStep, payload);
+
+// Spec 92 — historial de encuestas realizadas por el encuestador.
+export interface GetMySurveysParams {
+  page?: number;
+  limit?: number;
+  search?: string;
+}
+
+export const getMySurveys = (params: GetMySurveysParams = {}) => {
+  const query = new URLSearchParams();
+  if (params.page != null) query.set("page", String(params.page));
+  if (params.limit != null) query.set("limit", String(params.limit));
+  if (params.search) query.set("search", params.search);
+  const queryString = query.toString();
+  return httpClient.get<MySurveysPage>(
+    queryString ? `${endpoints.surveysMine}?${queryString}` : endpoints.surveysMine,
+  );
+};
+
+export const getSurveyResponses = (surveyId: string) =>
+  httpClient.get<RemoteSurveyResponseRow[]>(endpoints.surveyResponses(surveyId));
