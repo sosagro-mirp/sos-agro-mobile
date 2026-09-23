@@ -25,6 +25,7 @@ import {
 import { useSnackbar } from "../../../src/components/common/Snackbar";
 import { DestructiveButton } from "../../../src/components/common/DestructiveButton";
 import { useSyncStatusStore } from "../../../src/store/useSyncStatusStore";
+import { useAuthStore } from "../../../src/store/useAuthStore";
 import { syncQueueStorage, type SyncQueueEntry } from "../../../src/storage/syncQueue";
 import { secureStorage } from "../../../src/storage/secureStorage";
 import { offlineCredentialStorage } from "../../../src/storage/offlineCredentialStorage";
@@ -179,9 +180,14 @@ export default function SyncScreen() {
     setIdentities(Object.fromEntries(surveyIds.map((id, i) => [id, resolved[i]])));
   };
 
+  const activeUserId = useAuthStore((s) => s.user?.userId ?? null);
+
   useEffect(() => {
+    setFailedEntries([]);
+    setFailedMedia([]);
+    setWaitingNames([]);
     refreshData().catch((err) => logger.error('[Sync] refreshData failed', err));
-  }, []);
+  }, [activeUserId]);
 
   useEffect(() => {
     if (lastSyncAt) {
