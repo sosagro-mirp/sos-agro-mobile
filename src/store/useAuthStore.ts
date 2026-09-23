@@ -287,6 +287,9 @@ export const useAuthStore = create<AuthState>((set, get) => {
         await persistOnlineLogin(accessToken, user, password);
         set({ token: accessToken, user, loading: false });
         applyServerState("valid");
+        // Los pendientes de este encuestador (sobre todo los que esperaban su
+        // ingreso con el token vencido) salen ahora, sin esperar otro disparo.
+        void SyncQueueService.processAll();
       } catch (e) {
         // Sin red, timeout, 5xx o 429: se intenta la verificación local.
         if (
