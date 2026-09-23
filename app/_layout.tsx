@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Stack, useRouter } from "expo-router";
+import { Stack, useRootNavigationState, useRouter } from "expo-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   useFonts,
@@ -48,31 +48,42 @@ const queryClient = new QueryClient({
 function AuthGuard() {
   const { user, isRestoring } = useAuthStore();
   const router = useRouter();
+  // Con el proceso vivo (p. ej. reabrir la app tras salir con "atrás") la sesión
+  // ya está cargada y navegar antes de montar el navegador raíz lanza un error.
+  const navigationReady = !!useRootNavigationState()?.key;
   // Track previous user value to only act on actual changes, not re-renders
   const prevUserRef = useRef<string | null | undefined>(undefined);
 
+  const [retryTick, setRetryTick] = useState(0);
+
   useEffect(() => {
-    if (isRestoring) return;
+    if (isRestoring || !navigationReady) return;
 
     const prevId = prevUserRef.current;
     const currId = user?.userId ?? null;
 
     // Skip if user identity hasn't changed (avoids resetting navigation mid-session)
     if (prevId === currId) return;
-    prevUserRef.current = currId;
 
-    if (!user) {
-      // `replace` solo cambia la pantalla de arriba: sin vaciar la pila, el botón
-      // "atrás" de Android dejaba ver las pantallas del encuestador anterior sin
-      // sesión (test-086, TC-086-07).
-      // En el arranque (`prevId === undefined`) el navegador aún no está montado y
-      // no hay pila que vaciar.
-      if (prevId !== undefined && router.canDismiss()) router.dismissAll();
-      router.replace("/login");
-    } else {
-      router.replace("/campaign");
+    try {
+      if (!user) {
+        // `replace` solo cambia la pantalla de arriba: sin vaciar la pila, el botón
+        // "atrás" de Android dejaba ver las pantallas del encuestador anterior sin
+        // sesión (test-086, TC-086-07). En el arranque (`prevId === undefined`) no
+        // hay pila que vaciar.
+        if (prevId !== undefined && router.canDismiss()) router.dismissAll();
+        router.replace("/login");
+      } else {
+        router.replace("/campaign");
+      }
+      prevUserRef.current = currId;
+    } catch {
+      // Reabrir la app con el proceso vivo ya trae la sesión cargada y el navegador
+      // raíz puede no estar listo todavía: se reintenta en un instante.
+      const timer = setTimeout(() => setRetryTick((n) => n + 1), 100);
+      return () => clearTimeout(timer);
     }
-  }, [user, isRestoring]);
+  }, [user, isRestoring, navigationReady, retryTick]);
 
   return null;
 }
