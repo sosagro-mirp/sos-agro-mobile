@@ -16,8 +16,10 @@ import { isTokenExpired } from "../lib/jwt";
 import { useSyncStatusStore } from "./useSyncStatusStore";
 import { useCampaignSessionStore } from "./useCampaignSessionStore";
 import { useInstrumentSurveyStore } from "./useInstrumentSurveyStore";
+import { useDraftCountStore } from "./useDraftCountStore";
 import { SyncQueueService } from "../sync/SyncQueueService";
 import { syncQueueStorage } from "../storage/syncQueue";
+import { logger } from "../lib/logger";
 
 /**
  * Spec 86 (D1): estado de la sesión con el SERVIDOR, independiente de la
@@ -66,31 +68,33 @@ function offlineDeniedMessage(
   return LOGIN_ERROR_MESSAGES.requiresOnline;
 }
 
-/** Persiste sesión activa + credencial + selector tras un login en línea. */
+/**
+ * Persiste sesión activa + credencial + selector tras un login en línea.
+ * El hash PBKDF2 tarda varios segundos en el dispositivo; salvo que se pida
+ * esperarlo, la credencial se guarda en segundo plano y el usuario entra ya.
+ */
 async function persistOnlineLogin(
   accessToken: string,
   user: AuthUser,
   password: string,
+  opts: { waitForCredential?: boolean } = {},
 ): Promise<void> {
   await Promise.all([
     secureStorage.saveTokenFor(user.userId, accessToken),
     userStorage.saveUser(user),
   ]);
   await secureStorage.setActiveUserId(user.userId);
+  await refreshActiveUserCounts();
 
-  const cred = await createOfflineCredential({
-    userId: user.userId,
-    email: user.email,
-    password,
-    profile: user,
-  });
-  await offlineCredentialStorage.saveCredential(cred);
+  // El selector no depende del hash: la tarjeta aparece aunque la credencial
+  // siga calculándose.
+  const now = Date.now();
   await offlineCredentialStorage.upsertKnownUser({
     userId: user.userId,
     name: user.name,
     lastName: user.lastName,
     email: user.email,
-    lastOnlineLoginAt: cred.lastOnlineLoginAt,
+    lastOnlineLoginAt: now,
   });
 
   // M1 (auditoría 44, D7): máximo 10 usuarios por tablet. Sale el más antiguo
@@ -105,13 +109,37 @@ async function persistOnlineLogin(
   } catch {
     // La limpieza es de mantenimiento: un fallo no debe impedir el ingreso.
   }
+
+  const saving = createOfflineCredential({
+    userId: user.userId,
+    email: user.email,
+    password,
+    profile: user,
+    now,
+  }).then((cred) => offlineCredentialStorage.saveCredential(cred));
+  if (opts.waitForCredential) {
+    await saving;
+    return;
+  }
+  saving.catch((err) => logger.error("[Auth] offline credential save failed", err));
 }
 
 async function clearActiveSession(): Promise<void> {
+  // Los contadores son del encuestador activo: vaciarlos evita que el
+  // siguiente vea por un instante los del anterior.
+  useSyncStatusStore.setState({ pendingCount: 0 });
+  useDraftCountStore.setState({ count: 0, othersCount: 0 });
   await secureStorage.clearActiveUserId();
   await userStorage.deleteUser();
   useCampaignSessionStore.getState().reset();
   useInstrumentSurveyStore.getState().reset();
+}
+
+async function refreshActiveUserCounts(): Promise<void> {
+  await Promise.all([
+    useSyncStatusStore.getState().refreshPendingCount(),
+    useDraftCountStore.getState().refresh(),
+  ]).catch(() => {});
 }
 
 export const useAuthStore = create<AuthState>((set, get) => {
@@ -186,6 +214,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
     const token = await secureStorage.getTokenFor(cred.userId);
     await userStorage.saveUser(cred.profile);
     await secureStorage.setActiveUserId(cred.userId);
+    await refreshActiveUserCounts();
 
     set({ token, user: cred.profile, loading: false, error: null });
     // Sin token guardado, o vencido: la sesión local vale pero el servidor la
@@ -339,7 +368,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
       try {
         // Verifica la contraseña contra el servidor antes de guardar su hash.
         const { accessToken, user: freshUser } = await apiLogin(user.email, password);
-        await persistOnlineLogin(accessToken, freshUser, password);
+        await persistOnlineLogin(accessToken, freshUser, password, { waitForCredential: true });
         set({ token: accessToken, user: freshUser, loading: false });
         applyServerState("valid");
       } catch (e) {

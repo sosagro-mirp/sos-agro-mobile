@@ -160,6 +160,7 @@ function scheduleFlush(): void {
 }
 
 function write(level: LogLevel, message: string): void {
+  console.log(`[APPLOG] ${level} ${message}`); // TEMP (test-086): diagnóstico en release; retirar.
   buffer.push(formatEntry(level, message));
   scheduleFlush();
 }

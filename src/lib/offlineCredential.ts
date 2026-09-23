@@ -69,12 +69,79 @@ function randomSalt(seed: string): Uint8Array {
   return sha256(utf8ToBytes(mixed)).slice(0, 16);
 }
 
-async function derive(password: string, saltHex: string, iterations: number): Promise<string> {
-  const out = await pbkdf2Async(sha256, utf8ToBytes(password), hexToBytes(saltHex), {
+type NativePbkdf2 = (
+  password: Uint8Array,
+  salt: Uint8Array,
+  iterations: number,
+  keylen: number,
+  digest: string,
+  callback: (err: Error | null, derivedKey?: Uint8Array) => void,
+) => void;
+
+let nativePbkdf2: NativePbkdf2 | null | undefined;
+
+// Spec 86, Fase 10: en JS puro (Hermes, sin JIT) 100.000 iteraciones tardaban
+// ~30-40 s en la tablet. El módulo nativo no existe en Expo Go ni en Jest; ahí
+// se usa @noble/hashes, que produce exactamente el mismo resultado.
+function loadNativePbkdf2(): NativePbkdf2 | null {
+  if (nativePbkdf2 !== undefined) return nativePbkdf2;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const qc = require("react-native-quick-crypto") as { pbkdf2?: NativePbkdf2 };
+    nativePbkdf2 = typeof qc.pbkdf2 === "function" ? qc.pbkdf2 : null;
+  } catch {
+    nativePbkdf2 = null;
+  }
+  return nativePbkdf2;
+}
+
+function deriveNative(
+  fn: NativePbkdf2,
+  password: string,
+  saltHex: string,
+  iterations: number,
+): Promise<Uint8Array> {
+  return new Promise((resolve, reject) => {
+    fn(utf8ToBytes(password), hexToBytes(saltHex), iterations, HASH_BYTES, "sha256", (err, key) => {
+      if (err || !key) reject(err ?? new Error("pbkdf2 sin resultado"));
+      else resolve(new Uint8Array(key));
+    });
+  });
+}
+
+function deriveJs(password: string, saltHex: string, iterations: number): Promise<Uint8Array> {
+  // En React Native cada cesión al event loop (setTimeout) cuesta casi tanto
+  // como 10 ms de cálculo: con el tramo por defecto la espera duplicaba el
+  // tiempo total. 100 ms mantiene la interfaz usable.
+  return pbkdf2Async(sha256, utf8ToBytes(password), hexToBytes(saltHex), {
     c: iterations,
     dkLen: HASH_BYTES,
+    asyncTick: 100,
   });
+}
+
+async function derive(password: string, saltHex: string, iterations: number): Promise<string> {
+  const start = Date.now(); // TEMP (test-086): retirar tras medir en release.
+  const native = loadNativePbkdf2();
+  let out: Uint8Array;
+  let engine = "js";
+  if (native) {
+    try {
+      out = await deriveNative(native, password, saltHex, iterations);
+      engine = "nativo";
+    } catch {
+      out = await deriveJs(password, saltHex, iterations);
+    }
+  } else {
+    out = await deriveJs(password, saltHex, iterations);
+  }
+  console.log(`[PBKDF2-TEMP] motor=${engine} iteraciones=${iterations} total=${Date.now() - start}ms`);
   return bytesToHex(out);
+}
+
+/** Solo para pruebas: fuerza o quita el motor nativo. */
+export function __setNativePbkdf2ForTests(fn: NativePbkdf2 | null | undefined): void {
+  nativePbkdf2 = fn;
 }
 
 /** Comparación en tiempo constante de dos cadenas hex. */

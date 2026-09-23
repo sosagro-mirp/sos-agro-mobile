@@ -110,6 +110,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       'expo-router',
       'expo-sqlite',
       'expo-background-task',
+      // Spec 86, Fase 10: PBKDF2 nativo para la credencial sin conexión.
+      'react-native-quick-crypto',
       // Spec 76, Fase 2: antes el plugin actuaba con su configuración por
       // defecto y dejaba `values-night/colors.xml` vacío, con
       // `splashscreen_background` fijo en #FFFFFF. En una tablet en modo
