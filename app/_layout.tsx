@@ -62,6 +62,10 @@ function AuthGuard() {
     prevUserRef.current = currId;
 
     if (!user) {
+      // `replace` solo cambia la pantalla de arriba: sin vaciar la pila, el botón
+      // "atrás" de Android dejaba ver las pantallas del encuestador anterior sin
+      // sesión (test-086, TC-086-07).
+      if (router.canDismiss()) router.dismissAll();
       router.replace("/login");
     } else {
       router.replace("/campaign");
