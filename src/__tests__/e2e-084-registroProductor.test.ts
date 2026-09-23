@@ -40,6 +40,7 @@ jest.mock('../storage/syncQueue', () => ({
     getActiveBySurveyId: jest.fn(),
     resetInFlightToRetry: jest.fn(),
     resetInFlightToRetryBySurveyId: jest.fn(),
+    claimPendingBySurveyId: jest.fn(),
   },
 }));
 
@@ -138,6 +139,16 @@ jest.mock('../store/useChangeRequestStore', () => ({
       loadAll: jest.fn().mockResolvedValue(undefined),
       setHasNewResolved: jest.fn(),
     }),
+  },
+}));
+
+// Spec 88 — `processAll()` no procesa la cola sin sesión iniciada (criterio 8).
+// Estas suites ejercitan el sync directamente, así que necesitan un token
+// simulado. Mock agregado con autorización explícita del usuario (2026-09-21);
+// ninguna aserción de estas suites cambió.
+jest.mock('../store/useAuthStore', () => ({
+  useAuthStore: {
+    getState: jest.fn().mockReturnValue({ token: 'test-token' }),
   },
 }));
 
@@ -412,7 +423,10 @@ describe('Colisión de documento con el orquestador esperando la encuesta (audit
       sections: [{ sectionId: 's1', name: 'Section 1', order: 1, questions: [] }],
     });
     mockBuildResponsesPayload.mockReturnValue([{ surveyId: 'survey-1', questionId: 'q1', textValue: 'x' }]);
-    (syncQueueStorage.getPendingBySurveyId as jest.Mock).mockResolvedValueOnce(makeEntry());
+    // Spec 91 — corrección de auditoría (docs/reports/auditorias/45-…):
+    // `processSurveyNow()` reclama con `claimPendingBySurveyId()` en vez de
+    // `getPendingBySurveyId()` + `processEntry()`.
+    (syncQueueStorage.claimPendingBySurveyId as jest.Mock).mockResolvedValueOnce(makeEntry());
     mockExtractFarmer.mockRejectedValueOnce(collision());
 
     await SyncQueueService.processSurveyNow('survey-1');

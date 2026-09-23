@@ -13,6 +13,8 @@ import { extractFarmer, extractCrops, DocumentIdCollisionError } from '../api/fa
 import { cacheFarmerIdentity } from '../lib/cacheFarmerIdentity';
 import { buildResponsesPayload } from '../lib/buildResponsesPayload';
 import { flattenSections } from '../lib/flattenSections';
+import { findIncompleteNumericUnitAnswers } from '../lib/findIncompleteNumericUnitAnswers';
+import { discardedAnswersStorage } from '../storage/discardedAnswersStorage';
 import { resolveOtherOptions } from '../lib/resolveOtherOptions';
 import { isLocalId } from '../lib/isLocalId';
 import { useSyncStatusStore } from '../store/useSyncStatusStore';
@@ -21,6 +23,9 @@ import { NetworkError, ServerError, httpClient, type RequestOptions } from '../a
 import { secureStorage } from '../storage/secureStorage';
 import { planOwnerSync } from '../lib/planOwnerSync';
 import { resolveSyncErrorAction } from '../lib/syncErrorAction';
+import { useAuthStore } from '../store/useAuthStore';
+import { shouldRetrySessionLater } from './planSessionRecovery';
+import { resolveDraftFarmerId } from './resolveDraftFarmerId';
 import { endpoints } from '../api/endpoints';
 import { logger } from '../lib/logger';
 import { sessionCropsStorage } from '../storage/sessionCropsStorage';
@@ -94,10 +99,28 @@ class SyncQueueServiceClass {
     }
     return true;
   }
+  // Spec 91 — corrección de auditoría (docs/reports/auditorias/45-…):
+  // `surveyId`s que un `processSurveyNow()` interactivo tiene genuinamente
+  // en vuelo ahora mismo, más allá de si el orquestador que lo llamó ya dejó
+  // de esperar (su `withTimeout()` no cancela esta promesa). Se usa para que
+  // el `resetInFlightToRetry()` global de `processAll()` no le quite la
+  // entrada a un envío que sigue en curso.
+  private interactiveInFlightSurveyIds = new Set<string>();
 
   async processAll(): Promise<void> {
     if (this.isProcessing) return;
     if (this.consecutiveNetworkFailures >= MAX_CONSECUTIVE_NETWORK_FAILURES) return;
+
+    // Spec 88, criterio 8 — sin token no se procesa nada. `NetworkMonitor`,
+    // `checkAndSync()` y `BackgroundSync` arrancan haya sesión o no: al abrir
+    // la app, el sync corría antes de que `restoreSession()` hidratara el
+    // token, el servidor respondía 401 y ese 401 condenaba la sesión de
+    // campaña y, con ella, todas sus encuestas. Esperar a que haya sesión no
+    // pierde nada: la cola es persistente y se procesa en la siguiente corrida.
+    if (!useAuthStore.getState().token) {
+      logger.info('[Sync] sin sesión iniciada, no se procesa la cola');
+      return;
+    }
 
     this.isProcessing = true;
     const { setSyncingId, markSyncCompleted, refreshPendingCount } =
@@ -143,13 +166,21 @@ class SyncQueueServiceClass {
         logger.error('[Sync] flushPendingChangeRequests failed, continuing anyway', err);
       }
 
+      // Spec 88 — una entrada por corrida. `resolveCampaignSession()` devuelve a
+      // `pending` la entrada que aplaza (spec 81), así que sin esta lista el
+      // bucle la recibiría de nuevo en el siguiente `dequeueNextPending()` y
+      // giraría indefinidamente, bloqueando el hilo de JS. Se detectó
+      // congelando la app en la ronda manual del test-088 (y de nuevo en la del
+      // test-086, al combinarse con el bucle por dueño).
+      const yaAtendidas: string[] = [];
       for (const { ownerUserId, token } of plan.toProcess) {
         if (this.stopRun) break;
         this.stopOwnerGroup = false;
 
-        let entry = await syncQueueStorage.dequeueNextPending(ownerUserId);
+        let entry = await syncQueueStorage.dequeueNextPending(yaAtendidas, ownerUserId);
         while (entry) {
           setSyncingId(entry.id);
+          yaAtendidas.push(entry.id);
           await this.processEntry(
             entry,
             false,
@@ -160,7 +191,7 @@ class SyncQueueServiceClass {
           );
           await refreshPendingCount();
           if (this.stopOwnerGroup || this.stopRun) break;
-          entry = await syncQueueStorage.dequeueNextPending(ownerUserId);
+          entry = await syncQueueStorage.dequeueNextPending(yaAtendidas, ownerUserId);
         }
       }
       // Pull resolved change requests after the survey loop.
@@ -199,7 +230,9 @@ class SyncQueueServiceClass {
       // Reset any entries left in_flight (e.g., deferred due to unresolved session)
       // so they're retried on the next sync run.
       try {
-        await syncQueueStorage.resetInFlightToRetry();
+        await syncQueueStorage.resetInFlightToRetry(
+          Array.from(this.interactiveInFlightSurveyIds),
+        );
       } catch (err) {
         logger.error('[Sync] resetInFlightToRetry failed', err);
       }
@@ -379,8 +412,13 @@ class SyncQueueServiceClass {
           this.stopRun = true;
           break;
         }
-        if (err instanceof NetworkError) {
-          logger.error('[Sync] network error resolving session, will retry later', err);
+        // Spec 88, criterio 7 — ningún error transitorio marca la sesión como
+        // `failed` (arrastraría a `failed_validation` todas sus encuestas).
+        if (shouldRetrySessionLater(err)) {
+          logger.error(
+            `[Sync] error transitorio resolviendo la sesión ${session.localSessionId}, sigue pendiente y se reintenta luego`,
+            err,
+          );
           break;
         } else {
           logger.error(`[Sync] failed to resolve session ${session.localSessionId}`, err);
@@ -834,12 +872,22 @@ class SyncQueueServiceClass {
     // inestable — el escenario real de `TC-070-04`), el siguiente intento
     // reenvía el mismo id local y el backend devuelve la encuesta ya creada
     // en vez de duplicarla. Sin esto, cada reintento generaba una fila nueva.
+    // Spec 90 — el `farmerId` del borrador puede ser provisional
+    // (`local_farmer_…`) si esta encuesta no es de registro y por tanto nunca
+    // pasó por `extractFarmer`. Enviarlo tal cual lo rechaza el backend con un
+    // 400 (`@IsUUID`) y condena la encuesta entera. Se resuelve al id real por
+    // documento, y si no hay forma se omite el campo.
+    const farmerIdParaBackend = await resolveDraftFarmerId(draft.farmerId, {
+      documentoDe: async (id) => (await farmerCacheStorage.get(id))?.documentId ?? null,
+      idRealDe: async (doc) => (await farmerCacheStorage.getByDocumentId(doc))?.farmerId ?? null,
+    });
+
     const { surveyId: realSurveyId } = await createSurvey(
       {
         instrumentIds: [draft.instrumentId],
         campaignSessionId: entry.campaignSessionId,
         clientSurveyId: entry.surveyId,
-        ...(draft.farmerId != null ? { farmerId: draft.farmerId } : {}),
+        ...(farmerIdParaBackend ? { farmerId: farmerIdParaBackend } : {}),
         ...(entry.stepOrder != null ? { stepOrder: entry.stepOrder } : {}),
       },
       ...this.authArgs(entry),
@@ -1034,6 +1082,17 @@ class SyncQueueServiceClass {
 
     const flattenedQuestions = flattenSections(instrument.sections);
 
+    // Spec 87 (D7): `buildResponsesPayload` omite las respuestas número + unidad a
+    // medias para no tumbar el lote. Se registra antes el valor que se descarta,
+    // para que pueda reingresarse a mano.
+    const discarded = findIncompleteNumericUnitAnswers(flattenedQuestions, draft.answers);
+    if (discarded.length > 0) {
+      logger.warn(
+        `[Sync] survey ${entry.surveyId}: ${discarded.length} incomplete numeric_with_unit answer(s) sent without value`,
+      );
+      await discardedAnswersStorage.record(entry.surveyId, realSurveyId, discarded);
+    }
+
     const resolvedAnswers = await resolveOtherOptions(
       flattenedQuestions,
       draft.answers,
@@ -1078,29 +1137,59 @@ class SyncQueueServiceClass {
   }
 
   async processSurveyNow(surveyId: string): Promise<void> {
-    // Spec 81, Fase 3 — un intento anterior (este mismo camino interactivo,
-    // o un `processAll()` interrumpido) puede haber dejado la entrada de
-    // este `surveyId` en `in_flight`. `getPendingBySurveyId()` no la vería
-    // (filtra por `status = 'pending'`) y este método caería directo al
-    // bucle de espera de más abajo sin procesarla nunca. Repararla antes de
-    // consultar es lo que permite que un segundo "Reintentar" del
-    // encuestador sí avance, sin depender de que corra un `processAll()` de
-    // fondo ni de reiniciar la app.
-    await syncQueueStorage.resetInFlightToRetryBySurveyId(surveyId);
-
-    const entry = await syncQueueStorage.getPendingBySurveyId(surveyId);
-
-    if (entry) {
-      await this.processEntry(entry, true);
+    // Spec 91 — corrección de auditoría (docs/reports/auditorias/45-…): si
+    // esta misma encuesta ya tiene otra llamada interactiva en vuelo en esta
+    // sesión (p. ej. una reentrada al orquestador mientras la primera
+    // todavía no termina), no competir por la entrada — solo esperarla,
+    // igual que se espera a un `processAll()` de fondo.
+    if (this.interactiveInFlightSurveyIds.has(surveyId)) {
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        const active = await syncQueueStorage.getActiveBySurveyId(surveyId);
+        if (!active) return;
+        await sleep(300);
+      }
       return;
     }
 
-    // Entry may be in_flight (processAll already picked it up); wait up to 10s.
-    const deadline = Date.now() + 10_000;
-    while (Date.now() < deadline) {
-      const active = await syncQueueStorage.getActiveBySurveyId(surveyId);
-      if (!active) return;
-      await sleep(300);
+    this.interactiveInFlightSurveyIds.add(surveyId);
+    try {
+      // Spec 91 — reclamación atómica: leer y marcar `in_flight` en una
+      // transición `UPDATE … WHERE status = 'pending'` re-verificada, en vez
+      // del `getPendingBySurveyId()` + `processEntry()` de antes. Ese camino
+      // anterior tenía una ventana entre leer y procesar donde un
+      // `processAll()` de fondo (disparado por `enqueueSubmission()` justo
+      // antes de este método) podía tomar la misma entrada primero — con
+      // esta reclamación, solo uno de los dos se la queda; el otro cae al
+      // bucle de espera de abajo, sin reenviar nada.
+      let entry = await syncQueueStorage.claimPendingBySurveyId(surveyId);
+
+      // Spec 81, Fase 3 — un intento anterior (este mismo camino
+      // interactivo, o un `processAll()` interrumpido) puede haber dejado la
+      // entrada en `in_flight` sin que nadie la esté procesando de verdad
+      // ahora mismo. Spec 91 — resetear solo si no hay un `processAll()`
+      // vivo en esta sesión (`isProcessing`): si lo hay, cualquier
+      // `in_flight` le pertenece a esa corrida, no está abandonado.
+      if (!entry && !this.isProcessing) {
+        await syncQueueStorage.resetInFlightToRetryBySurveyId(surveyId);
+        entry = await syncQueueStorage.claimPendingBySurveyId(surveyId);
+      }
+
+      if (entry) {
+        await this.processEntry(entry, true);
+        return;
+      }
+
+      // La entrada ya está en manos de otra corrida (processAll() en vuelo,
+      // u otra llamada interactiva), o ya se sincronizó. Esperar hasta 10s.
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        const active = await syncQueueStorage.getActiveBySurveyId(surveyId);
+        if (!active) return;
+        await sleep(300);
+      }
+    } finally {
+      this.interactiveInFlightSurveyIds.delete(surveyId);
     }
   }
 

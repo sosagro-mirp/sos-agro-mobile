@@ -13,6 +13,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import {
   Check,
   CircleAlert,
+  LifeBuoy,
   LoaderCircle,
   Image as ImageIcon,
   Mic,
@@ -23,6 +24,7 @@ import {
   UserRound,
 } from "lucide-react-native";
 import { useSnackbar } from "../../../src/components/common/Snackbar";
+import { ConfirmSheet } from "../../../src/components/common/ConfirmSheet";
 import { DestructiveButton } from "../../../src/components/common/DestructiveButton";
 import { useSyncStatusStore } from "../../../src/store/useSyncStatusStore";
 import { useAuthStore } from "../../../src/store/useAuthStore";
@@ -39,7 +41,11 @@ import { consentRecordStore } from "../../../src/storage/consentRecordStore";
 import { instrumentCacheStorage } from "../../../src/storage/instrumentCache";
 import { farmerCacheStorage } from "../../../src/storage/farmerCache";
 import { NetworkMonitor } from "../../../src/sync/NetworkMonitor";
+import { describeSyncFailure } from "../../../src/lib/describeFailedSyncCause";
+import { discardedAnswersStorage, type DiscardedAnswer } from "../../../src/storage/discardedAnswersStorage";
+import { describeDiscardedValue } from "../../../src/lib/findIncompleteNumericUnitAnswers";
 import { MediaUploadService } from "../../../src/sync/MediaUploadService";
+import { hasStuckSessions, recoverStuckSessions } from "../../../src/sync/recoverStuckSessions";
 import { Fonts } from "../../../src/theme/fonts";
 import { useTheme } from "../../../src/theme/ThemeProvider";
 import type { ThemeColors } from "../../../src/theme/colors";
@@ -138,6 +144,8 @@ export default function SyncScreen() {
   const [failedEntries, setFailedEntries] = useState<SyncQueueEntry[]>([]);
   const [failedMedia, setFailedMedia] = useState<MediaUploadEntry[]>([]);
   const [identities, setIdentities] = useState<Record<string, EntryIdentity>>({});
+  // Spec 87 (D7): respuestas número + unidad que se enviaron sin su valor a medias.
+  const [discarded, setDiscarded] = useState<DiscardedAnswer[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [retryingMediaId, setRetryingMediaId] = useState<string | null>(null);
@@ -147,11 +155,22 @@ export default function SyncScreen() {
   const [isClearingFailedMedia, setIsClearingFailedMedia] = useState(false);
   // Spec 86 (CA-16): encuestadores con pendientes que esperan ingresar con conexión.
   const [waitingNames, setWaitingNames] = useState<string[]>([]);
+  // Spec 88 — recuperación de encuestas atascadas por una sesión en `failed`.
+  const [stuckSessions, setStuckSessions] = useState(false);
+  const [isRecovering, setIsRecovering] = useState(false);
+  const [inFlightCount, setInFlightCount] = useState(0);
+  const [confirmClearVisible, setConfirmClearVisible] = useState(false);
 
   const refreshData = async () => {
     await refreshPendingCount();
     const failed = await syncQueueStorage.listFailed();
     setFailedEntries(failed);
+    setStuckSessions(await hasStuckSessions().catch(() => false));
+    // Spec 88 — `in_flight` no se mostraba en ninguna parte de esta pantalla,
+    // ni se sumaba a «Pendientes»: una entrada varada en vuelo era invisible
+    // salvo desde la consola oculta de diagnóstico.
+    const all = await syncQueueStorage.listAll().catch(() => []);
+    setInFlightCount(all.filter((e) => e.status === "in_flight").length);
     const failedMediaEntries = await mediaUploadQueueStorage.listFailed();
     setFailedMedia(failedMediaEntries);
 
@@ -175,7 +194,16 @@ export default function SyncScreen() {
       setWaitingNames([]);
     }
 
-    const surveyIds = [...new Set([...failed.map((e) => e.surveyId), ...failedMediaEntries.map((e) => e.surveyId)])];
+    const discardedList = await discardedAnswersStorage.list();
+    setDiscarded(discardedList);
+
+    const surveyIds = [
+      ...new Set([
+        ...failed.map((e) => e.surveyId),
+        ...failedMediaEntries.map((e) => e.surveyId),
+        ...discardedList.map((d) => d.localSurveyId),
+      ]),
+    ];
     const resolved = await Promise.all(surveyIds.map((id) => resolveEntryIdentity(id)));
     setIdentities(Object.fromEntries(surveyIds.map((id, i) => [id, resolved[i]])));
   };
@@ -220,6 +248,7 @@ export default function SyncScreen() {
 
   const handleClearFailed = async () => {
     if (isClearingFailed) return;
+    setConfirmClearVisible(false);
     setIsClearingFailed(true);
     try {
       await syncQueueStorage.clearFailed();
@@ -227,6 +256,37 @@ export default function SyncScreen() {
       await refreshPendingCount();
     } finally {
       setIsClearingFailed(false);
+    }
+  };
+
+  // Spec 88 — devuelve a la cola las encuestas que quedaron atascadas porque su
+  // sesión de campaña se marcó como fallida (un 401 al arrancar bastaba). No
+  // borra nada y es idempotente: repetirla no encuentra nada que hacer.
+  const handleRecover = async () => {
+    if (isRecovering) return;
+    setIsRecovering(true);
+    try {
+      const report = await recoverStuckSessions();
+      await refreshData();
+
+      if (report.surveysRequeued === 0 && report.sessionsRecovered === 0) {
+        showSnackbar({ message: "No había encuestas atascadas por recuperar." });
+      } else {
+        const encuestas = `${report.surveysRequeued} encuesta${report.surveysRequeued === 1 ? "" : "s"}`;
+        const sesiones = `${report.sessionsRecovered} visita${report.sessionsRecovered === 1 ? "" : "s"}`;
+        showSnackbar({
+          message: `Se recuperaron ${encuestas} de ${sesiones}. Pulsa «Sincronizar ahora» para enviarlas.`,
+          variant: "success",
+        });
+      }
+    } catch (err) {
+      logger.error("[Sync] recuperación de sesiones atascadas falló", err);
+      showSnackbar({
+        message: "No se pudo recuperar las encuestas atascadas.",
+        variant: "error",
+      });
+    } finally {
+      setIsRecovering(false);
     }
   };
 
@@ -311,9 +371,42 @@ export default function SyncScreen() {
 
         <View style={styles.countersRow}>
           <CounterCard label="Pendientes" value={pendingCount} tone="warning" />
+          {inFlightCount > 0 ? (
+            <CounterCard label="En curso" value={inFlightCount} tone="warning" />
+          ) : null}
           <CounterCard label="Con error" value={failedEntries.length} tone="danger" />
           <CounterCard label="Adjuntos" value={failedMedia.length} tone="danger" />
         </View>
+
+        {stuckSessions ? (
+          <View style={styles.recoveryCard}>
+            <View style={styles.recoveryHeader}>
+              <LifeBuoy size={18} color={colors.warningFg} strokeWidth={2.4} />
+              <Text style={styles.recoveryTitle}>Hay encuestas atascadas</Text>
+            </View>
+            <Text style={styles.recoveryBody}>
+              Quedaron encuestas que no pudieron enviarse porque la visita a la que pertenecen
+              no llegó a registrarse en el servidor. Los datos están guardados y completos.
+              Inicia sesión con conexión y recupéralas para volver a ponerlas en cola.
+            </Text>
+            <Pressable
+              style={[styles.recoveryButton, isRecovering && styles.syncButtonDisabled]}
+              onPress={handleRecover}
+              disabled={isRecovering}
+              accessibilityRole="button"
+              accessibilityLabel="Recuperar encuestas atascadas"
+            >
+              {isRecovering ? (
+                <ActivityIndicator color={colors.warningFg} />
+              ) : (
+                <>
+                  <RefreshCw size={16} color={colors.warningFg} strokeWidth={2.4} />
+                  <Text style={styles.recoveryButtonText}>Recuperar encuestas atascadas</Text>
+                </>
+              )}
+            </Pressable>
+          </View>
+        ) : null}
 
         {allDone ? (
           <View style={styles.allGood}>
@@ -346,7 +439,17 @@ export default function SyncScreen() {
               <Text style={styles.sectionTitleDanger}>
                 ERRORES DE VALIDACIÓN ({failedEntries.length})
               </Text>
-              <Pressable onPress={handleClearFailed} disabled={isClearingFailed}>
+              {/* Spec 88 — «Limpiar» hace un DELETE de estas entradas: las
+                  respuestas quedan en la base pero huérfanas, sin ningún camino
+                  de reenvío desde la app. Durante el incidente del 401 este
+                  botón era la forma más rápida de perder datos de campo, así
+                  que ahora exige confirmación explícita. */}
+              <Pressable
+                onPress={() => setConfirmClearVisible(true)}
+                disabled={isClearingFailed}
+                accessibilityRole="button"
+                accessibilityLabel="Borrar los envíos con error"
+              >
                 {isClearingFailed ? (
                   <ActivityIndicator size="small" color={colors.dangerFg} />
                 ) : (
@@ -368,8 +471,13 @@ export default function SyncScreen() {
                     {who || "Instrumento no disponible"}
                   </Text>
                   <Text style={styles.failedWhen}>{when}</Text>
-                  {entry.errorDetail ? (
-                    <Text style={styles.failedError}>{entry.errorDetail}</Text>
+                  {/* Spec 90 — una sola resolución para todas las causas
+                      conocidas; si no reconocemos el error, se muestra el texto
+                      crudo del backend antes que dejar al encuestador sin nada. */}
+                  {describeSyncFailure(entry.errorDetail) ?? entry.errorDetail ? (
+                    <Text style={styles.failedError}>
+                      {describeSyncFailure(entry.errorDetail) ?? entry.errorDetail}
+                    </Text>
                   ) : null}
                 </View>
                 <View style={styles.failedFooter}>
@@ -395,6 +503,51 @@ export default function SyncScreen() {
               </View>
               );
             })}
+          </View>
+        ) : null}
+
+        {discarded.length > 0 ? (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <CircleAlert size={15} color={colors.warningFg} strokeWidth={2.4} />
+              <Text style={styles.sectionTitleWarning}>
+                RESPUESTAS ENVIADAS A MEDIAS ({discarded.length})
+              </Text>
+              <Pressable
+                onPress={async () => {
+                  await discardedAnswersStorage.clear();
+                  setDiscarded([]);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Limpiar avisos de respuestas enviadas a medias"
+              >
+                <Text style={styles.clearFailedBtnWarning}>Limpiar</Text>
+              </Pressable>
+            </View>
+            <View style={styles.attachmentsBox}>
+              {discarded.map((item, index) => {
+                const identity = identities[item.localSurveyId];
+                return (
+                  <View
+                    key={`${item.localSurveyId}-${item.questionId}`}
+                    style={[
+                      styles.attachmentRow,
+                      index !== discarded.length - 1 && styles.attachmentRowDivider,
+                    ]}
+                  >
+                    <View style={styles.attachmentInfo}>
+                      <Text style={styles.attachmentFile} numberOfLines={2}>
+                        {item.questionText}
+                      </Text>
+                      <Text style={styles.attachmentMeta} numberOfLines={2}>
+                        Se envió sin esta respuesta: {describeDiscardedValue(item)} ·{" "}
+                        {identity?.farmerName ?? identity?.instrumentName ?? "Sin identificar"}
+                      </Text>
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
           </View>
         ) : null}
 
@@ -468,6 +621,25 @@ export default function SyncScreen() {
           </Text>
         ) : null}
       </ScrollView>
+
+      <ConfirmSheet
+        visible={confirmClearVisible}
+        icon={Trash2}
+        tone="danger"
+        title="¿Borrar los envíos con error?"
+        body={
+          "Las respuestas ya capturadas dejarán de poder enviarse al servidor y no hay forma de recuperarlas desde la app.\n\n" +
+          "Si las encuestas quedaron atascadas por un problema de conexión o de sesión, usa «Recuperar encuestas atascadas» en vez de borrarlas."
+        }
+        destructiveAction={{
+          label: `Borrar ${failedEntries.length} envío${failedEntries.length === 1 ? "" : "s"}`,
+          onPress: handleClearFailed,
+          icon: Trash2,
+        }}
+        secondaryAction={{ label: "Cancelar", onPress: () => setConfirmClearVisible(false) }}
+        isLoading={isClearingFailed}
+        onRequestClose={() => setConfirmClearVisible(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -557,6 +729,31 @@ function createStyles(colors: ThemeColors) {
     },
     syncButtonDisabled: { backgroundColor: colors.textMuted },
     syncButtonText: { fontSize: 15, fontFamily: Fonts.extraBold, color: colors.brandForeground },
+
+    // Spec 88 — tarjeta de recuperación. Tono `warning`, nunca solo color:
+    // lleva ícono y texto, como exige DESIGN.md para los estados semánticos.
+    recoveryCard: {
+      gap: 10,
+      backgroundColor: colors.warningBg,
+      borderRadius: 11,
+      borderWidth: 1,
+      borderColor: colors.warningFg,
+      padding: 14,
+    },
+    recoveryHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
+    recoveryTitle: { flex: 1, fontSize: 14, fontFamily: Fonts.extraBold, color: colors.warningFg },
+    recoveryBody: { fontSize: 12.5, fontFamily: Fonts.regular, color: colors.textPrimary, lineHeight: 18 },
+    recoveryButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 8,
+      borderRadius: 10,
+      borderWidth: 1.5,
+      borderColor: colors.warningFg,
+      paddingVertical: 12,
+    },
+    recoveryButtonText: { fontSize: 13.5, fontFamily: Fonts.extraBold, color: colors.warningFg },
 
     purgeResult: { fontSize: 12, fontFamily: Fonts.regular, color: colors.textMuted, textAlign: "center" },
 

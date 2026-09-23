@@ -1,7 +1,7 @@
 import React, { useMemo } from "react";
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Check } from "lucide-react-native";
-import { isAnswerComplete } from "../../lib/isAnswerComplete";
+import { isAnswerAcceptable } from "../../lib/isAnswerConsistent";
 import { Fonts } from "../../theme/fonts";
 import { useTheme } from "../../theme/ThemeProvider";
 import type { ThemeColors } from "../../theme/colors";
@@ -38,7 +38,7 @@ export function SectionNavPanel({
       <ScrollView showsVerticalScrollIndicator={false}>
         {questions.map((item) => {
           const isCurrent = item.question.questionId === currentQuestionId;
-          const complete = isAnswerComplete(item.question, answers[item.question.questionId]);
+          const complete = isAnswerAcceptable(item.question, answers[item.question.questionId]);
           return (
             <TouchableOpacity
               key={item.question.questionId}
