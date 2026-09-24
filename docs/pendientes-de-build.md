@@ -47,6 +47,7 @@ archiva) en cuanto un build lo cubre y la ronda manual correspondiente lo confir
 |---|--------|--------|------------------------------|--------------------------------------|
 | 1 | Spec 35, D3: `blockedPermissions` para `READ_MEDIA_IMAGES`, `READ_MEDIA_VIDEO`, `READ_MEDIA_AUDIO` y `SYSTEM_ALERT_WINDOW` en `app.config.ts`. Verificar en el AAB que no aparecen en el manifiesto y que galería, cámara, documento y audio siguen funcionando | *(rama `deploy/v1.0.0-google-play`)* | Spec 35, Fase 5 (TC-035-005 a TC-035-008) | Sí — manifiesto nativo |
 | 2 | Spec 35: `autoIncrement: true` en el perfil `production` de `eas.json`. Confirmar `versionCode` ≥ 10015 en la salida del build | *(rama `deploy/v1.0.0-google-play`)* | Spec 35, Fase 5 | Sí — solo afecta builds |
+| 3 | Spec 86, Fase 10: PBKDF2 nativo con `react-native-quick-crypto` (+ `react-native-nitro-modules`, `react-native-quick-base64`, plugin en `app.config.ts`) y `version` 1.0.0 → 1.0.1. Verificar en la tablet: ingreso sin conexión < 1 s, que una credencial creada con JS se verifica con el nativo (auditoría 46, M4) y TC-086-16/17. **No publicar el spec 86 por OTA**: el runtime cambia | *(rama `feature/persistent-tablet-session`)* | Spec 86, Fase 10; `docs/testing/test-086` (TC-086-16, 17 y casos nuevos de Fase 10) | Sí — dependencias nativas y `version` |
 
 ## Política: cuándo generar el siguiente build
 
