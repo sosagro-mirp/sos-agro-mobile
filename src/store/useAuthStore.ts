@@ -289,7 +289,9 @@ export const useAuthStore = create<AuthState>((set, get) => {
         applyServerState("valid");
         // Los pendientes de este encuestador (sobre todo los que esperaban su
         // ingreso con el token vencido) salen ahora, sin esperar otro disparo.
-        void SyncQueueService.processAll();
+        SyncQueueService.processAll().catch((err) =>
+          logger.error("[Auth] processAll after sign-in failed", err),
+        );
       } catch (e) {
         // Sin red, timeout, 5xx o 429: se intenta la verificación local.
         if (
@@ -331,7 +333,9 @@ export const useAuthStore = create<AuthState>((set, get) => {
         set({ token: accessToken, user: freshUser, loading: false });
         applyServerState("valid");
         // La cola del usuario se sincroniza sola; el estado de navegación no cambia.
-        void SyncQueueService.processAll();
+        SyncQueueService.processAll().catch((err) =>
+          logger.error("[Auth] processAll after sign-in failed", err),
+        );
       } catch (e) {
         set({
           error:

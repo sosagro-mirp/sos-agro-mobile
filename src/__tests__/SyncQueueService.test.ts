@@ -1360,7 +1360,7 @@ describe('processEntry — 401/429 en los demás tipos de ítem y dueños (spec 
 
     await SyncQueueService.processAll();
 
-    expect(mockDequeueNextPending).not.toHaveBeenCalledWith('user-ghost');
+    expect(mockDequeueNextPending).not.toHaveBeenCalledWith(expect.anything(), 'user-ghost');
     (secureStorage.getTokenFor as jest.Mock).mockResolvedValue('token-1');
   });
 

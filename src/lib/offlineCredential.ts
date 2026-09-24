@@ -8,6 +8,7 @@ import { pbkdf2Async } from "@noble/hashes/pbkdf2.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, hexToBytes, utf8ToBytes } from "@noble/hashes/utils.js";
 import type { AuthUser } from "../api/auth";
+import { logger } from "./logger";
 
 // ── Parámetros aprobados por el usuario (2026-09-19) — ajustables por OTA ──
 export const OFFLINE_CREDENTIAL_MAX_AGE_DAYS = 30;
@@ -126,7 +127,8 @@ async function derive(password: string, saltHex: string, iterations: number): Pr
   if (native) {
     try {
       out = await deriveNative(native, password, saltHex, iterations);
-    } catch {
+    } catch (err) {
+      logger.warn(`[OfflineCredential] native PBKDF2 failed, falling back to JS: ${String(err)}`);
       out = await deriveJs(password, saltHex, iterations);
     }
   } else {
