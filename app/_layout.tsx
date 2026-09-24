@@ -21,6 +21,7 @@ import { NetworkMonitor } from "../src/sync/NetworkMonitor";
 import { BackgroundSync } from "../src/sync/BackgroundSync";
 import { initSentry, captureError } from "../src/lib/sentry";
 import { logger } from "../src/lib/logger";
+import { decideAuthNavigation, MAX_NAVIGATION_RETRIES } from "../src/lib/authGuardNavigation";
 import { ChangeRequestBanner } from "../src/components/requests/ChangeRequestBanner";
 import { ThemeProvider, useTheme } from "../src/theme/ThemeProvider";
 import { SnackbarProvider } from "../src/components/common/Snackbar";
@@ -53,33 +54,36 @@ function AuthGuard() {
   const navigationReady = !!useRootNavigationState()?.key;
   // Track previous user value to only act on actual changes, not re-renders
   const prevUserRef = useRef<string | null | undefined>(undefined);
-
+  const retriesRef = useRef(0);
   const [retryTick, setRetryTick] = useState(0);
 
   useEffect(() => {
-    if (isRestoring || !navigationReady) return;
-
-    const prevId = prevUserRef.current;
     const currId = user?.userId ?? null;
-
-    // Skip if user identity hasn't changed (avoids resetting navigation mid-session)
-    if (prevId === currId) return;
+    const action = decideAuthNavigation({
+      isRestoring,
+      navigationReady,
+      prevId: prevUserRef.current,
+      currId,
+    });
+    if (action.type === "none") return;
 
     try {
-      if (!user) {
-        // `replace` solo cambia la pantalla de arriba: sin vaciar la pila, el botón
-        // "atrás" de Android dejaba ver las pantallas del encuestador anterior sin
-        // sesión (test-086, TC-086-07). En el arranque (`prevId === undefined`) no
-        // hay pila que vaciar.
-        if (prevId !== undefined && router.canDismiss()) router.dismissAll();
+      if (action.type === "login") {
+        if (action.clearStack && router.canDismiss()) router.dismissAll();
         router.replace("/login");
       } else {
         router.replace("/campaign");
       }
       prevUserRef.current = currId;
-    } catch {
-      // Reabrir la app con el proceso vivo ya trae la sesión cargada y el navegador
-      // raíz puede no estar listo todavía: se reintenta en un instante.
+      retriesRef.current = 0;
+    } catch (err) {
+      // Reabrir con el proceso vivo puede llegar antes de que el navegador esté
+      // listo: se reintenta en un instante, con tope para no girar sin fin.
+      if (retriesRef.current >= MAX_NAVIGATION_RETRIES) {
+        logger.error("[AuthGuard] navigation failed after retries", err);
+        return;
+      }
+      retriesRef.current += 1;
       const timer = setTimeout(() => setRetryTick((n) => n + 1), 100);
       return () => clearTimeout(timer);
     }
