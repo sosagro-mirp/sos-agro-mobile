@@ -61,9 +61,9 @@ export const useCachedCampaignsStore = create<CachedCampaignsState>((set, get) =
     set({ isLoading: true, error: null, downloadProgress: null });
 
     try {
-      // ── Clear stale cache before refreshing ───────────────────────────────
-      await campaignCacheStorage.clear();
-      await instrumentCacheStorage.clear();
+      // Todo se descarga a memoria y la caché se reemplaza solo al final: si
+      // la red o el token fallan a mitad, las campañas ya descargadas siguen
+      // disponibles para trabajar sin conexión.
 
       // ── Phase 1: fetch campaign list and full renders ──────────────────────
       const summaries = await fetchActiveCampaigns();
@@ -89,7 +89,6 @@ export const useCachedCampaignsStore = create<CachedCampaignsState>((set, get) =
         }));
 
         const campaign = await fetchCampaignRender(summary.campaignId);
-        await campaignCacheStorage.save(campaign);
         rendered.push(campaign);
 
         set((s) => ({
@@ -116,6 +115,7 @@ export const useCachedCampaignsStore = create<CachedCampaignsState>((set, get) =
         },
       });
 
+      const instruments: Awaited<ReturnType<typeof fetchInstrumentRender>>[] = [];
       for (const instrumentId of toDownload) {
         set((s) => ({
           downloadProgress: s.downloadProgress
@@ -126,8 +126,7 @@ export const useCachedCampaignsStore = create<CachedCampaignsState>((set, get) =
             : null,
         }));
 
-        const instrument = await fetchInstrumentRender(instrumentId);
-        await instrumentCacheStorage.save(instrument);
+        instruments.push(await fetchInstrumentRender(instrumentId));
 
         set((s) => ({
           downloadProgress: s.downloadProgress
@@ -146,12 +145,17 @@ export const useCachedCampaignsStore = create<CachedCampaignsState>((set, get) =
       for (const code of ['S_REG', 'S1', 'S2'] as const) {
         try {
           const meta = await fetchInstrumentByCode(code);
-          const instrument = await fetchInstrumentRender(meta.instrumentId);
-          await instrumentCacheStorage.save(instrument);
+          instruments.push(await fetchInstrumentRender(meta.instrumentId));
         } catch {
           // Instrumento no configurado en el backend — ignorar en silencio
         }
       }
+
+      // ── Descarga completa: recién ahora se reemplaza la caché ──────────────
+      await campaignCacheStorage.clear();
+      await instrumentCacheStorage.clear();
+      for (const campaign of rendered) await campaignCacheStorage.save(campaign);
+      for (const instrument of instruments) await instrumentCacheStorage.save(instrument);
 
       // ── Spec 78 — pre-cache the active consent document, alongside S1/S2 ──
       try {

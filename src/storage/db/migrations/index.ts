@@ -16,9 +16,21 @@ const migrations = {
       { idx: 10, when: 10, tag: 'm0010', breakpoints: true },
       { idx: 11, when: 11, tag: 'm0011', breakpoints: true },
       { idx: 12, when: 12, tag: 'm0012', breakpoints: true },
+      { idx: 13, when: 13, tag: 'm0013', breakpoints: true },
     ],
   },
   migrations: {
+    m0013: [
+      // Spec 86 — dueño por registro para sincronizar con el token de quien lo creó.
+      'ALTER TABLE `sync_queue` ADD COLUMN `owner_user_id` text',
+      '--> statement-breakpoint',
+      'ALTER TABLE `surveys` ADD COLUMN `owner_user_id` text',
+      '--> statement-breakpoint',
+      'ALTER TABLE `change_requests` ADD COLUMN `owner_user_id` text',
+      '--> statement-breakpoint',
+      'CREATE INDEX IF NOT EXISTS `sync_queue_owner_status_idx` ON `sync_queue` (`owner_user_id`, `status`)',
+    ].join('\n'),
+
     m0012: [
       "ALTER TABLE `farmer_cache` ADD COLUMN `consent_version` text",
       '--> statement-breakpoint',

@@ -19,10 +19,13 @@ import { resolveOtherOptions } from '../lib/resolveOtherOptions';
 import { isLocalId } from '../lib/isLocalId';
 import { useSyncStatusStore } from '../store/useSyncStatusStore';
 import { useCampaignSessionStore } from '../store/useCampaignSessionStore';
+import { NetworkError, ServerError, httpClient, type RequestOptions } from '../api/httpClient';
+import { secureStorage } from '../storage/secureStorage';
+import { planOwnerSync } from '../lib/planOwnerSync';
+import { resolveSyncErrorAction } from '../lib/syncErrorAction';
 import { useAuthStore } from '../store/useAuthStore';
 import { shouldRetrySessionLater } from './planSessionRecovery';
 import { resolveDraftFarmerId } from './resolveDraftFarmerId';
-import { NetworkError, ServerError, httpClient } from '../api/httpClient';
 import { endpoints } from '../api/endpoints';
 import { logger } from '../lib/logger';
 import { sessionCropsStorage } from '../storage/sessionCropsStorage';
@@ -46,6 +49,56 @@ const BACKOFF_MAX_MS = 60_000;
 class SyncQueueServiceClass {
   private isProcessing = false;
   private consecutiveNetworkFailures = 0;
+  // Spec 86 (D5) — un 401 corta el grupo del dueño afectado; un 429 corta la
+  // corrida completa. Ninguno marca ítems como fallidos ni suma intentos.
+  private stopOwnerGroup = false;
+  private stopRun = false;
+  // Token con el que cada dueño recibió un 401 en esta sesión de la app: el
+  // dueño espera ("Esperando que {Nombre} ingrese con conexión") mientras su
+  // token guardado siga siendo ese mismo. Al reingresar, el token cambia.
+  private readonly failedTokens = new Map<string, string>();
+  // Spec 86 — ¿hay token del usuario activo? Sin él, los pasos auxiliares que
+  // salen con la sesión activa (dueño `null`) no envían nada (CA-17).
+  private hasActiveToken = false;
+
+  private authArgs(entry: { authToken?: string }): [RequestOptions] | [] {
+    return entry.authToken ? [{ authToken: entry.authToken }] : [];
+  }
+
+  private async tokenFor(ownerUserId: string | null | undefined): Promise<string | null> {
+    if (!ownerUserId) return null;
+    try {
+      return (await secureStorage.getTokenFor(ownerUserId)) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Spec 86 (D5): 401 (`retry_auth`) y 429 (`retry_transient`) devuelven el
+   * ítem a pendiente sin sumar intentos. Devuelve `true` si el error se
+   * absorbió aquí y el llamador debe cortar.
+   */
+  private async deferOnAuthOrRateLimit(entry: SyncQueueEntry, error: unknown): Promise<boolean> {
+    const action = resolveSyncErrorAction(error);
+    if (action !== 'retry_auth' && action !== 'retry_transient') return false;
+
+    logger.warn(
+      `[Sync] ${action === 'retry_auth' ? '401' : '429'} for entry ${entry.id} — leaving pending`,
+    );
+    await syncQueueStorage.resetInFlightToRetryById(entry.id);
+
+    if (action === 'retry_auth') {
+      this.stopOwnerGroup = true;
+      if (entry.ownerUserId) {
+        const failed = entry.authToken ?? (await this.tokenFor(entry.ownerUserId));
+        if (failed) this.failedTokens.set(entry.ownerUserId, failed);
+      }
+    } else {
+      this.stopRun = true;
+    }
+    return true;
+  }
   // Spec 91 — corrección de auditoría (docs/reports/auditorias/45-…):
   // `surveyId`s que un `processSurveyNow()` interactivo tiene genuinamente
   // en vuelo ahora mismo, más allá de si el orquestador que lo llamó ya dejó
@@ -74,16 +127,41 @@ class SyncQueueServiceClass {
       useSyncStatusStore.getState();
 
     try {
+      this.stopOwnerGroup = false;
+      this.stopRun = false;
+
+      // Spec 86 (D6, CA-16/17): qué dueños se procesan y con qué token. Sin
+      // ningún token usable no se envía nada — antes, cerrar sesión con
+      // pendientes hacía que todo saliera sin Authorization y terminara en
+      // `failed_validation`.
+      const activeUserId = (await secureStorage.getActiveUserId().catch(() => null)) ?? null;
+      const owners = await syncQueueStorage.listPendingOwners();
+      const tokens: Record<string, string | null> = {};
+      for (const id of [...owners, activeUserId]) {
+        if (id && !(id in tokens)) tokens[id] = await this.tokenFor(id);
+      }
+      const reauthRequired = new Set(
+        [...this.failedTokens].filter(([id, tk]) => tokens[id] === tk).map(([id]) => id),
+      );
+      const plan = planOwnerSync({ owners, tokens, reauthRequired, activeUserId });
+      this.hasActiveToken = !!(activeUserId && tokens[activeUserId]);
+      // CA-17: sin ningún token usable (ni de dueños con pendientes ni de la
+      // sesión activa) no se emite ningún request, tampoco los auxiliares.
+      const canSendAnything = plan.toProcess.length > 0 || this.hasActiveToken;
+      if (plan.waiting.length > 0) {
+        logger.info(`[Sync] waiting for owner(s) to sign in online: ${plan.waiting.join(', ')}`);
+      }
+
       // Resolve any provisional sessions before processing the queue.
       try {
-        await this.resolveLocalSessions();
+        if (canSendAnything) await this.resolveLocalSessions();
       } catch (err) {
         logger.error('[Sync] resolveLocalSessions failed, continuing anyway', err);
       }
 
       // Flush pending change requests before processing surveys.
       try {
-        await this.flushPendingChangeRequests();
+        if (canSendAnything) await this.flushPendingChangeRequests();
       } catch (err) {
         logger.error('[Sync] flushPendingChangeRequests failed, continuing anyway', err);
       }
@@ -92,16 +170,29 @@ class SyncQueueServiceClass {
       // `pending` la entrada que aplaza (spec 81), así que sin esta lista el
       // bucle la recibiría de nuevo en el siguiente `dequeueNextPending()` y
       // giraría indefinidamente, bloqueando el hilo de JS. Se detectó
-      // congelando la app en la ronda manual del test-088.
+      // congelando la app en la ronda manual del test-088 (y de nuevo en la del
+      // test-086, al combinarse con el bucle por dueño).
       const yaAtendidas: string[] = [];
-      let entry = await syncQueueStorage.dequeueNextPending(yaAtendidas);
+      for (const { ownerUserId, token } of plan.toProcess) {
+        if (this.stopRun) break;
+        this.stopOwnerGroup = false;
 
-      while (entry) {
-        setSyncingId(entry.id);
-        yaAtendidas.push(entry.id);
-        await this.processEntry(entry);
-        await refreshPendingCount();
-        entry = await syncQueueStorage.dequeueNextPending(yaAtendidas);
+        let entry = await syncQueueStorage.dequeueNextPending(yaAtendidas, ownerUserId);
+        while (entry) {
+          setSyncingId(entry.id);
+          yaAtendidas.push(entry.id);
+          await this.processEntry(
+            entry,
+            false,
+            // M3 (auditoría 44): siempre el token del dueño, aunque sea el activo —
+            // si otro encuestador entra a mitad de la corrida, los ítems que
+            // quedan no deben salir con su token.
+            ownerUserId === null ? undefined : token,
+          );
+          await refreshPendingCount();
+          if (this.stopOwnerGroup || this.stopRun) break;
+          entry = await syncQueueStorage.dequeueNextPending(yaAtendidas, ownerUserId);
+        }
       }
       // Pull resolved change requests after the survey loop.
       try {
@@ -109,7 +200,22 @@ class SyncQueueServiceClass {
         // Fall back to epoch when lastSyncAt is null (first sync or after app restart)
         // so we always catch any resolved tickets.
         const since = lastSyncAt ?? new Date(0);
-        await this.pullResolvedChangeRequests(since);
+        // M2 (auditoría 44): las resueltas son del usuario del token, así que se
+        // consultan por dueño con el token de cada uno (y una vez con la sesión
+        // activa para los registros sin dueño).
+        const pulled = new Set<string>();
+        for (const { ownerUserId, token } of plan.toProcess) {
+          const key = ownerUserId ?? '__active__';
+          if (pulled.has(key)) continue;
+          pulled.add(key);
+          await this.pullResolvedChangeRequests(
+            since,
+            ...(ownerUserId === null ? [] : [{ authToken: token }]),
+          );
+        }
+        if (this.hasActiveToken && !pulled.has('__active__') && !pulled.has(activeUserId ?? '')) {
+          await this.pullResolvedChangeRequests(since);
+        }
       } catch (err) {
         logger.error('[Sync] pullResolvedChangeRequests failed, continuing anyway', err);
       }
@@ -138,12 +244,42 @@ class SyncQueueServiceClass {
     const pending = await changeRequestStorage.listPendingSync();
     if (pending.length === 0) return;
 
+    // Spec 86 (D6): cada solicitud sale con el token de su dueño — el backend
+    // la atribuye (y deduplica por `localId + createdBy`) al usuario del token.
+    const skippedOwners = new Set<string>();
     for (const cr of pending) {
-      await postChangeRequest({
-        description: cr.description,
-        farmerId: cr.farmerId,
-        localId: cr.id,
-      });
+      const owner = cr.ownerUserId ?? null;
+      if (owner && skippedOwners.has(owner)) continue;
+
+      const token = owner ? await this.tokenFor(owner) : null;
+      if (owner && (!token || this.failedTokens.get(owner) === token)) {
+        skippedOwners.add(owner);
+        continue;
+      }
+      // Sin dueño: se envía con la sesión activa, que debe tener token.
+      if (!owner && !this.hasActiveToken) return;
+
+      try {
+        await postChangeRequest(
+          { description: cr.description, farmerId: cr.farmerId, localId: cr.id },
+          ...(token ? [{ authToken: token }] : []),
+        );
+      } catch (err) {
+        const action = resolveSyncErrorAction(err);
+        if (action === 'retry_auth') {
+          // Dueño `null`: el 401 es de la sesión activa, que ya avisó por
+          // `authEvents`; no hay nada más que enviar con ella.
+          if (!owner || !token) return;
+          this.failedTokens.set(owner, token);
+          skippedOwners.add(owner);
+          continue;
+        }
+        if (action === 'retry_transient') {
+          this.stopRun = true;
+          return;
+        }
+        throw err;
+      }
       await changeRequestStorage.markSynced(cr.id);
       logger.info(`[Sync] change request ${cr.id} synced`);
     }
@@ -151,8 +287,8 @@ class SyncQueueServiceClass {
     await useChangeRequestStore.getState().loadAll();
   }
 
-  private async pullResolvedChangeRequests(since: Date): Promise<void> {
-    const resolved = await fetchMyResolved(since);
+  private async pullResolvedChangeRequests(since: Date, ...auth: [RequestOptions] | []): Promise<void> {
+    const resolved = await fetchMyResolved(since, ...auth);
     if (resolved.length === 0) return;
 
     let newCount = 0;
@@ -173,6 +309,17 @@ class SyncQueueServiceClass {
     const pending = await pendingSessionStorage.listPending();
 
     for (const session of pending) {
+      // Spec 86 (D6): la sesión provisional se crea con el token de quien la
+      // abrió (`session.userId`), no con el de quien use la tablet ahora.
+      const storedToken = await this.tokenFor(session.userId);
+      if (session.userId && (!storedToken || this.failedTokens.get(session.userId) === storedToken)) {
+        logger.info(`[Sync] session ${session.localSessionId} waits for its owner to sign in`);
+        continue;
+      }
+      if (!session.userId && !this.hasActiveToken) continue;
+      const sessionAuth: [RequestOptions] | [] = storedToken ? [{ authToken: storedToken }] : [];
+      const sessionToken = storedToken;
+
       try {
         let farmerIdForBackend: string | undefined = session.farmerId;
 
@@ -186,12 +333,15 @@ class SyncQueueServiceClass {
 
         let sessionResponse: CampaignSessionResponse;
         try {
-          sessionResponse = await createCampaignSession({
-            campaignId: session.campaignId,
-            userId: session.userId,
-            ...(farmerIdForBackend ? { farmerId: farmerIdForBackend } : {}),
-            ...(cropIds.length > 0 ? { cropIds } : {}),
-          });
+          sessionResponse = await createCampaignSession(
+            {
+              campaignId: session.campaignId,
+              userId: session.userId,
+              ...(farmerIdForBackend ? { farmerId: farmerIdForBackend } : {}),
+              ...(cropIds.length > 0 ? { cropIds } : {}),
+            },
+            ...sessionAuth,
+          );
         } catch (createErr) {
           // The farmerId was cached on this device but has since been
           // deleted on the backend (e.g. cleanup of a prior test round):
@@ -207,11 +357,14 @@ class SyncQueueServiceClass {
             logger.warn(
               `[Sync] farmerId ${farmerIdForBackend} no longer exists on the backend, retrying session ${session.localSessionId} without it`,
             );
-            sessionResponse = await createCampaignSession({
-              campaignId: session.campaignId,
-              userId: session.userId,
-              ...(cropIds.length > 0 ? { cropIds } : {}),
-            });
+            sessionResponse = await createCampaignSession(
+              {
+                campaignId: session.campaignId,
+                userId: session.userId,
+                ...(cropIds.length > 0 ? { cropIds } : {}),
+              },
+              ...sessionAuth,
+            );
           } else {
             throw createErr;
           }
@@ -246,13 +399,21 @@ class SyncQueueServiceClass {
 
         logger.info(`[Sync] resolved local session ${localSessionId} → ${realSessionId}`);
       } catch (err) {
-        // Spec 88, criterio 7 — antes solo `NetworkError` se consideraba
-        // transitorio, así que un 401 (o un 429 con varias tabletas en el
-        // mismo wifi) marcaba la sesión como `failed`. Como
-        // `resolveLocalSessions()` solo itera `listPending()`, esa sesión no
-        // se reintentaba nunca y arrastraba a `failed_validation` todas las
-        // encuestas encoladas contra ella. Ese fue el incidente del 17-18 de
-        // septiembre de 2026 (Sentry REACT-NATIVE-F y REACT-NATIVE-G).
+        const action = resolveSyncErrorAction(err);
+        if (action === 'retry_auth') {
+          // Spec 86 (CA-7): un 401 NO marca la sesión como fallida (arrastraría
+          // en cascada todas sus encuestas). Queda pendiente hasta renovar.
+          if (session.userId && sessionToken) this.failedTokens.set(session.userId, sessionToken);
+          logger.warn(`[Sync] 401 resolving session ${session.localSessionId}, leaving pending`);
+          continue;
+        }
+        if (action === 'retry_transient') {
+          logger.warn('[Sync] 429 resolving sessions, will retry later');
+          this.stopRun = true;
+          break;
+        }
+        // Spec 88, criterio 7 — ningún error transitorio marca la sesión como
+        // `failed` (arrastraría a `failed_validation` todas sus encuestas).
         if (shouldRetrySessionLater(err)) {
           logger.error(
             `[Sync] error transitorio resolviendo la sesión ${session.localSessionId}, sigue pendiente y se reintenta luego`,
@@ -308,7 +469,16 @@ class SyncQueueServiceClass {
   // fondo (processAll()). En el primero, handleNetworkError() no debe
   // dormir el backoff completo (hasta 60s): el "Reintentar" se quedaría
   // colgado sin ninguna señal en pantalla.
-  private async processEntry(entry: SyncQueueEntry, interactive = false): Promise<void> {
+  private async processEntry(
+    entry: SyncQueueEntry,
+    interactive = false,
+    knownToken?: string,
+  ): Promise<void> {
+    // Spec 86 (D6): el ítem sale con el token de su dueño. Sin dueño conocido
+    // se usa el de la sesión activa (comportamiento anterior).
+    const authToken = knownToken ?? (await this.tokenFor(entry.ownerUserId));
+    if (authToken) entry = { ...entry, authToken };
+
     if (entry.itemType === 'farm-plot') {
       await this.processFarmPlotEntry(entry, interactive);
     } else if (entry.itemType === 'skip-step') {
@@ -381,7 +551,7 @@ class SyncQueueServiceClass {
         acceptedAt: draft.acceptedAt,
       });
 
-      const response = await submitConsent(payload);
+      const response = await submitConsent(payload, ...this.authArgs(entry));
 
       await consentRecordStore.markSynced(draft.id);
       await syncQueueStorage.markSynced(entry.id);
@@ -391,6 +561,7 @@ class SyncQueueServiceClass {
       );
       this.consecutiveNetworkFailures = 0;
     } catch (error) {
+      if (await this.deferOnAuthOrRateLimit(entry, error)) return;
       if (error instanceof NetworkError) {
         logger.error('[Sync] network error (consent)', error);
         await this.handleNetworkError(entry, interactive);
@@ -427,11 +598,14 @@ class SyncQueueServiceClass {
         return;
       }
 
-      await skipStepApi({
-        sessionId: entry.campaignSessionId,
-        instrumentId: entry.instrumentId,
-        stepOrder: entry.stepOrder,
-      });
+      await skipStepApi(
+        {
+          sessionId: entry.campaignSessionId,
+          instrumentId: entry.instrumentId,
+          stepOrder: entry.stepOrder,
+        },
+        ...this.authArgs(entry),
+      );
 
       await syncQueueStorage.markSynced(entry.id);
       // El borrador local (creado por handleSkip() antes de encolar) ya
@@ -442,6 +616,7 @@ class SyncQueueServiceClass {
       logger.info(`[Sync] processed skip-step entry ${entry.id} for session ${entry.campaignSessionId}`);
       this.consecutiveNetworkFailures = 0;
     } catch (error) {
+      if (await this.deferOnAuthOrRateLimit(entry, error)) return;
       if (error instanceof NetworkError) {
         logger.error('[Sync] network error (skip-step)', error);
         await this.handleNetworkError(entry, interactive);
@@ -583,22 +758,26 @@ class SyncQueueServiceClass {
         }
       }
 
-      await submitResponsesBatch(payload);
-      await markSurveyAsSynced(realSurveyId);
+      await submitResponsesBatch(payload, ...this.authArgs(entry));
+      await markSurveyAsSynced(realSurveyId, ...this.authArgs(entry));
 
       // After responses are on the backend, run deferred extraction for S1/S2.
       await this.maybeExtractFarmerAndCrops(entry, realSurveyId);
 
       if (entry.campaignSessionId) {
-        await markSessionAsSynced(entry.campaignSessionId);
+        await markSessionAsSynced(entry.campaignSessionId, ...this.authArgs(entry));
       }
 
       // Non-blocking telemetry — ignore errors
-      httpClient.post(endpoints.telemetrySync, {
-        surveyId: realSurveyId,
-        campaignSessionId: entry.campaignSessionId,
-        attempts: entry.attempts,
-      }).catch(() => {});
+      httpClient.post(
+        endpoints.telemetrySync,
+        {
+          surveyId: realSurveyId,
+          campaignSessionId: entry.campaignSessionId,
+          attempts: entry.attempts,
+        },
+        ...this.authArgs(entry),
+      ).catch(() => {});
 
       await syncQueueStorage.markSynced(entry.id);
       await surveyDraftStore.markSynced(entry.surveyId);
@@ -606,6 +785,7 @@ class SyncQueueServiceClass {
       logger.info(`[Sync] processed entry ${entry.id} for survey ${realSurveyId}`);
       this.consecutiveNetworkFailures = 0;
     } catch (error) {
+      if (await this.deferOnAuthOrRateLimit(entry, error)) return;
       if (error instanceof NetworkError) {
         logger.error('[Sync] network error', error);
         await this.handleNetworkError(entry, interactive);
@@ -642,14 +822,17 @@ class SyncQueueServiceClass {
         return;
       }
 
-      const { farmPlotId } = await createFarmPlot({
-        farmId: draft.farmId,
-        name: draft.name,
-        description: draft.description,
-        area: draft.area,
-        capturedOffline: draft.capturedOffline,
-        polygon: draft.polygon,
-      });
+      const { farmPlotId } = await createFarmPlot(
+        {
+          farmId: draft.farmId,
+          name: draft.name,
+          description: draft.description,
+          area: draft.area,
+          capturedOffline: draft.capturedOffline,
+          polygon: draft.polygon,
+        },
+        ...this.authArgs(entry),
+      );
 
       await farmPlotStore.markSynced(draft.id);
       await syncQueueStorage.markSynced(entry.id);
@@ -657,6 +840,7 @@ class SyncQueueServiceClass {
       logger.info(`[Sync] processed farm-plot entry ${entry.id} for plot ${farmPlotId}`);
       this.consecutiveNetworkFailures = 0;
     } catch (error) {
+      if (await this.deferOnAuthOrRateLimit(entry, error)) return;
       if (error instanceof NetworkError) {
         logger.error('[Sync] network error (farm-plot)', error);
         await this.handleNetworkError(entry, interactive);
@@ -698,13 +882,16 @@ class SyncQueueServiceClass {
       idRealDe: async (doc) => (await farmerCacheStorage.getByDocumentId(doc))?.farmerId ?? null,
     });
 
-    const { surveyId: realSurveyId } = await createSurvey({
-      instrumentIds: [draft.instrumentId],
-      campaignSessionId: entry.campaignSessionId,
-      clientSurveyId: entry.surveyId,
-      ...(farmerIdParaBackend ? { farmerId: farmerIdParaBackend } : {}),
-      ...(entry.stepOrder != null ? { stepOrder: entry.stepOrder } : {}),
-    });
+    const { surveyId: realSurveyId } = await createSurvey(
+      {
+        instrumentIds: [draft.instrumentId],
+        campaignSessionId: entry.campaignSessionId,
+        clientSurveyId: entry.surveyId,
+        ...(farmerIdParaBackend ? { farmerId: farmerIdParaBackend } : {}),
+        ...(entry.stepOrder != null ? { stepOrder: entry.stepOrder } : {}),
+      },
+      ...this.authArgs(entry),
+    );
 
     logger.info(`[Sync] materialized local survey ${entry.surveyId} → ${realSurveyId}`);
     return realSurveyId;
@@ -747,7 +934,9 @@ class SyncQueueServiceClass {
   private async extractFarmerForEntry(entry: SyncQueueEntry, realSurveyId: string): Promise<boolean> {
     let farmer: Awaited<ReturnType<typeof extractFarmer>>['farmer'];
     try {
-      ({ farmer } = await extractFarmer(realSurveyId));
+      ({ farmer } = entry.authToken
+        ? await extractFarmer(realSurveyId, undefined, { authToken: entry.authToken })
+        : await extractFarmer(realSurveyId));
     } catch (err) {
       if (!(err instanceof DocumentIdCollisionError)) throw err;
 
@@ -782,7 +971,11 @@ class SyncQueueServiceClass {
           `submitted "${err.submittedName}" vs existing "${err.existingFarmerName}") — ` +
           'resolving as separate_person, pending admin review',
       );
-      ({ farmer } = await extractFarmer(realSurveyId, { resolution: 'separate_person' }));
+      ({ farmer } = await extractFarmer(
+        realSurveyId,
+        { resolution: 'separate_person' },
+        ...this.authArgs(entry),
+      ));
     }
 
     // Remap provisional farmerId if one exists in farmerCache.
@@ -867,7 +1060,7 @@ class SyncQueueServiceClass {
   }
 
   private async extractCropsForEntry(entry: SyncQueueEntry, realSurveyId: string): Promise<void> {
-    const cropsResult = await extractCrops(realSurveyId);
+    const cropsResult = await extractCrops(realSurveyId, ...this.authArgs(entry));
     logger.info(`[Sync] extractCrops completed for survey ${realSurveyId}`);
     if (entry.campaignSessionId) {
       await sessionCropsStorage.save(entry.campaignSessionId, cropsResult.crops);
@@ -884,6 +1077,7 @@ class SyncQueueServiceClass {
     const attachmentIds = await MediaUploadService.processPendingForSurvey(
       entry.surveyId,
       realSurveyId,
+      ...this.authArgs(entry),
     );
 
     const flattenedQuestions = flattenSections(instrument.sections);
@@ -899,7 +1093,11 @@ class SyncQueueServiceClass {
       await discardedAnswersStorage.record(entry.surveyId, realSurveyId, discarded);
     }
 
-    const resolvedAnswers = await resolveOtherOptions(flattenedQuestions, draft.answers);
+    const resolvedAnswers = await resolveOtherOptions(
+      flattenedQuestions,
+      draft.answers,
+      ...this.authArgs(entry),
+    );
 
     // Persist resolved answers so a retry doesn't create the same dynamic option twice.
     const hasChanges = Object.keys(resolvedAnswers).some(
@@ -997,6 +1195,9 @@ class SyncQueueServiceClass {
 
   resetNetworkFailures(): void {
     this.consecutiveNetworkFailures = 0;
+    // Spec 86: al reconectar se vuelve a intentar a los dueños que recibieron un
+    // 401; si su token sigue vencido, cuesta un solo request y vuelven a esperar.
+    this.failedTokens.clear();
   }
 }
 

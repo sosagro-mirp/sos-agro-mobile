@@ -80,6 +80,22 @@ export function getJwtExpiry(token: string): number | null {
 }
 
 /**
+ * Spec 86: devuelve el `sub` (userId) del payload del JWT, o `null` si el
+ * token está malformado o no lo trae. Nunca lanza.
+ */
+export function getJwtSubject(token: string): string | null {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    const payload: unknown = JSON.parse(base64UrlToUtf8(parts[1]));
+    const sub = (payload as { sub?: unknown } | null)?.sub;
+    return typeof sub === "string" && sub.length > 0 ? sub : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * `true` si el token ya venció (o está malformado — un token que no se puede
  * leer nunca se trata como válido). `true` también es el resultado seguro
  * ante cualquier duda: fuerza el flujo de login en vez de asumir una sesión

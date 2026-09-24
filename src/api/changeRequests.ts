@@ -1,4 +1,4 @@
-import { httpClient } from './httpClient';
+import { httpClient, type RequestOptions } from './httpClient';
 import { endpoints } from './endpoints';
 
 export interface PostChangeRequestPayload {
@@ -13,14 +13,21 @@ export interface ResolvedChangeRequest {
   resolvedAt: string;
 }
 
-export async function postChangeRequest(payload: PostChangeRequestPayload): Promise<void> {
-  await httpClient.post(endpoints.changeRequests, payload);
+export async function postChangeRequest(
+  payload: PostChangeRequestPayload,
+  opts?: RequestOptions,
+): Promise<void> {
+  await httpClient.post(endpoints.changeRequests, payload, ...(opts ? [opts] : []));
 }
 
-export async function fetchMyResolved(since: Date): Promise<ResolvedChangeRequest[]> {
+export async function fetchMyResolved(
+  since: Date,
+  opts?: RequestOptions,
+): Promise<ResolvedChangeRequest[]> {
   const sinceIso = since.toISOString();
   const result = await httpClient.get<ResolvedChangeRequest[]>(
-    `${endpoints.changeRequestsMyResolved}?since=${encodeURIComponent(sinceIso)}`
+    `${endpoints.changeRequestsMyResolved}?since=${encodeURIComponent(sinceIso)}`,
+    ...(opts ? [opts] : []),
   );
   return result;
 }

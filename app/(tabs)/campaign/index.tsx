@@ -101,7 +101,10 @@ export default function CampaignListScreen() {
         refreshControl={
           <RefreshControl
             refreshing={isLoading && !downloadProgress}
-            onRefresh={refresh}
+            enabled={!refreshDisabled}
+            onRefresh={() => {
+              if (!refreshDisabled) void refresh().catch(() => {});
+            }}
             tintColor={colors.brand}
           />
         }

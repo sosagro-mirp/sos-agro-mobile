@@ -57,6 +57,18 @@ A network connection is required to start a new visit. This ensures you always h
 
 ---
 
+## Sharing a tablet between pollsters
+
+Several pollsters can use the same tablet. See [`guia-fijacion-pantalla-tablets.md`](guia-fijacion-pantalla-tablets.md)
+(in Spanish, for the project coordinators) for how to pin the app on screen, switch pollsters
+from **My account** without losing anything, and what to do after an app update.
+
+- Each pollster signs in **once with internet** on each tablet; after that they can sign in
+  **without internet** for 30 days.
+- The **avatar with initials** (top right) opens *My account*. There is no "Sign out" button in the header anymore.
+- Pending surveys are always sent **under the name of whoever created them**, even if another
+  pollster is using the tablet when the connection comes back.
+
 ## Syncing data
 
 ### Automatic sync

@@ -11,9 +11,12 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { CircleAlert, Eye, EyeOff, LoaderCircle } from "lucide-react-native";
+import { CircleAlert, Eye, EyeOff, LoaderCircle, Wifi, WifiOff } from "lucide-react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuthStore } from "../src/store/useAuthStore";
+import { useSyncStatusStore } from "../src/store/useSyncStatusStore";
+import { useKnownUsers, type KnownUserView } from "../src/hooks/useKnownUsers";
+import { KnownUserPicker } from "../src/components/auth/KnownUserPicker";
 import { Fonts } from "../src/theme/fonts";
 import { useTheme } from "../src/theme/ThemeProvider";
 import type { ThemeColors } from "../src/theme/colors";
@@ -56,17 +59,33 @@ export default function LoginScreen() {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
+  const reachability = useSyncStatusStore((s) => s.reachability);
+  const isOffline = reachability === "offline";
+  const { users: knownUsers, reload: reloadKnownUsers } = useKnownUsers();
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  // Spec 86 (D9): con usuarios que ya ingresaron en esta tablet se muestra
+  // "¿Quién va a encuestar?"; "Otro usuario" abre el formulario completo.
+  const [selected, setSelected] = useState<KnownUserView | null>(null);
+  const [useFullForm, setUseFullForm] = useState(false);
+  const showPicker = knownUsers.length > 0 && !useFullForm;
+
+  // Un intento fallido actualiza el bloqueo guardado: se recarga el selector.
+  useEffect(() => {
+    if (error) void reloadKnownUsers();
+  }, [error, reloadKnownUsers]);
 
   const handleLogin = () => {
-    if (!email.trim() || !password) return;
+    const loginEmail = showPicker ? selected?.user.email : email.trim().toLowerCase();
+    if (!loginEmail || !password) return;
     clearError();
-    login(email.trim().toLowerCase(), password);
+    // La contraseña solo vive en este estado hasta el envío; se limpia después.
+    void login(loginEmail, password).finally(() => setPassword(""));
   };
 
-  const isDisabled = loading || !email.trim() || !password;
+  const isDisabled = loading || !password || (showPicker ? !selected : !email.trim());
 
   return (
     // SafeAreaView fills the screen con el fondo del shell (spec 74, Fase 2:
@@ -104,8 +123,21 @@ export default function LoginScreen() {
             </View>
             <AppText style={styles.title} numberOfLines={1}>Sos Agro 4.C</AppText>
             <AppText style={styles.subtitle}>
-              Ingresa tus credenciales para acceder a la plataforma
+              {showPicker
+                ? "¿Quién va a encuestar?"
+                : "Ingresa tus credenciales para acceder a la plataforma"}
             </AppText>
+            {/* Estado de conexión: siempre con ícono y texto, nunca solo color. */}
+            <View style={styles.connPill}>
+              {isOffline ? (
+                <WifiOff size={14} color={colors.warningFg} />
+              ) : (
+                <Wifi size={14} color={colors.successFg} />
+              )}
+              <AppText style={[styles.connText, isOffline && styles.connTextOffline]}>
+                {isOffline ? "Sin conexión" : "En línea"}
+              </AppText>
+            </View>
           </View>
 
           <View style={styles.card}>
@@ -116,21 +148,42 @@ export default function LoginScreen() {
               </View>
             ) : null}
 
-            <View style={styles.field}>
-              <AppText style={styles.label} numberOfLines={1}>CORREO</AppText>
-              <TextInput
-                style={styles.input}
-                value={email}
-                onChangeText={setEmail}
-                placeholder="usuario@ejemplo.com"
-                placeholderTextColor={colors.textMuted}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoCorrect={false}
-                editable={!loading}
+            {showPicker ? (
+              <KnownUserPicker
+                users={knownUsers}
+                selectedUserId={selected?.user.userId ?? null}
+                onSelect={(view) => {
+                  clearError();
+                  setPassword("");
+                  setSelected(view);
+                }}
               />
-            </View>
+            ) : (
+              <>
+                {isOffline ? (
+                  <AppText style={styles.offlineNote}>
+                    Sin conexión: solo pueden entrar quienes ya ingresaron antes en esta tablet.
+                    El primer ingreso de un usuario requiere internet.
+                  </AppText>
+                ) : null}
+                <View style={styles.field}>
+                  <AppText style={styles.label} numberOfLines={1}>CORREO</AppText>
+                  <TextInput
+                    style={styles.input}
+                    value={email}
+                    onChangeText={setEmail}
+                    placeholder="usuario@ejemplo.com"
+                    placeholderTextColor={colors.textMuted}
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    editable={!loading}
+                  />
+                </View>
+              </>
+            )}
 
+            {!showPicker || selected ? (
             <View style={styles.field}>
               <View style={styles.labelRow}>
                 <AppText style={styles.label} numberOfLines={1}>CONTRASEÑA</AppText>
@@ -164,6 +217,7 @@ export default function LoginScreen() {
                 returnKeyType="done"
               />
             </View>
+            ) : null}
 
             <Pressable
               style={[styles.button, isDisabled && styles.buttonDisabled]}
@@ -181,6 +235,22 @@ export default function LoginScreen() {
                 <AppText style={styles.buttonText} numberOfLines={1}>Ingresar</AppText>
               )}
             </Pressable>
+
+            {knownUsers.length > 0 ? (
+              <Pressable
+                style={styles.switchMode}
+                onPress={() => {
+                  clearError();
+                  setPassword("");
+                  setUseFullForm((v) => !v);
+                }}
+                accessibilityRole="button"
+              >
+                <AppText style={styles.switchModeText}>
+                  {showPicker ? "Otro usuario" : "Volver a los usuarios de esta tablet"}
+                </AppText>
+              </Pressable>
+            ) : null}
           </View>
         </ScrollView>
 
@@ -341,6 +411,35 @@ function createStyles(colors: ThemeColors) {
       color: colors.brandForeground,
       fontSize: 15,
       fontFamily: Fonts.semiBold,
+    },
+    connPill: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      marginTop: 12,
+      paddingHorizontal: 12,
+      paddingVertical: 5,
+      borderRadius: 999,
+      backgroundColor: colors.surface,
+    },
+    connText: { fontSize: 12, fontFamily: Fonts.semiBold, color: colors.successFg },
+    connTextOffline: { color: colors.warningFg },
+    offlineNote: {
+      fontSize: 12.5,
+      fontFamily: Fonts.medium,
+      color: colors.warningFg,
+      backgroundColor: colors.warningBg,
+      borderRadius: 10,
+      padding: 12,
+      marginBottom: 16,
+      lineHeight: 18,
+    },
+    switchMode: { minHeight: 44, alignItems: "center", justifyContent: "center", marginTop: 8 },
+    switchModeText: {
+      fontSize: 13.5,
+      fontFamily: Fonts.semiBold,
+      color: colors.brand,
+      textDecorationLine: "underline",
     },
     footer: {
       alignItems: "center",
