@@ -24,9 +24,20 @@
 
 // ─── Mock declarations (hoisted before imports) ───────────────────────────────
 
+// Spec 86 — la sync procesa por dueño con el token guardado de cada uno: estas
+// suites simulan una sesión activa con token para que `processAll()` corra.
+jest.mock('../storage/secureStorage', () => ({
+  secureStorage: {
+    getActiveUserId: jest.fn().mockResolvedValue('user-1'),
+    getTokenFor: jest.fn().mockResolvedValue('token-1'),
+  },
+}));
+
 jest.mock('../storage/syncQueue', () => ({
   syncQueueStorage: {
     dequeueNextPending: jest.fn(),
+    // Spec 86 — sin dueño (registros anteriores): se procesan con la sesión activa.
+    listPendingOwners: jest.fn().mockResolvedValue([null]),
     markInFlight: jest.fn(),
     markSynced: jest.fn(),
     markFailedValidation: jest.fn(),
@@ -134,6 +145,16 @@ jest.mock('../store/useChangeRequestStore', () => ({
       loadAll: jest.fn().mockResolvedValue(undefined),
       setHasNewResolved: jest.fn(),
     }),
+  },
+}));
+
+// Spec 88 — `processAll()` no procesa la cola sin sesión iniciada (criterio 8).
+// Estas suites ejercitan el sync directamente, así que necesitan un token
+// simulado. Mock agregado con autorización explícita del usuario (2026-09-21);
+// ninguna aserción de estas suites cambió.
+jest.mock('../store/useAuthStore', () => ({
+  useAuthStore: {
+    getState: jest.fn().mockReturnValue({ token: 'test-token' }),
   },
 }));
 

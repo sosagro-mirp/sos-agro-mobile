@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Stack, useRouter } from "expo-router";
+import { Stack, useRootNavigationState, useRouter } from "expo-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   useFonts,
@@ -15,11 +15,13 @@ import { useCachedInstrumentsStore } from "../src/store/useCachedInstrumentsStor
 import { runMigrations } from "../src/storage/db/db";
 import { syncQueueStorage } from "../src/storage/syncQueue";
 import { surveyDraftStore } from "../src/storage/surveyDraftStore";
+import { runOwnershipBackfill } from "../src/storage/ownershipBackfill";
 import { pendingSessionStorage } from "../src/storage/pendingSessions";
 import { NetworkMonitor } from "../src/sync/NetworkMonitor";
 import { BackgroundSync } from "../src/sync/BackgroundSync";
 import { initSentry, captureError } from "../src/lib/sentry";
 import { logger } from "../src/lib/logger";
+import { decideAuthNavigation, MAX_NAVIGATION_RETRIES } from "../src/lib/authGuardNavigation";
 import { ChangeRequestBanner } from "../src/components/requests/ChangeRequestBanner";
 import { ThemeProvider, useTheme } from "../src/theme/ThemeProvider";
 import { SnackbarProvider } from "../src/components/common/Snackbar";
@@ -47,25 +49,45 @@ const queryClient = new QueryClient({
 function AuthGuard() {
   const { user, isRestoring } = useAuthStore();
   const router = useRouter();
+  // Con el proceso vivo (p. ej. reabrir la app tras salir con "atrás") la sesión
+  // ya está cargada y navegar antes de montar el navegador raíz lanza un error.
+  const navigationReady = !!useRootNavigationState()?.key;
   // Track previous user value to only act on actual changes, not re-renders
   const prevUserRef = useRef<string | null | undefined>(undefined);
+  const retriesRef = useRef(0);
+  const [retryTick, setRetryTick] = useState(0);
 
   useEffect(() => {
-    if (isRestoring) return;
-
-    const prevId = prevUserRef.current;
     const currId = user?.userId ?? null;
+    const action = decideAuthNavigation({
+      isRestoring,
+      navigationReady,
+      prevId: prevUserRef.current,
+      currId,
+    });
+    if (action.type === "none") return;
 
-    // Skip if user identity hasn't changed (avoids resetting navigation mid-session)
-    if (prevId === currId) return;
-    prevUserRef.current = currId;
-
-    if (!user) {
-      router.replace("/login");
-    } else {
-      router.replace("/campaign");
+    try {
+      if (action.type === "login") {
+        if (action.clearStack && router.canDismiss()) router.dismissAll();
+        router.replace("/login");
+      } else {
+        router.replace("/campaign");
+      }
+      prevUserRef.current = currId;
+      retriesRef.current = 0;
+    } catch (err) {
+      // Reabrir con el proceso vivo puede llegar antes de que el navegador esté
+      // listo: se reintenta en un instante, con tope para no girar sin fin.
+      if (retriesRef.current >= MAX_NAVIGATION_RETRIES) {
+        logger.error("[AuthGuard] navigation failed after retries", err);
+        return;
+      }
+      retriesRef.current += 1;
+      const timer = setTimeout(() => setRetryTick((n) => n + 1), 100);
+      return () => clearTimeout(timer);
     }
-  }, [user, isRestoring]);
+  }, [user, isRestoring, navigationReady, retryTick]);
 
   return null;
 }
@@ -85,6 +107,7 @@ function AppStack() {
       <Stack.Screen name="login" />
       <Stack.Screen name="index" />
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      <Stack.Screen name="account" />
       <Stack.Screen name="campaign/[id]/pre-survey" />
       <Stack.Screen name="campaign/[id]/session/[sessionId]/orchestrator" />
       <Stack.Screen name="campaign/[id]/session/[sessionId]/completed" />
@@ -219,18 +242,33 @@ export default function RootLayout() {
       .then((count) => { if (count > 0) logger.info(`Purged ${count} old synced surveys`); })
       .catch((err) => logger.error('[App] purgeSyncedSurveys failed', err));
 
-    NetworkMonitor.start();
-    BackgroundSync.register().catch(() => {
-      // expo-background-fetch not available in Expo Go — silently ignored
-    });
+    // Spec 86 (CA-19): los registros anteriores a m0013 reciben dueño ANTES de
+    // que arranque cualquier sync, para que salgan con el token correcto.
+    let cancelled = false;
+    runOwnershipBackfill()
+      .catch((err) => {
+        captureError(err);
+        logger.error('[App] runOwnershipBackfill failed', err);
+      })
+      .then(() => {
+        if (cancelled) return;
 
-    // Cold start: process queue if network is available.
-    NetworkMonitor.checkAndSync().catch((err) => {
-      captureError(err);
-      logger.error('[App] checkAndSync failed', err);
-    });
+        NetworkMonitor.start();
+        BackgroundSync.register().catch(() => {
+          // expo-background-fetch not available in Expo Go — silently ignored
+        });
 
-    return () => NetworkMonitor.stop();
+        // Cold start: process queue if network is available.
+        NetworkMonitor.checkAndSync().catch((err) => {
+          captureError(err);
+          logger.error('[App] checkAndSync failed', err);
+        });
+      });
+
+    return () => {
+      cancelled = true;
+      NetworkMonitor.stop();
+    };
   }, [dbReady]);
 
   // El árbol se renderiza SIEMPRE; la pantalla de error sustituye al stack de

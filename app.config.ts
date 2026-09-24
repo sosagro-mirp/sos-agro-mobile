@@ -28,7 +28,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     // runtime nuevo, y ningún dispositivo en 1.0.0 lo recibe jamás. Regla de
     // oro (mobile/docs/ota-updates.md): no tocar `version` salvo que se vaya
     // a compilar e instalar un build nativo nuevo en las tablets.
-    version: '1.0.0',
+    version: '1.0.1',
     // Spec 74, Fase 10 (aprobada 2026-08-26): antes 'portrait' bloqueaba
     // rotación en toda la app. Tablet necesita landscape para el layout de
     // dos paneles; sin expo-screen-orientation (dependencia nueva que este
@@ -110,6 +110,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       'expo-router',
       'expo-sqlite',
       'expo-background-task',
+      // Spec 86, Fase 10: PBKDF2 nativo para la credencial sin conexión.
+      'react-native-quick-crypto',
       // Spec 76, Fase 2: antes el plugin actuaba con su configuración por
       // defecto y dejaba `values-night/colors.xml` vacío, con
       // `splashscreen_background` fijo en #FFFFFF. En una tablet en modo

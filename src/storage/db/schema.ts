@@ -22,6 +22,10 @@ export const surveys = sqliteTable('surveys', {
   // so media attachments can still be retried after the survey is synced
   // and out of the queue.
   backendSurveyId: text('backend_survey_id'),
+  // Spec 86 (D6) — dueño del registro (userId de quien lo creó). En una tablet
+  // compartida la sync envía cada registro con el token de su dueño; `null` =
+  // registro anterior a la migración m0013 sin dueño asignable.
+  ownerUserId: text('owner_user_id'),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
 });
@@ -82,6 +86,10 @@ export const syncQueue = sqliteTable('sync_queue', {
   // del paso que se saltó, que POST /api/surveys/skip-step exige y que
   // ninguna otra columna de esta tabla guardaba hasta ahora.
   instrumentId: text('instrument_id'),
+  // Spec 86 (D6) — dueño del registro (userId de quien lo creó). En una tablet
+  // compartida la sync envía cada registro con el token de su dueño; `null` =
+  // registro anterior a la migración m0013 sin dueño asignable.
+  ownerUserId: text('owner_user_id'),
 });
 
 export const farmPlots = sqliteTable('farm_plots', {
@@ -140,6 +148,10 @@ export const changeRequests = sqliteTable('change_requests', {
   resolvedAt: integer('resolved_at', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
   syncedAt: integer('synced_at', { mode: 'timestamp' }),
+  // Spec 86 (D6) — dueño del registro (userId de quien lo creó). En una tablet
+  // compartida la sync envía cada registro con el token de su dueño; `null` =
+  // registro anterior a la migración m0013 sin dueño asignable.
+  ownerUserId: text('owner_user_id'),
 });
 
 export const farmerCache = sqliteTable('farmer_cache', {

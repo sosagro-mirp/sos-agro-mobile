@@ -1,9 +1,11 @@
 import React, { useMemo, useState } from "react";
 import { StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { CircleAlert } from "lucide-react-native";
 import { Fonts } from "../../theme/fonts";
 import { useTheme } from "../../theme/ThemeProvider";
 import type { ThemeColors } from "../../theme/colors";
 import type { InstrumentDraftAnswer, InstrumentOption } from "../../types/instrument";
+import { missingNumericWithUnitPart } from "../../lib/isAnswerConsistent";
 
 interface Props {
   questionId: string;
@@ -43,14 +45,20 @@ export function NumericWithUnitInput({
     onChange({ questionId, numericValue, optionId: unitId });
   }
 
-  const selectedUnit = units.find((u) => u.optionId === selectedUnitId);
+  // Spec 87 (D2): número y unidad van juntos. Qué falta se dice con texto e
+  // ícono además del borde (nunca solo color, DESIGN.md).
+  const missing = missingNumericWithUnitPart({ questionId, numericValue, optionId: selectedUnitId });
 
   return (
     <View style={styles.container}>
       <View style={styles.section}>
         <Text style={styles.sectionLabel}>Valor</Text>
         <TextInput
-          style={[styles.numericInput, focused && styles.numericInputFocused]}
+          style={[
+            styles.numericInput,
+            focused && styles.numericInputFocused,
+            missing === "number" && styles.fieldMissing,
+          ]}
           value={raw}
           onChangeText={handleNumericChange}
           keyboardType="decimal-pad"
@@ -59,12 +67,19 @@ export function NumericWithUnitInput({
           placeholderTextColor={colors.textMuted}
           placeholder="0"
           returnKeyType="done"
+          accessibilityLabel="Valor"
         />
+        {missing === "number" ? (
+          <View style={styles.hint} accessibilityRole="alert">
+            <CircleAlert size={15} color={colors.dangerFg} />
+            <Text style={styles.hintText}>Escribe el valor para la unidad elegida</Text>
+          </View>
+        ) : null}
       </View>
 
       <View style={styles.section}>
         <Text style={styles.sectionLabel}>Unidad</Text>
-        <View style={styles.unitList}>
+        <View style={[styles.unitList, missing === "unit" && styles.fieldMissing]}>
           {units.map((unit) => {
             const selected = selectedUnitId === unit.optionId;
             return (
@@ -86,6 +101,12 @@ export function NumericWithUnitInput({
             );
           })}
         </View>
+        {missing === "unit" ? (
+          <View style={styles.hint} accessibilityRole="alert">
+            <CircleAlert size={15} color={colors.dangerFg} />
+            <Text style={styles.hintText}>Falta elegir la unidad del valor</Text>
+          </View>
+        ) : null}
       </View>
     </View>
   );
@@ -121,6 +142,25 @@ function createStyles(colors: ThemeColors) {
     },
     numericInputFocused: {
       borderColor: colors.brand,
+    },
+    fieldMissing: {
+      borderColor: colors.dangerFg,
+      borderWidth: 2,
+    },
+    hint: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      backgroundColor: colors.dangerBg,
+      borderRadius: 8,
+      paddingVertical: 8,
+      paddingHorizontal: 12,
+    },
+    hintText: {
+      flex: 1,
+      fontFamily: Fonts.medium,
+      fontSize: 13,
+      color: colors.dangerFg,
     },
     unitList: {
       borderWidth: 1,

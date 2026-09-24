@@ -1,4 +1,4 @@
-import { httpClient } from "./httpClient";
+import { httpClient, type RequestOptions } from "./httpClient";
 import { endpoints } from "./endpoints";
 import type { SurveyResponse } from "../types";
 
@@ -18,11 +18,11 @@ export interface CreateSurveyPayload {
   clientSurveyId?: string;
 }
 
-export const createSurvey = (payload: CreateSurveyPayload) =>
-  httpClient.post<SurveyResponse>(endpoints.surveys, payload);
+export const createSurvey = (payload: CreateSurveyPayload, opts?: RequestOptions) =>
+  httpClient.post<SurveyResponse>(endpoints.surveys, payload, ...(opts ? [opts] : []));
 
-export const markSurveyAsSynced = (surveyId: string) =>
-  httpClient.patch<void>(endpoints.surveySync(surveyId));
+export const markSurveyAsSynced = (surveyId: string, opts?: RequestOptions) =>
+  httpClient.patch<void>(endpoints.surveySync(surveyId), ...(opts ? [undefined, opts] as const : []));
 
 // Spec 70, Fase 4 — el endpoint solo descarta el duplicado; el reemplazo se
 // inicia por separado con `beginSurvey()`, igual que cualquier otro inicio
@@ -50,5 +50,5 @@ export interface SkipStepResponse {
   surveyId: string;
 }
 
-export const skipStepApi = (payload: SkipStepPayload) =>
-  httpClient.post<SkipStepResponse>(endpoints.surveySkipStep, payload);
+export const skipStepApi = (payload: SkipStepPayload, opts?: RequestOptions) =>
+  httpClient.post<SkipStepResponse>(endpoints.surveySkipStep, payload, ...(opts ? [opts] : []));

@@ -1,4 +1,5 @@
 import { createQuestionOption } from "../api/questions";
+import type { RequestOptions } from "../api/httpClient";
 import type { FlattenedQuestionItem, InstrumentDraftAnswer } from "../types";
 
 type AnswersMap = Record<string, InstrumentDraftAnswer>;
@@ -6,6 +7,8 @@ type AnswersMap = Record<string, InstrumentDraftAnswer>;
 export async function resolveOtherOptions(
   flattenedQuestions: FlattenedQuestionItem[],
   answers: AnswersMap,
+  // Spec 86 — token del dueño de la encuesta (tablet compartida).
+  opts?: RequestOptions,
 ): Promise<AnswersMap> {
   const resolved: AnswersMap = { ...answers };
 
@@ -23,7 +26,7 @@ export async function resolveOtherOptions(
         answer.optionId === otherOption.optionId &&
         answer.otherText?.trim()
       ) {
-        const created = await createQuestionOption(questionId, answer.otherText.trim());
+        const created = await createQuestionOption(questionId, answer.otherText.trim(), opts);
         resolved[questionId] = {
           ...answer,
           optionId: created.optionId,
@@ -38,7 +41,7 @@ export async function resolveOtherOptions(
         selectedIds.includes(otherOption.optionId) &&
         answer.otherText?.trim()
       ) {
-        const created = await createQuestionOption(questionId, answer.otherText.trim());
+        const created = await createQuestionOption(questionId, answer.otherText.trim(), opts);
         resolved[questionId] = {
           ...answer,
           optionIds: selectedIds.map((id) =>

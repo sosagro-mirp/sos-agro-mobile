@@ -1,6 +1,7 @@
-import { eq, and, asc } from 'drizzle-orm';
+import { eq, and, asc, isNull, or, notInArray } from 'drizzle-orm';
 import { db } from './db/db';
 import { syncQueue } from './db/schema';
+import { secureStorage } from './secureStorage';
 
 export type SyncStatus = 'pending' | 'in_flight' | 'failed_validation';
 
@@ -27,6 +28,11 @@ export interface SyncQueueEntry {
   // Solo lo usan las entradas 'skip-step' (spec 70, Fase 10): el instrumento
   // del paso que se saltó, que POST /api/surveys/skip-step exige.
   instrumentId?: string;
+  // Spec 86 — dueño del ítem; `undefined` = sin dueño (anterior a m0013).
+  ownerUserId?: string;
+  // Spec 86 — solo en memoria (nunca se persiste): token del dueño con el que
+  // la sync debe enviar este ítem. Lo adjunta `SyncQueueService.processEntry`.
+  authToken?: string;
 }
 
 export interface EnqueueParams {
@@ -37,10 +43,13 @@ export interface EnqueueParams {
   payloadPath?: string;
   itemType?: ItemType;
   instrumentId?: string;
+  // Spec 86 — por defecto el usuario activo al momento de encolar.
+  ownerUserId?: string;
 }
 
 export const syncQueueStorage = {
   async enqueue(params: EnqueueParams): Promise<void> {
+    const ownerUserId = params.ownerUserId ?? (await secureStorage.getActiveUserId()) ?? null;
     await db.insert(syncQueue).values({
       id: params.id,
       surveyId: params.surveyId,
@@ -54,14 +63,34 @@ export const syncQueueStorage = {
       createdAt: new Date(),
       itemType: params.itemType ?? 'survey',
       instrumentId: params.instrumentId ?? null,
+      ownerUserId,
     });
   },
 
-  async dequeueNextPending(): Promise<SyncQueueEntry | null> {
+  // Spec 88 — `excludeIds` evita que una misma corrida de `processAll()` vuelva
+  // a servir una entrada que ya atendió. Sin eso hay bloqueo en vivo: una
+  // entrada que `resolveCampaignSession()` aplaza vuelve a `pending` de
+  // inmediato (spec 81) y el bucle la recibe otra vez, sin esperar por red,
+  // girando para siempre y congelando el hilo de JS. Cada entrada recibe un
+  // intento por corrida; si necesita otro, lo tendrá en la siguiente.
+  // Spec 86 — `ownerUserId` undefined = sin filtro; `null` = solo registros sin
+  // dueño; string = solo los de ese dueño.
+  async dequeueNextPending(
+    excludeIds: string[] = [],
+    ownerUserId?: string | null,
+  ): Promise<SyncQueueEntry | null> {
+    const ownerFilter =
+      ownerUserId === undefined
+        ? undefined
+        : ownerUserId === null
+          ? isNull(syncQueue.ownerUserId)
+          : eq(syncQueue.ownerUserId, ownerUserId);
+    const excludeFilter = excludeIds.length > 0 ? notInArray(syncQueue.id, excludeIds) : undefined;
+
     const row = await db
       .select()
       .from(syncQueue)
-      .where(eq(syncQueue.status, 'pending'))
+      .where(and(eq(syncQueue.status, 'pending'), ownerFilter, excludeFilter))
       .orderBy(asc(syncQueue.createdAt))
       .limit(1)
       .get();
@@ -106,11 +135,29 @@ export const syncQueueStorage = {
       .where(eq(syncQueue.id, id));
   },
 
-  async countPending(): Promise<number> {
+  /** Spec 86 — dueños distintos con ítems pendientes (`null` = sin dueño). */
+  async listPendingOwners(): Promise<(string | null)[]> {
+    const rows = await db
+      .select({ owner: syncQueue.ownerUserId })
+      .from(syncQueue)
+      .where(eq(syncQueue.status, 'pending'))
+      .all();
+    return [...new Set(rows.map((r) => r.owner ?? null))];
+  },
+
+  // Spec 86 — con `ownerUserId`, solo los del encuestador activo más los sin dueño.
+  async countPending(ownerUserId?: string): Promise<number> {
     const rows = await db
       .select({ id: syncQueue.id })
       .from(syncQueue)
-      .where(eq(syncQueue.status, 'pending'))
+      .where(
+        ownerUserId === undefined
+          ? eq(syncQueue.status, 'pending')
+          : and(
+              eq(syncQueue.status, 'pending'),
+              or(eq(syncQueue.ownerUserId, ownerUserId), isNull(syncQueue.ownerUserId)),
+            ),
+      )
       .all();
     return rows.length;
   },
@@ -141,11 +188,20 @@ export const syncQueueStorage = {
   },
 
   // Resets any entries stuck in `in_flight` from a previous crashed session.
-  async resetInFlightToRetry(): Promise<void> {
-    await db
-      .update(syncQueue)
-      .set({ status: 'pending' })
-      .where(eq(syncQueue.status, 'in_flight'));
+  // Spec 91 — corrección de auditoría (docs/reports/auditorias/45-…):
+  // `excludeSurveyIds` deja fuera las entradas que un `processSurveyNow()`
+  // interactivo todavía tiene genuinamente en vuelo en esta misma sesión
+  // (más allá del tope de espera del orquestador, que no cancela la
+  // promesa). Sin esto, el `finally` de `processAll()` podía resetear a
+  // `pending` una entrada que otra corrida seguía enviando, y el siguiente
+  // `processAll()` la reenviaba — doble POST con el mismo `clientSurveyId`.
+  async resetInFlightToRetry(excludeSurveyIds: string[] = []): Promise<void> {
+    const condicion =
+      excludeSurveyIds.length > 0
+        ? and(eq(syncQueue.status, 'in_flight'), notInArray(syncQueue.surveyId, excludeSurveyIds))
+        : eq(syncQueue.status, 'in_flight');
+
+    await db.update(syncQueue).set({ status: 'pending' }).where(condicion);
   },
 
   // Spec 81, Fase 3 — variante acotada a un `surveyId`: `processSurveyNow()`
@@ -196,6 +252,34 @@ export const syncQueueStorage = {
     return row ? mapRow(row) : null;
   },
 
+  // Spec 91 — corrección de auditoría (docs/reports/auditorias/45-…):
+  // reclama la entrada pendiente de forma atómica (leer + `UPDATE … WHERE
+  // status = 'pending'` re-verificando la condición) en vez del
+  // `getPendingBySurveyId()` + `processEntry()` que usaba antes
+  // `processSurveyNow()`. Ese camino anterior tenía una ventana entre leer
+  // y procesar donde un `processAll()` de fondo podía tomar la misma
+  // entrada — el propio bug que corrigió `resetInFlightToRetryBySurveyId()`
+  // condicional, pero que seguía abierto en `getPendingBySurveyId()`.
+  // Devuelve `null` si no había ninguna entrada `pending` o si otra llamada
+  // se la ganó entre la lectura y la escritura.
+  async claimPendingBySurveyId(surveyId: string): Promise<SyncQueueEntry | null> {
+    const row = await db
+      .select()
+      .from(syncQueue)
+      .where(and(eq(syncQueue.surveyId, surveyId), eq(syncQueue.status, 'pending')))
+      .get();
+    if (!row) return null;
+
+    const result = await db
+      .update(syncQueue)
+      .set({ status: 'in_flight', lastAttemptAt: new Date() })
+      .where(and(eq(syncQueue.id, row.id), eq(syncQueue.status, 'pending')));
+
+    if ((result.changes ?? 0) === 0) return null; // alguien más la reclamó primero
+
+    return mapRow({ ...row, status: 'in_flight' });
+  },
+
   // Spec 71 — repara una entrada cuyo `campaignSessionId` quedó apuntando a
   // un id local (`local_*`) cuya sesión ya se resolvió en el backend. Se usa
   // cuando `resolveLocalSessions()` no vuelve a ofrecer esa sesión (porque su
@@ -233,5 +317,6 @@ function mapRow(row: typeof syncQueue.$inferSelect): SyncQueueEntry {
     createdAt: row.createdAt,
     itemType: (row.itemType ?? 'survey') as ItemType,
     instrumentId: row.instrumentId ?? undefined,
+    ownerUserId: row.ownerUserId ?? undefined,
   };
 }

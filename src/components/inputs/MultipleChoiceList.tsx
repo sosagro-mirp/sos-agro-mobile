@@ -1,11 +1,16 @@
 import React, { useMemo, useState } from "react";
-import { FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { FlatList, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { Search, Info, Check, X } from "lucide-react-native";
 import { Fonts } from "../../theme/fonts";
 import { useTheme } from "../../theme/ThemeProvider";
 import type { ThemeColors } from "../../theme/colors";
 import type { InstrumentDraftAnswer, InstrumentOption } from "../../types/instrument";
 import { OPTION_SEARCH_THRESHOLD, normalizeSearchText } from "../../lib/optionSearch";
+import {
+  SELECTED_CHIPS_GAP,
+  SELECTED_CHIPS_MAX_ROWS,
+  resolveSelectedChipsMaxHeight,
+} from "../../lib/resolveSelectedChipsMaxHeight";
 
 interface Props {
   questionId: string;
@@ -26,6 +31,9 @@ export function MultipleChoiceList({
 }: Props): React.JSX.Element {
   const [otherFocused, setOtherFocused] = useState(false);
   const [query, setQuery] = useState("");
+  // Spec 87 (D5/D6): altura real de una fila de chips (ya incluye el escalado de
+  // fuente del sistema); 0 hasta medir el primer chip.
+  const [chipRowHeight, setChipRowHeight] = useState(0);
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const isSearchable = options.length > searchThreshold;
@@ -46,6 +54,12 @@ export function MultipleChoiceList({
     () => options.filter((option) => selectedIds.includes(option.optionId)),
     [options, selectedIds],
   );
+
+  const chipsMaxHeight = resolveSelectedChipsMaxHeight({
+    rowHeight: chipRowHeight,
+    gap: SELECTED_CHIPS_GAP,
+    maxRows: SELECTED_CHIPS_MAX_ROWS,
+  });
 
   function handleToggle(option: InstrumentOption): void {
     const isSelected = selectedIds.includes(option.optionId);
@@ -111,13 +125,29 @@ export function MultipleChoiceList({
   return (
     <View style={[styles.container, isSearchable && styles.containerFill]}>
       {selectedOptions.length > 0 && (
-        <View style={styles.chipsRow}>
-          {selectedOptions.map((option) => (
+        // Spec 87: tope de ~2 filas con scroll propio. Sin él, cada fila nueva de
+        // chips le quitaba altura al listado de opciones hasta dejarlo sin espacio.
+        <ScrollView
+          style={[styles.chipsScroll, { maxHeight: chipsMaxHeight }]}
+          contentContainerStyle={styles.chipsRow}
+          nestedScrollEnabled
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator
+          accessibilityLabel={`${selectedOptions.length} opciones seleccionadas`}
+        >
+          {selectedOptions.map((option, index) => (
             <TouchableOpacity
               key={option.optionId}
               style={styles.chip}
               onPress={() => handleToggle(option)}
               activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={`Quitar ${option.text}`}
+              onLayout={
+                index === 0
+                  ? (event) => setChipRowHeight(event.nativeEvent.layout.height)
+                  : undefined
+              }
             >
               <Text style={styles.chipText} numberOfLines={1}>
                 {option.text}
@@ -125,7 +155,7 @@ export function MultipleChoiceList({
               <X size={12} color={colors.brandSubtleFg} strokeWidth={2.6} />
             </TouchableOpacity>
           ))}
-        </View>
+        </ScrollView>
       )}
       {isSearchable && (
         <View style={styles.searchWrapper}>
@@ -222,6 +252,12 @@ function createStyles(colors: ThemeColors) {
       color: colors.textMuted,
       paddingHorizontal: 4,
     },
+    // `flexGrow: 0`: por defecto un ScrollView ocupa todo el espacio libre del
+    // contenedor y volvería a empujar al listado.
+    chipsScroll: {
+      flexGrow: 0,
+      flexShrink: 0,
+    },
     chipsRow: {
       flexDirection: "row",
       flexWrap: "wrap",
@@ -253,6 +289,9 @@ function createStyles(colors: ThemeColors) {
     },
     virtualizedList: {
       flex: 1,
+      // Spec 87: el listado nunca baja de ~3 filas (`row.minHeight: 56`), aunque
+      // otros bloques de altura fija se sumen por encima.
+      minHeight: 168,
     },
     virtualizedListContent: {
       flexGrow: 1,

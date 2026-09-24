@@ -6,9 +6,20 @@
 
 // ─── Mock declarations (hoisted before imports) ───────────────────────────────
 
+// Spec 86 — la sync procesa por dueño con el token guardado de cada uno: estas
+// suites simulan una sesión activa con token para que `processAll()` corra.
+jest.mock('../storage/secureStorage', () => ({
+  secureStorage: {
+    getActiveUserId: jest.fn().mockResolvedValue('user-1'),
+    getTokenFor: jest.fn().mockResolvedValue('token-1'),
+  },
+}));
+
 jest.mock('../storage/syncQueue', () => ({
   syncQueueStorage: {
     dequeueNextPending: jest.fn(),
+    // Spec 86 — sin dueño (registros anteriores): se procesan con la sesión activa.
+    listPendingOwners: jest.fn().mockResolvedValue([null]),
     markInFlight: jest.fn(),
     markSynced: jest.fn(),
     markFailedValidation: jest.fn(),
@@ -16,6 +27,9 @@ jest.mock('../storage/syncQueue', () => ({
     getPendingBySurveyId: jest.fn(),
     getActiveBySurveyId: jest.fn(),
     resetInFlightToRetry: jest.fn(),
+    resetInFlightToRetryById: jest.fn(),
+    resetInFlightToRetryBySurveyId: jest.fn(),
+    claimPendingBySurveyId: jest.fn(),
   },
 }));
 
@@ -31,6 +45,21 @@ jest.mock('../storage/farmPlotStore', () => ({
     loadDraft: jest.fn(),
     markSynced: jest.fn(),
   },
+}));
+
+// Spec 86 (M5, auditoría 44): el caso de 401 en consentimientos necesita su
+// propio par de mocks; ningún caso anterior ejercía este camino.
+jest.mock('../storage/consentRecordStore', () => ({
+  consentRecordStore: {
+    get: jest.fn(),
+    markFailed: jest.fn(),
+    markSynced: jest.fn(),
+    remapSession: jest.fn(),
+  },
+}));
+
+jest.mock('../api/consents', () => ({
+  submitConsent: jest.fn(),
 }));
 
 jest.mock('../api/farmPlots', () => ({
@@ -141,6 +170,16 @@ jest.mock('../store/useChangeRequestStore', () => ({
   },
 }));
 
+// Spec 88 — `processAll()` no procesa la cola sin sesión iniciada (criterio 8).
+// Estas suites ejercitan el sync directamente, así que necesitan un token
+// simulado. Mock agregado con autorización explícita del usuario (2026-09-21);
+// ninguna aserción de estas suites cambió.
+jest.mock('../store/useAuthStore', () => ({
+  useAuthStore: {
+    getState: jest.fn().mockReturnValue({ token: 'test-token' }),
+  },
+}));
+
 jest.mock('../store/useCampaignSessionStore', () => ({
   useCampaignSessionStore: {
     getState: jest.fn().mockReturnValue({
@@ -167,7 +206,7 @@ jest.mock('../sync/MediaUploadService', () => ({
 
 // ─── Import SUT and mocked modules ───────────────────────────────────────────
 
-import { NetworkError, ServerError } from '../api/httpClient';
+import { NetworkError, ServerError, AuthRequiredError } from '../api/httpClient';
 import { SyncQueueService } from '../sync/SyncQueueService';
 import { syncQueueStorage } from '../storage/syncQueue';
 import { surveyDraftStore } from '../storage/surveyDraftStore';
@@ -185,7 +224,10 @@ import { buildResponsesPayload } from '../lib/buildResponsesPayload';
 import { farmerCacheStorage } from '../storage/farmerCache';
 import { cacheFarmerIdentity } from '../lib/cacheFarmerIdentity';
 import { farmPlotStore } from '../storage/farmPlotStore';
+import { secureStorage } from '../storage/secureStorage';
 import { createFarmPlot } from '../api/farmPlots';
+import { consentRecordStore } from '../storage/consentRecordStore';
+import { submitConsent } from '../api/consents';
 
 // ─── Typed mock aliases ───────────────────────────────────────────────────────
 
@@ -194,6 +236,9 @@ const mockMarkInFlight = syncQueueStorage.markInFlight as jest.Mock;
 const mockMarkSynced = syncQueueStorage.markSynced as jest.Mock;
 const mockMarkFailedValidation = syncQueueStorage.markFailedValidation as jest.Mock;
 const mockIncrementAttempts = syncQueueStorage.incrementAttempts as jest.Mock;
+const mockGetActiveBySurveyId = syncQueueStorage.getActiveBySurveyId as jest.Mock;
+const mockResetInFlightToRetryBySurveyId = syncQueueStorage.resetInFlightToRetryBySurveyId as jest.Mock;
+const mockClaimPendingBySurveyId = syncQueueStorage.claimPendingBySurveyId as jest.Mock;
 
 const mockLoadDraft = surveyDraftStore.loadDraft as jest.Mock;
 const mockMarkSyncedDraft = surveyDraftStore.markSynced as jest.Mock;
@@ -388,6 +433,107 @@ describe('processAll', () => {
     expect(mockSetSyncingId).toHaveBeenCalledWith(entry.id);
     expect(mockSetSyncingId).toHaveBeenCalledWith(null);
     expect(mockMarkSyncCompleted).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ─── processSurveyNow: no debe duplicar el envío de un processAll() en vuelo ──
+// Spec 91 — encontrado en la ronda manual de test-091 (TC-091-006): con red
+// lenta, el `processAll()` de fondo que dispara `enqueueSubmission()` y el
+// `processSurveyNow()` del orquestador podían competir por la misma entrada,
+// produciendo dos POST /api/surveys para el mismo borrador.
+
+describe('processSurveyNow — no compite con un processAll() en vuelo', () => {
+  it('no resetea ni reprocesa la entrada mientras processAll() sigue corriendo', async () => {
+    // `dequeueNextPending` no resuelve todavía: simula que processAll() sigue
+    // en vuelo (isProcessing = true, que se fija de forma síncrona antes de
+    // este await) esperando su primer paso.
+    let releaseDequeue: (value: unknown) => void = () => {};
+    const hangingDequeue = new Promise((resolve) => {
+      releaseDequeue = resolve;
+    });
+    mockDequeueNextPending.mockReturnValueOnce(hangingDequeue);
+
+    const processAllPromise = SyncQueueService.processAll();
+
+    // Deja correr el event loop lo justo para que processAll() llegue a su
+    // primer `await dequeueNextPending(...)` y fije isProcessing = true.
+    await Promise.resolve();
+
+    // Mientras tanto, el orquestador pide procesar la misma encuesta. La
+    // entrada ya no está `pending` (processAll() la tomó primero con su
+    // propio dequeue), así que la reclamación atómica no encuentra nada.
+    mockClaimPendingBySurveyId.mockResolvedValue(null);
+    mockGetActiveBySurveyId.mockResolvedValue(null); // resuelve el bucle de espera de inmediato
+    await SyncQueueService.processSurveyNow('survey-1');
+
+    // No debe haber reseteado nada: eso es lo que antes producía el segundo
+    // POST. `isProcessing` sigue true (processAll() no terminó), así que el
+    // reseteo condicional tampoco corre.
+    expect(mockResetInFlightToRetryBySurveyId).not.toHaveBeenCalled();
+    expect(mockGetActiveBySurveyId).toHaveBeenCalledWith('survey-1');
+
+    // Cerrar processAll() para no dejar una promesa colgada.
+    releaseDequeue(null);
+    await processAllPromise;
+  });
+
+  it('reclama y procesa una entrada genuinamente pendiente, sin resetear nada', async () => {
+    const entry = makeEntry();
+    mockClaimPendingBySurveyId.mockResolvedValue(entry);
+    mockLoadDraft.mockResolvedValue(makeDraft());
+    mockInstrumentCacheGet.mockResolvedValue(makeInstrument());
+
+    await SyncQueueService.processSurveyNow('survey-1');
+
+    // La entrada estaba genuinamente `pending`: la reclamación atómica la
+    // toma directo, sin necesidad de resetear ningún `in_flight` abandonado.
+    expect(mockResetInFlightToRetryBySurveyId).not.toHaveBeenCalled();
+    expect(mockClaimPendingBySurveyId).toHaveBeenCalledWith('survey-1');
+    expect(mockMarkSynced).toHaveBeenCalledWith(entry.id);
+  });
+
+  it('resetea y reclama cuando la entrada quedó in_flight abandonada (sin processAll en vuelo)', async () => {
+    const entry = makeEntry();
+    // Primera reclamación: nada pending (la entrada sigue in_flight de una
+    // corrida anterior interrumpida). Sin processAll() vivo en esta sesión,
+    // se resetea y se reclama de nuevo.
+    mockClaimPendingBySurveyId.mockResolvedValueOnce(null).mockResolvedValueOnce(entry);
+    mockLoadDraft.mockResolvedValue(makeDraft());
+    mockInstrumentCacheGet.mockResolvedValue(makeInstrument());
+
+    await SyncQueueService.processSurveyNow('survey-1');
+
+    expect(mockResetInFlightToRetryBySurveyId).toHaveBeenCalledWith('survey-1');
+    expect(mockClaimPendingBySurveyId).toHaveBeenCalledTimes(2);
+    expect(mockMarkSynced).toHaveBeenCalledWith(entry.id);
+  });
+
+  it('no compite consigo mismo: una segunda llamada para el mismo surveyId espera en vez de reclamar', async () => {
+    // Primera llamada: entrada pendiente que tarda en "procesarse" (loadDraft
+    // no resuelve todavía), simulando que sigue en vuelo.
+    let releaseLoadDraft: (value: unknown) => void = () => {};
+    const hangingLoadDraft = new Promise((resolve) => {
+      releaseLoadDraft = resolve;
+    });
+    const entry = makeEntry();
+    mockClaimPendingBySurveyId.mockResolvedValueOnce(entry);
+    mockLoadDraft.mockReturnValueOnce(hangingLoadDraft);
+    mockInstrumentCacheGet.mockResolvedValue(makeInstrument());
+
+    const firstCall = SyncQueueService.processSurveyNow('survey-1');
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Segunda llamada para la misma encuesta, mientras la primera sigue en
+    // vuelo: no debe reclamar ni resetear, solo esperar.
+    mockGetActiveBySurveyId.mockResolvedValue(null);
+    await SyncQueueService.processSurveyNow('survey-1');
+
+    expect(mockClaimPendingBySurveyId).toHaveBeenCalledTimes(1);
+    expect(mockResetInFlightToRetryBySurveyId).not.toHaveBeenCalled();
+
+    releaseLoadDraft(makeDraft());
+    await firstCall;
   });
 });
 
@@ -758,8 +904,10 @@ describe('resolveLocalSessions', () => {
     await SyncQueueService.processAll();
 
     expect(mockSessionCropsGet).toHaveBeenCalledWith('local-session-1');
+    // Spec 86: la sesión provisional se crea con el token de quien la abrió.
     expect(mockCreateCampaignSession).toHaveBeenCalledWith(
       expect.objectContaining({ cropIds: ['crop-café'] }),
+      { authToken: 'token-1' },
     );
     expect(mockResolveSession).toHaveBeenCalledWith('local-session-1', 'real-session-1');
   });
@@ -997,5 +1145,234 @@ describe('processEntry — skip-step', () => {
       expect.stringContaining('Instrument not found'),
     );
     expect(mockMarkSynced).not.toHaveBeenCalledWith('skip-entry-5');
+  });
+
+  // Spec 88 — regresión del congelamiento encontrado en la ronda manual del
+  // test-088 (2026-09-21). `resolveCampaignSession()` devuelve a `pending` la
+  // entrada que aplaza, así que si el bucle vuelve a pedir la más antigua sin
+  // excluir las ya atendidas, recibe la misma para siempre: gira sin esperar
+  // por red y bloquea el hilo de JS. La app quedaba pintada pero muerta.
+  //
+  // Se simula la cola real: `dequeueNextPending(excluidas)` respeta la lista de
+  // exclusión. Si `processAll()` no la usara, este caso no terminaría nunca.
+  it('no gira indefinidamente cuando una entrada vuelve a quedar pendiente', async () => {
+    const entry = makeEntry({
+      id: 'entry-aplazada',
+      surveyId: 'draft-aplazado',
+      campaignSessionId: 'local_session_sin_resolver',
+      itemType: 'survey',
+    });
+
+    let entregas = 0;
+    mockDequeueNextPending.mockImplementation(async (excluidas: string[] = []) => {
+      entregas += 1;
+      // Red de seguridad: si el bucle no excluye, cortamos a mano y el
+      // `expect` de abajo delata la regresión en vez de colgar la suite.
+      if (entregas > 20) return null;
+      return excluidas.includes(entry.id) ? null : entry;
+    });
+
+    await SyncQueueService.processAll();
+
+    // Dos llamadas: la que entrega la entrada y la que ya no tiene nada que dar.
+    expect(entregas).toBeLessThanOrEqual(2);
+  });
+});
+
+
+// ─── Spec 86 (CA-7): 401 y 429 dejan el ítem pendiente, no fallido ───────────
+
+describe('processEntry — 401 y 429 no destruyen pendientes (spec 86)', () => {
+  const mockResetById = syncQueueStorage.resetInFlightToRetryById as jest.Mock;
+
+  // Un `mockResolvedValueOnce` sin consumir (el 401 corta el grupo antes de pedir
+  // la siguiente entrada) no debe filtrarse al caso siguiente.
+  beforeEach(() => {
+    mockDequeueNextPending.mockReset();
+    mockDequeueNextPending.mockResolvedValue(null);
+  });
+
+  function arrangeSurveyEntryFailingWith(error: Error) {
+    const entry = makeEntry();
+    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
+    mockLoadDraft.mockResolvedValue(makeDraft());
+    mockInstrumentCacheGet.mockResolvedValue(makeInstrument());
+    mockBuildResponsesPayload.mockReturnValue([{ surveyId: 'survey-1', questionId: 'q1' }]);
+    mockSubmitResponsesBatch.mockRejectedValue(error);
+    return entry;
+  }
+
+  it('un 401 (AuthRequiredError) devuelve la entrada a pendiente sin marcarla fallida ni sumar intentos', async () => {
+    const entry = arrangeSurveyEntryFailingWith(
+      new AuthRequiredError({ kind: 'expired', token: 'token-1', serverDateMs: Date.now() }),
+    );
+
+    await SyncQueueService.processAll();
+
+    expect(mockResetById).toHaveBeenCalledWith(entry.id);
+    expect(mockMarkFailedValidation).not.toHaveBeenCalled();
+    expect(mockIncrementAttempts).not.toHaveBeenCalled();
+  });
+
+  it('un 401 corta el grupo del dueño: no sigue con la siguiente entrada', async () => {
+    const first = makeEntry({ id: 'e1' });
+    const second = makeEntry({ id: 'e2' });
+    mockDequeueNextPending
+      .mockResolvedValueOnce(first)
+      .mockResolvedValueOnce(second)
+      .mockResolvedValue(null);
+    mockLoadDraft.mockResolvedValue(makeDraft());
+    mockInstrumentCacheGet.mockResolvedValue(makeInstrument());
+    mockBuildResponsesPayload.mockReturnValue([{ surveyId: 'survey-1', questionId: 'q1' }]);
+    mockSubmitResponsesBatch.mockRejectedValue(
+      new AuthRequiredError({ kind: 'expired', token: 'token-1', serverDateMs: Date.now() }),
+    );
+
+    await SyncQueueService.processAll();
+
+    expect(mockSubmitResponsesBatch).toHaveBeenCalledTimes(1);
+    expect(mockMarkFailedValidation).not.toHaveBeenCalled();
+  });
+
+  it('un 429 deja la entrada pendiente sin marcarla fallida ni sumar intentos', async () => {
+    const entry = arrangeSurveyEntryFailingWith(new ServerError(429, 'Too Many Requests'));
+
+    await SyncQueueService.processAll();
+
+    expect(mockResetById).toHaveBeenCalledWith(entry.id);
+    expect(mockMarkFailedValidation).not.toHaveBeenCalled();
+    expect(mockIncrementAttempts).not.toHaveBeenCalled();
+  });
+
+  it('un 403 sigue siendo failed_validation', async () => {
+    const entry = arrangeSurveyEntryFailingWith(new ServerError(403, 'Forbidden'));
+
+    await SyncQueueService.processAll();
+
+    expect(mockMarkFailedValidation).toHaveBeenCalledWith(entry.id, 'Forbidden');
+  });
+
+  it('una sesión provisional con 401 NO se marca fallida (no arrastra sus encuestas)', async () => {
+    const mockMarkFailedSession = pendingSessionStorage.markFailed as jest.Mock;
+    (pendingSessionStorage.listPending as jest.Mock).mockResolvedValueOnce([
+      { localSessionId: 'local_s1', campaignId: 'c1', farmerId: undefined, userId: 'user-1' },
+    ]);
+    (createCampaignSession as jest.Mock).mockRejectedValueOnce(
+      new AuthRequiredError({ kind: 'expired', token: 'token-1', serverDateMs: Date.now() }),
+    );
+    mockDequeueNextPending.mockResolvedValue(null);
+
+    await SyncQueueService.processAll();
+
+    expect(mockMarkFailedSession).not.toHaveBeenCalled();
+  });
+});
+
+
+// ─── Spec 86 (M5): 401/429 también en skip-step, lote, consentimiento y dueños ──
+
+describe('processEntry — 401/429 en los demás tipos de ítem y dueños (spec 86)', () => {
+  const mockResetById = syncQueueStorage.resetInFlightToRetryById as jest.Mock;
+  const authError = () =>
+    new AuthRequiredError({ kind: 'expired', token: 'token-1', serverDateMs: Date.now() });
+
+  beforeEach(() => {
+    mockDequeueNextPending.mockReset();
+    mockDequeueNextPending.mockResolvedValue(null);
+  });
+
+  it('skip-step: un 401 deja la entrada pendiente', async () => {
+    const entry = makeEntry({
+      id: 'skip-1', surveyId: 'skip-draft', stepOrder: 2, instrumentId: 'inst-1', itemType: 'skip-step',
+    });
+    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
+    mockSkipStepApi.mockRejectedValueOnce(authError());
+
+    await SyncQueueService.processAll();
+
+    expect(mockResetById).toHaveBeenCalledWith('skip-1');
+    expect(mockMarkFailedValidation).not.toHaveBeenCalled();
+    expect(mockIncrementAttempts).not.toHaveBeenCalled();
+  });
+
+  it('farm-plot: un 429 deja la entrada pendiente', async () => {
+    const entry = makeEntry({ id: 'plot-1', surveyId: 'plot-x', itemType: 'farm-plot' });
+    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
+    mockFarmPlotLoadDraft.mockResolvedValue(makeFarmPlotDraft());
+    mockCreateFarmPlot.mockRejectedValueOnce(new ServerError(429, 'Too Many Requests'));
+
+    await SyncQueueService.processAll();
+
+    expect(mockResetById).toHaveBeenCalledWith('plot-1');
+    expect(mockMarkFailedValidation).not.toHaveBeenCalled();
+  });
+
+  it('consentimiento: un 401 deja la entrada pendiente y NO marca la constancia como fallida', async () => {
+    const entry = makeEntry({ id: 'consent-1', surveyId: 'consent-local', itemType: 'consent' });
+    mockDequeueNextPending.mockResolvedValueOnce(entry).mockResolvedValue(null);
+    (consentRecordStore.get as jest.Mock).mockResolvedValue({
+      id: 'consent-local',
+      status: 'pending',
+      consentDocumentId: 'doc-1',
+      respondentName: 'Ana',
+      acceptedDataProcessing: true,
+      acceptedPhoto: false,
+      acceptedAudio: false,
+      acceptedVideo: false,
+      acceptedFollowUpContact: false,
+      acceptedAt: new Date(),
+    });
+    (submitConsent as jest.Mock).mockRejectedValueOnce(authError());
+
+    await SyncQueueService.processAll();
+
+    expect(mockResetById).toHaveBeenCalledWith('consent-1');
+    expect(consentRecordStore.markFailed).not.toHaveBeenCalled();
+    expect(mockMarkFailedValidation).not.toHaveBeenCalled();
+  });
+
+  it('cada dueño sale con su propio token, aunque sea el usuario activo', async () => {
+    (syncQueueStorage.listPendingOwners as jest.Mock).mockResolvedValueOnce(['user-1', 'user-2']);
+    (secureStorage.getTokenFor as jest.Mock).mockImplementation(async (id: string) => `token-of-${id}`);
+    mockDequeueNextPending
+      .mockResolvedValueOnce(makeEntry({ id: 'e-u1', ownerUserId: 'user-1' }))
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(makeEntry({ id: 'e-u2', surveyId: 'survey-2', ownerUserId: 'user-2' }))
+      .mockResolvedValue(null);
+    mockLoadDraft.mockResolvedValue(makeDraft());
+    mockInstrumentCacheGet.mockResolvedValue(makeInstrument());
+    mockBuildResponsesPayload.mockReturnValue([{ surveyId: 'survey-1', questionId: 'q1' }]);
+    mockSubmitResponsesBatch.mockResolvedValue(undefined);
+
+    await SyncQueueService.processAll();
+
+    const tokens = mockSubmitResponsesBatch.mock.calls.map((c) => c[1]);
+    expect(tokens).toEqual([{ authToken: 'token-of-user-1' }, { authToken: 'token-of-user-2' }]);
+    (secureStorage.getTokenFor as jest.Mock).mockResolvedValue('token-1');
+  });
+
+  it('un dueño sin token no bloquea a los demás y no se le envía nada', async () => {
+    (syncQueueStorage.listPendingOwners as jest.Mock).mockResolvedValueOnce(['user-1', 'user-ghost']);
+    (secureStorage.getTokenFor as jest.Mock).mockImplementation(async (id: string) =>
+      id === 'user-ghost' ? null : 'token-1',
+    );
+    mockDequeueNextPending.mockResolvedValueOnce(null);
+
+    await SyncQueueService.processAll();
+
+    expect(mockDequeueNextPending).not.toHaveBeenCalledWith(expect.anything(), 'user-ghost');
+    (secureStorage.getTokenFor as jest.Mock).mockResolvedValue('token-1');
+  });
+
+  it('CA-17: sin ningún token no se envía nada y nada pasa a fallido', async () => {
+    (secureStorage.getActiveUserId as jest.Mock).mockResolvedValueOnce(null);
+    (syncQueueStorage.listPendingOwners as jest.Mock).mockResolvedValueOnce([null]);
+    (pendingSessionStorage.listPending as jest.Mock).mockResolvedValue([]);
+
+    await SyncQueueService.processAll();
+
+    expect(mockDequeueNextPending).not.toHaveBeenCalled();
+    expect(mockSubmitResponsesBatch).not.toHaveBeenCalled();
+    expect(mockMarkFailedValidation).not.toHaveBeenCalled();
   });
 });

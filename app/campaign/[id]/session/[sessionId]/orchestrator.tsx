@@ -34,6 +34,8 @@ import { DocumentCollisionModal } from "../../../../../src/components/campaign/D
 import { NetworkError } from "../../../../../src/api/httpClient";
 import { withNetworkRetry } from "../../../../../src/lib/withNetworkRetry";
 import { advanceWithinCampaign, returnToPreSurvey } from "../../../../../src/lib/campaignNavigation";
+import { planNextStepAfterCompletion } from "../../../../../src/lib/planNextStepAfterCompletion";
+import type { NextStepResponse } from "../../../../../src/types";
 import { Fonts } from "../../../../../src/theme/fonts";
 import { useTheme } from "../../../../../src/theme/ThemeProvider";
 import type { ThemeColors } from "../../../../../src/theme/colors";
@@ -42,6 +44,28 @@ type ScreenState = 'loading' | 'offline' | 'injection_error' | 'error' | 'duplic
 
 function generateId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+// Spec 91 — tope de espera para que el bloque recién terminado llegue al
+// backend antes de avanzar. La petición HTTP subyacente ya tiene 15s de
+// timeout (httpClient.ts); este margen deja espacio a un reintento 5xx
+// dentro de processSurveyNow() sin alargar la espera indefinidamente.
+const STEP_SYNC_TIMEOUT_MS = 20_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Tiempo agotado (${ms}ms)`)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
 }
 
 export default function OrchestratorScreen() {
@@ -62,6 +86,11 @@ export default function OrchestratorScreen() {
   // sigue en 'loading': la UI muestra "reintentando" en vez del error de
   // "sin conexión" que antes aparecía en el primer microcorte.
   const [retryAttempt, setRetryAttempt] = useState(0);
+  // Spec 91 — true mientras se espera a que el bloque recién terminado
+  // llegue al backend, antes de pedir el siguiente paso. Solo cambia
+  // mientras `screenState` sigue en 'loading'; misma convención que
+  // `retryAttempt`.
+  const [savingStep, setSavingStep] = useState(false);
   const [duplicatePending, setDuplicatePending] = useState<{
     instrument: { instrumentId: string; name: string };
     stepOrder: number;
@@ -311,6 +340,7 @@ export default function OrchestratorScreen() {
     setScreenState('loading');
     setErrorMessage(null);
     setRetryAttempt(0);
+    setSavingStep(false);
 
     try {
       const { injectionPhase, registroSurveyId, s1SurveyId, s2SurveyId } =
@@ -583,7 +613,93 @@ export default function OrchestratorScreen() {
         }
       } else {
         if (isOnline) {
-          const nextStep = await getNextStep(resolvedSessionId);
+          // Spec 91 — esperar (con tope) a que el bloque recién terminado
+          // llegue al backend antes de pedir el siguiente paso. Sin esto,
+          // getNextStep() puede devolver el mismo paso que se acaba de
+          // completar, porque el backend solo lo cuenta como hecho cuando ya
+          // tiene la encuesta (campaign-sessions.service.ts:242-255).
+          const { lastCompletedSurveyId } = useCampaignSessionStore.getState();
+          if (lastCompletedSurveyId) {
+            // Spec 91 — corrección de auditoría (docs/reports/auditorias/45-…):
+            // limpiar ANTES del `await`, no en el `finally`. Si el
+            // componente se desmonta y remonta durante la espera (el
+            // encuestador sale y vuelve a entrar), el nuevo `run()` no debe
+            // volver a leer este mismo `surveyId` y disparar otro
+            // `processSurveyNow()` para él — `SyncQueueService` ya protege
+            // contra esa reentrada con su propio candado, pero evitarla acá
+            // ahorra la espera redundante.
+            store.clearLastCompletedSurveyId();
+            setSavingStep(true);
+            try {
+              await withTimeout(
+                SyncQueueService.processSurveyNow(lastCompletedSurveyId),
+                STEP_SYNC_TIMEOUT_MS,
+              );
+            } catch (err) {
+              // No detener el avance: la guarda de abajo (comparación contra
+              // lo completado localmente) cubre este caso igual, y la
+              // encuesta sigue en la cola para sincronizar después.
+              logger.warn(
+                `[Orchestrator] no se pudo confirmar el envío de ${lastCompletedSurveyId} antes de avanzar: ${
+                  err instanceof Error ? err.message : String(err)
+                }`,
+              );
+            } finally {
+              setSavingStep(false);
+            }
+          }
+
+          const { campaign } = useCampaignSessionStore.getState();
+
+          // Spec 91 — si el backend está totalmente inalcanzable (no solo
+          // lento para recibir este bloque), getNextStep() mismo falla. No
+          // hay respuesta del backend que comparar, así que se recalcula
+          // localmente directo, igual que si isOnline fuera false — el
+          // borrador de este bloque ya quedó `status: 'completed'` en SQLite
+          // sin importar si el envío llegó a tiempo. Encontrado en la ronda
+          // manual de test-091 (TC-091-003): antes, un backend caído dejaba
+          // al encuestador en la pantalla "sin conexión" en vez de avanzar.
+          let nextStep: NextStepResponse | null;
+          try {
+            nextStep = await getNextStep(resolvedSessionId);
+          } catch (err) {
+            if (err instanceof NetworkError && campaign?.campaignId) {
+              logger.warn(
+                `[Orchestrator] getNextStep() inalcanzable, recalculando localmente: ${
+                  err instanceof Error ? err.message : String(err)
+                }`,
+              );
+              const nextStepLocal = await getNextStepOffline(campaign.campaignId, resolvedSessionId, -1);
+              if (!nextStepLocal || (!nextStepLocal.stepId && !nextStepLocal.instrument)) {
+                advanceWithinCampaign(router, id, `/campaign/${id}/session/${resolvedSessionId}/completed`);
+                return;
+              }
+              store.applyNextStep(nextStepLocal);
+              await checkDuplicateAndNavigateOffline(nextStepLocal);
+              return;
+            }
+            throw err;
+          }
+
+          const completedLocally = campaign?.campaignId
+            ? await surveyDraftStore.listCompletedStepsForSession(resolvedSessionId)
+            : [];
+          const plan = planNextStepAfterCompletion({ backendStep: nextStep, completedLocally });
+
+          if (plan.action === 'fallback-local' && campaign?.campaignId) {
+            // El backend todavía no vio el bloque recién terminado (o
+            // devolvió el mismo paso) — recalcular localmente, igual que en
+            // el camino sin conexión.
+            const nextStepLocal = await getNextStepOffline(campaign.campaignId, resolvedSessionId, -1);
+            if (!nextStepLocal || (!nextStepLocal.stepId && !nextStepLocal.instrument)) {
+              advanceWithinCampaign(router, id, `/campaign/${id}/session/${resolvedSessionId}/completed`);
+              return;
+            }
+            store.applyNextStep(nextStepLocal);
+            await checkDuplicateAndNavigateOffline(nextStepLocal);
+            return;
+          }
+
           store.applyNextStep(nextStep);
           await checkAndNavigate(nextStep);
         } else {
@@ -1069,7 +1185,11 @@ export default function OrchestratorScreen() {
       <View style={styles.center}>
         <SpinningLoader size={42} color={colors.brand} />
         <Text style={styles.loadingLabel}>
-          {retryAttempt > 0
+          {savingStep
+            // Spec 91 — visible mientras se espera a que el bloque recién
+            // terminado llegue al backend antes de pedir el siguiente paso.
+            ? "Guardando el bloque…"
+            : retryAttempt > 0
             // Spec 81 — corrección de auditoría
             // (docs/reports/auditorias/37-…): `withNetworkRetry` llama a
             // `onRetry(attempt)` con el intento que acaba de fallar, justo

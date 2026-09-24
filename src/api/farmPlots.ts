@@ -1,4 +1,4 @@
-import { httpClient } from './httpClient';
+import { httpClient, type RequestOptions } from './httpClient';
 import { endpoints } from './endpoints';
 
 export interface PolygonPoint {
@@ -35,8 +35,11 @@ export interface FarmPlotResponse {
   updatedAt: string;
 }
 
-export const createFarmPlot = (payload: CreateFarmPlotPayload): Promise<{ farmPlotId: string }> =>
-  httpClient.post(endpoints.farmPlotsCreate, payload);
+export const createFarmPlot = (
+  payload: CreateFarmPlotPayload,
+  opts?: RequestOptions,
+): Promise<{ farmPlotId: string }> =>
+  httpClient.post(endpoints.farmPlotsCreate, payload, ...(opts ? [opts] : []));
 
 export const getFarmPlotsByFarm = (farmId: string): Promise<FarmPlotResponse[]> =>
   httpClient.get(endpoints.farmPlotsByFarm(farmId));
