@@ -56,6 +56,8 @@ const LOGIN_ERROR_MESSAGES = {
   requiresOnline:
     "Para entrar necesitas conexión a internet. Ingresa una vez con conexión para volver a habilitar el ingreso sin conexión.",
   passwordChanged: "Tu contraseña cambió. Ingresa con la nueva contraseña.",
+  preparing:
+    "Tu ingreso sin conexión todavía se está preparando. Espera unos segundos e inténtalo de nuevo, o ingresa con conexión.",
 } as const;
 
 function offlineDeniedMessage(
@@ -109,6 +111,11 @@ async function persistOnlineLogin(
   } catch {
     // La limpieza es de mantenimiento: un fallo no debe impedir el ingreso.
   }
+
+  // El hash tarda y puede no terminar (la app se cierra): si el usuario cambió su
+  // contraseña, la credencial anterior no debe seguir valiendo sin conexión. Se
+  // invalida ya y `saveCredential` la vuelve a habilitar con la nueva.
+  await offlineCredentialStorage.markRequiresOnlineLogin(user.userId);
 
   const saving = createOfflineCredential({
     userId: user.userId,
@@ -193,7 +200,14 @@ export const useAuthStore = create<AuthState>((set, get) => {
   async function loginOffline(email: string, password: string): Promise<boolean> {
     const cred = await offlineCredentialStorage.findByEmail(email);
     if (!cred) {
-      set({ error: LOGIN_ERROR_MESSAGES.needsConnection, loading: false });
+      // Un usuario que ya está en el selector pero sin credencial acaba de ingresar y
+      // su hash aún se calcula: no es "nunca ingresó".
+      const known = (await offlineCredentialStorage.listKnownUsers()) ?? [];
+      const preparing = known.some((k) => k.email.toLowerCase() === email.trim().toLowerCase());
+      set({
+        error: preparing ? LOGIN_ERROR_MESSAGES.preparing : LOGIN_ERROR_MESSAGES.needsConnection,
+        loading: false,
+      });
       return false;
     }
 
