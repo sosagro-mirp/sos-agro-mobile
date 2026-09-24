@@ -121,21 +121,17 @@ function deriveJs(password: string, saltHex: string, iterations: number): Promis
 }
 
 async function derive(password: string, saltHex: string, iterations: number): Promise<string> {
-  const start = Date.now(); // TEMP (test-086): retirar tras medir en release.
   const native = loadNativePbkdf2();
   let out: Uint8Array;
-  let engine = "js";
   if (native) {
     try {
       out = await deriveNative(native, password, saltHex, iterations);
-      engine = "nativo";
     } catch {
       out = await deriveJs(password, saltHex, iterations);
     }
   } else {
     out = await deriveJs(password, saltHex, iterations);
   }
-  console.log(`[PBKDF2-TEMP] motor=${engine} iteraciones=${iterations} total=${Date.now() - start}ms`);
   return bytesToHex(out);
 }
 
