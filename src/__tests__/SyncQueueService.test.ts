@@ -16,6 +16,8 @@ jest.mock('../storage/syncQueue', () => ({
     getPendingBySurveyId: jest.fn(),
     getActiveBySurveyId: jest.fn(),
     resetInFlightToRetry: jest.fn(),
+    resetInFlightToRetryBySurveyId: jest.fn(),
+    claimPendingBySurveyId: jest.fn(),
   },
 }));
 
@@ -204,6 +206,9 @@ const mockMarkInFlight = syncQueueStorage.markInFlight as jest.Mock;
 const mockMarkSynced = syncQueueStorage.markSynced as jest.Mock;
 const mockMarkFailedValidation = syncQueueStorage.markFailedValidation as jest.Mock;
 const mockIncrementAttempts = syncQueueStorage.incrementAttempts as jest.Mock;
+const mockGetActiveBySurveyId = syncQueueStorage.getActiveBySurveyId as jest.Mock;
+const mockResetInFlightToRetryBySurveyId = syncQueueStorage.resetInFlightToRetryBySurveyId as jest.Mock;
+const mockClaimPendingBySurveyId = syncQueueStorage.claimPendingBySurveyId as jest.Mock;
 
 const mockLoadDraft = surveyDraftStore.loadDraft as jest.Mock;
 const mockMarkSyncedDraft = surveyDraftStore.markSynced as jest.Mock;
@@ -398,6 +403,107 @@ describe('processAll', () => {
     expect(mockSetSyncingId).toHaveBeenCalledWith(entry.id);
     expect(mockSetSyncingId).toHaveBeenCalledWith(null);
     expect(mockMarkSyncCompleted).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ─── processSurveyNow: no debe duplicar el envío de un processAll() en vuelo ──
+// Spec 91 — encontrado en la ronda manual de test-091 (TC-091-006): con red
+// lenta, el `processAll()` de fondo que dispara `enqueueSubmission()` y el
+// `processSurveyNow()` del orquestador podían competir por la misma entrada,
+// produciendo dos POST /api/surveys para el mismo borrador.
+
+describe('processSurveyNow — no compite con un processAll() en vuelo', () => {
+  it('no resetea ni reprocesa la entrada mientras processAll() sigue corriendo', async () => {
+    // `dequeueNextPending` no resuelve todavía: simula que processAll() sigue
+    // en vuelo (isProcessing = true, que se fija de forma síncrona antes de
+    // este await) esperando su primer paso.
+    let releaseDequeue: (value: unknown) => void = () => {};
+    const hangingDequeue = new Promise((resolve) => {
+      releaseDequeue = resolve;
+    });
+    mockDequeueNextPending.mockReturnValueOnce(hangingDequeue);
+
+    const processAllPromise = SyncQueueService.processAll();
+
+    // Deja correr el event loop lo justo para que processAll() llegue a su
+    // primer `await dequeueNextPending(...)` y fije isProcessing = true.
+    await Promise.resolve();
+
+    // Mientras tanto, el orquestador pide procesar la misma encuesta. La
+    // entrada ya no está `pending` (processAll() la tomó primero con su
+    // propio dequeue), así que la reclamación atómica no encuentra nada.
+    mockClaimPendingBySurveyId.mockResolvedValue(null);
+    mockGetActiveBySurveyId.mockResolvedValue(null); // resuelve el bucle de espera de inmediato
+    await SyncQueueService.processSurveyNow('survey-1');
+
+    // No debe haber reseteado nada: eso es lo que antes producía el segundo
+    // POST. `isProcessing` sigue true (processAll() no terminó), así que el
+    // reseteo condicional tampoco corre.
+    expect(mockResetInFlightToRetryBySurveyId).not.toHaveBeenCalled();
+    expect(mockGetActiveBySurveyId).toHaveBeenCalledWith('survey-1');
+
+    // Cerrar processAll() para no dejar una promesa colgada.
+    releaseDequeue(null);
+    await processAllPromise;
+  });
+
+  it('reclama y procesa una entrada genuinamente pendiente, sin resetear nada', async () => {
+    const entry = makeEntry();
+    mockClaimPendingBySurveyId.mockResolvedValue(entry);
+    mockLoadDraft.mockResolvedValue(makeDraft());
+    mockInstrumentCacheGet.mockResolvedValue(makeInstrument());
+
+    await SyncQueueService.processSurveyNow('survey-1');
+
+    // La entrada estaba genuinamente `pending`: la reclamación atómica la
+    // toma directo, sin necesidad de resetear ningún `in_flight` abandonado.
+    expect(mockResetInFlightToRetryBySurveyId).not.toHaveBeenCalled();
+    expect(mockClaimPendingBySurveyId).toHaveBeenCalledWith('survey-1');
+    expect(mockMarkSynced).toHaveBeenCalledWith(entry.id);
+  });
+
+  it('resetea y reclama cuando la entrada quedó in_flight abandonada (sin processAll en vuelo)', async () => {
+    const entry = makeEntry();
+    // Primera reclamación: nada pending (la entrada sigue in_flight de una
+    // corrida anterior interrumpida). Sin processAll() vivo en esta sesión,
+    // se resetea y se reclama de nuevo.
+    mockClaimPendingBySurveyId.mockResolvedValueOnce(null).mockResolvedValueOnce(entry);
+    mockLoadDraft.mockResolvedValue(makeDraft());
+    mockInstrumentCacheGet.mockResolvedValue(makeInstrument());
+
+    await SyncQueueService.processSurveyNow('survey-1');
+
+    expect(mockResetInFlightToRetryBySurveyId).toHaveBeenCalledWith('survey-1');
+    expect(mockClaimPendingBySurveyId).toHaveBeenCalledTimes(2);
+    expect(mockMarkSynced).toHaveBeenCalledWith(entry.id);
+  });
+
+  it('no compite consigo mismo: una segunda llamada para el mismo surveyId espera en vez de reclamar', async () => {
+    // Primera llamada: entrada pendiente que tarda en "procesarse" (loadDraft
+    // no resuelve todavía), simulando que sigue en vuelo.
+    let releaseLoadDraft: (value: unknown) => void = () => {};
+    const hangingLoadDraft = new Promise((resolve) => {
+      releaseLoadDraft = resolve;
+    });
+    const entry = makeEntry();
+    mockClaimPendingBySurveyId.mockResolvedValueOnce(entry);
+    mockLoadDraft.mockReturnValueOnce(hangingLoadDraft);
+    mockInstrumentCacheGet.mockResolvedValue(makeInstrument());
+
+    const firstCall = SyncQueueService.processSurveyNow('survey-1');
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Segunda llamada para la misma encuesta, mientras la primera sigue en
+    // vuelo: no debe reclamar ni resetear, solo esperar.
+    mockGetActiveBySurveyId.mockResolvedValue(null);
+    await SyncQueueService.processSurveyNow('survey-1');
+
+    expect(mockClaimPendingBySurveyId).toHaveBeenCalledTimes(1);
+    expect(mockResetInFlightToRetryBySurveyId).not.toHaveBeenCalled();
+
+    releaseLoadDraft(makeDraft());
+    await firstCall;
   });
 });
 

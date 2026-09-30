@@ -1,7 +1,8 @@
-import { and, eq, lt } from 'drizzle-orm';
+import { and, eq, inArray, lt } from 'drizzle-orm';
 import { db } from './db/db';
 import { surveys, responses } from './db/schema';
 import type { InstrumentDraftAnswer } from '../types';
+import type { CompletedStepLocal } from '../lib/planNextStepAfterCompletion';
 
 export interface SurveyDraft {
   surveyId: string;
@@ -166,6 +167,25 @@ export const surveyDraftStore = {
       answers,
       updatedAt: survey.updatedAt,
     };
+  },
+
+  // Spec 91 — pasos ya completados de una sesión de campaña, leídos de
+  // SQLite (fuente de verdad local). Usada para no confiar ciegamente en
+  // getNextStep() del backend cuando el bloque recién terminado todavía no
+  // le llegó: ver planNextStepAfterCompletion().
+  async listCompletedStepsForSession(campaignSessionId: string): Promise<CompletedStepLocal[]> {
+    const rows = await db
+      .select({ stepOrder: surveys.stepOrder, instrumentId: surveys.instrumentId })
+      .from(surveys)
+      .where(
+        and(
+          eq(surveys.campaignSessionId, campaignSessionId),
+          inArray(surveys.status, ['completed', 'synced']),
+        ),
+      )
+      .all();
+
+    return rows.map((r) => ({ stepOrder: r.stepOrder, instrumentId: r.instrumentId }));
   },
 
   async listDrafts(): Promise<SurveyDraft[]> {

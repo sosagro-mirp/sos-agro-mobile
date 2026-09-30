@@ -152,11 +152,20 @@ export const syncQueueStorage = {
   },
 
   // Resets any entries stuck in `in_flight` from a previous crashed session.
-  async resetInFlightToRetry(): Promise<void> {
-    await db
-      .update(syncQueue)
-      .set({ status: 'pending' })
-      .where(eq(syncQueue.status, 'in_flight'));
+  // Spec 91 — corrección de auditoría (docs/reports/auditorias/45-…):
+  // `excludeSurveyIds` deja fuera las entradas que un `processSurveyNow()`
+  // interactivo todavía tiene genuinamente en vuelo en esta misma sesión
+  // (más allá del tope de espera del orquestador, que no cancela la
+  // promesa). Sin esto, el `finally` de `processAll()` podía resetear a
+  // `pending` una entrada que otra corrida seguía enviando, y el siguiente
+  // `processAll()` la reenviaba — doble POST con el mismo `clientSurveyId`.
+  async resetInFlightToRetry(excludeSurveyIds: string[] = []): Promise<void> {
+    const condicion =
+      excludeSurveyIds.length > 0
+        ? and(eq(syncQueue.status, 'in_flight'), notInArray(syncQueue.surveyId, excludeSurveyIds))
+        : eq(syncQueue.status, 'in_flight');
+
+    await db.update(syncQueue).set({ status: 'pending' }).where(condicion);
   },
 
   // Spec 81, Fase 3 — variante acotada a un `surveyId`: `processSurveyNow()`
@@ -205,6 +214,34 @@ export const syncQueueStorage = {
       .where(and(eq(syncQueue.surveyId, surveyId), eq(syncQueue.status, 'pending')))
       .get();
     return row ? mapRow(row) : null;
+  },
+
+  // Spec 91 — corrección de auditoría (docs/reports/auditorias/45-…):
+  // reclama la entrada pendiente de forma atómica (leer + `UPDATE … WHERE
+  // status = 'pending'` re-verificando la condición) en vez del
+  // `getPendingBySurveyId()` + `processEntry()` que usaba antes
+  // `processSurveyNow()`. Ese camino anterior tenía una ventana entre leer
+  // y procesar donde un `processAll()` de fondo podía tomar la misma
+  // entrada — el propio bug que corrigió `resetInFlightToRetryBySurveyId()`
+  // condicional, pero que seguía abierto en `getPendingBySurveyId()`.
+  // Devuelve `null` si no había ninguna entrada `pending` o si otra llamada
+  // se la ganó entre la lectura y la escritura.
+  async claimPendingBySurveyId(surveyId: string): Promise<SyncQueueEntry | null> {
+    const row = await db
+      .select()
+      .from(syncQueue)
+      .where(and(eq(syncQueue.surveyId, surveyId), eq(syncQueue.status, 'pending')))
+      .get();
+    if (!row) return null;
+
+    const result = await db
+      .update(syncQueue)
+      .set({ status: 'in_flight', lastAttemptAt: new Date() })
+      .where(and(eq(syncQueue.id, row.id), eq(syncQueue.status, 'pending')));
+
+    if ((result.changes ?? 0) === 0) return null; // alguien más la reclamó primero
+
+    return mapRow({ ...row, status: 'in_flight' });
   },
 
   // Spec 71 — repara una entrada cuyo `campaignSessionId` quedó apuntando a

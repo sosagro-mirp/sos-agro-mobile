@@ -51,6 +51,15 @@ interface CampaignSessionState {
    */
   consentPending: boolean;
 
+  /**
+   * Spec 91 — id (local o real) de la última encuesta de campaña marcada
+   * como completada, pendiente de confirmar en el backend antes de pedir el
+   * siguiente paso. `completed.tsx` lo fija justo antes de volver al
+   * orquestador; la rama en línea de `run()` lo consume con
+   * `processSurveyNow()` y lo limpia. Ver spec/91_bloque_repetido_al_avanzar_en_linea.md.
+   */
+  lastCompletedSurveyId: string | null;
+
   startSession: (campaign: CampaignRender) => void;
   applySessionResponse: (response: CampaignSessionResponse) => void;
   applyNextStep: (nextStep: NextStepResponse) => void;
@@ -75,6 +84,10 @@ interface CampaignSessionState {
   applyLocalFarmer: (draft: LocalFarmerDraft) => void;
   resolveFarmer: (realFarmerId: string) => void;
   setConsentPending: (pending: boolean) => void;
+  /** Spec 91 — registra el último bloque terminado, pendiente de esperar antes de avanzar. */
+  setLastCompletedSurveyId: (surveyId: string) => void;
+  /** Spec 91 — consumido (ya se esperó / se cayó al camino local); nada más que hacer con él. */
+  clearLastCompletedSurveyId: () => void;
 }
 
 const initialState = {
@@ -94,6 +107,7 @@ const initialState = {
   localSessionId: null,
   localFarmerId: null,
   consentPending: false,
+  lastCompletedSurveyId: null,
 };
 
 export const useCampaignSessionStore = create<CampaignSessionState>((set, get) => ({
@@ -203,5 +217,13 @@ export const useCampaignSessionStore = create<CampaignSessionState>((set, get) =
 
   setConsentPending(pending) {
     set({ consentPending: pending });
+  },
+
+  setLastCompletedSurveyId(surveyId) {
+    set({ lastCompletedSurveyId: surveyId });
+  },
+
+  clearLastCompletedSurveyId() {
+    set({ lastCompletedSurveyId: null });
   },
 }));
