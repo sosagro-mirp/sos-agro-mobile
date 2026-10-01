@@ -1,6 +1,6 @@
 import { httpClient, type RequestOptions } from "./httpClient";
 import { endpoints } from "./endpoints";
-import type { MySurveysPage, RemoteSurveyResponseRow, SurveyResponse } from "../types";
+import type { MySurveysPage, RemoteSurveyResponseRow, SurveyResponse, SurveyResponsesBody } from "../types";
 
 export interface CreateSurveyPayload {
   instrumentIds: string[];
@@ -71,5 +71,9 @@ export const getMySurveys = (params: GetMySurveysParams = {}) => {
   );
 };
 
-export const getSurveyResponses = (surveyId: string) =>
-  httpClient.get<RemoteSurveyResponseRow[]>(endpoints.surveyResponses(surveyId));
+// El backend responde `{ surveyId, instrumentName, syncedAt, responses }`, no un
+// arreglo; el hallazgo salió de la ronda manual TC-092-04.
+export const getSurveyResponses = async (surveyId: string): Promise<RemoteSurveyResponseRow[]> => {
+  const body = await httpClient.get<SurveyResponsesBody>(endpoints.surveyResponses(surveyId));
+  return body.responses ?? [];
+};

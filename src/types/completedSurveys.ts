@@ -40,3 +40,11 @@ export interface RemoteSurveyResponseRow {
   optionText: string | null;
   hasAttachment: boolean;
 }
+
+/** Cuerpo de `GET /api/surveys/:id/responses` (el arreglo viene dentro de `responses`). */
+export interface SurveyResponsesBody {
+  surveyId: string;
+  instrumentName: string;
+  syncedAt: string | null;
+  responses: RemoteSurveyResponseRow[];
+}
