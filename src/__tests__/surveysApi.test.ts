@@ -2,12 +2,13 @@
  * Spec 92 — contrato de `getSurveyResponses` con `GET /api/surveys/:id/responses`.
  * El backend devuelve `{ surveyId, instrumentName, syncedAt, responses: [...] }`.
  */
+import { httpClient } from "../api/httpClient";
+import { getSurveyResponses } from "../api/surveys";
+
+// babel-jest eleva este jest.mock por encima de los imports.
 jest.mock("../api/httpClient", () => ({
   httpClient: { get: jest.fn(), post: jest.fn(), patch: jest.fn() },
 }));
-
-import { httpClient } from "../api/httpClient";
-import { getSurveyResponses } from "../api/surveys";
 
 const get = httpClient.get as jest.Mock;
 
