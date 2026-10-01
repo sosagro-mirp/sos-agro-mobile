@@ -399,12 +399,12 @@ describe('listFinished', () => {
   const schema = jest.requireActual('../storage/db/schema');
 
   interface Canned {
-    surveys?: Array<Record<string, unknown>>;
-    responses?: Array<Record<string, unknown>>;
-    pendingSessions?: Array<Record<string, unknown>>;
-    instrumentCache?: Array<Record<string, unknown>>;
-    syncQueue?: Array<Record<string, unknown>>;
-    farmerCache?: Array<Record<string, unknown>>;
+    surveys?: Record<string, unknown>[];
+    responses?: Record<string, unknown>[];
+    pendingSessions?: Record<string, unknown>[];
+    instrumentCache?: Record<string, unknown>[];
+    syncQueue?: Record<string, unknown>[];
+    farmerCache?: Record<string, unknown>[];
   }
 
   // Cada tabla responde con sus filas fijas; las condiciones `where` se

@@ -52,7 +52,16 @@ function formatAnswer(question: InstrumentQuestion, answer: InstrumentDraftAnswe
   if (!answer) return NO_ANSWER_LABEL;
 
   if (typeName === "multiple_choice") {
-    const labels = (answer.optionIds ?? []).map((optionId) => optionLabel(question, optionId, answer.otherText));
+    // El texto de «Otro» pertenece a UNA opción: la primera que no está en el
+    // instrumento. Las demás desconocidas (p. ej. archivadas) no lo heredan.
+    let otherTextAvailable = answer.otherText;
+    const labels = (answer.optionIds ?? []).map((optionId) => {
+      const known = question.options.some((candidate) => candidate.optionId === optionId);
+      if (known) return optionLabel(question, optionId, answer.otherText);
+      const label = optionLabel(question, optionId, otherTextAvailable);
+      otherTextAvailable = undefined;
+      return label;
+    });
     return labels.length > 0 ? labels.join(", ") : NO_ANSWER_LABEL;
   }
 

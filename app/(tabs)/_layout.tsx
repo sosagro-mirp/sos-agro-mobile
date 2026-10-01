@@ -160,7 +160,9 @@ const tabButtonStyles = StyleSheet.create({
 function renderTabLabel(title: string, style: TextStyle) {
   function TabLabel({ color }: { color: string }) {
     return (
-      <AppText style={[style, { color }]} numberOfLines={1}>
+      // Spec 92 (criterio 7): con la letra al 130 % la etiqueta debe caber sin
+      // cortarse. Se encoge la fuente en vez de truncar con «…».
+      <AppText style={[style, { color }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
         {title}
       </AppText>
     );

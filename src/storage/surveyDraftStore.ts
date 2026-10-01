@@ -19,6 +19,16 @@ export interface SurveyDraft {
   updatedAt: Date;
 }
 
+// Un JSON corrupto en UNA fila no debe tumbar toda la lista local de «Realizadas».
+function safeParse<T>(raw: string | null | undefined): T | undefined {
+  if (!raw) return undefined;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return undefined;
+  }
+}
+
 export const surveyDraftStore = {
   async createDraft(params: {
     surveyId: string;
@@ -275,7 +285,7 @@ export const surveyDraftStore = {
       answers[row.questionId] = {
         questionId: row.questionId,
         optionId: row.optionId ?? undefined,
-        optionIds: row.optionIds ? (JSON.parse(row.optionIds) as string[]) : undefined,
+        optionIds: safeParse<string[]>(row.optionIds),
         textValue: row.textValue ?? undefined,
         numericValue: row.numericValue ?? undefined,
         booleanValue: row.booleanValue ?? undefined,
@@ -292,7 +302,10 @@ export const surveyDraftStore = {
       farmers: new Map(farmerRows.map((f) => [f.farmerId, { name: f.name, documentId: f.documentId }])),
       sessionFarmerIds,
       instruments: new Map(
-        instrumentRows.map((i) => [i.id, JSON.parse(i.data) as InstrumentResponse]),
+        instrumentRows.flatMap((i): Array<[string, InstrumentResponse]> => {
+          const parsed = safeParse<InstrumentResponse>(i.data);
+          return parsed ? [[i.id, parsed]] : [];
+        }),
       ),
       failedSurveyIds: new Set(failedRows.map((f) => f.surveyId)),
     });

@@ -495,3 +495,29 @@ describe("preserveOtherText (sincronización conserva el texto de «Otro»)", ()
     expect(preserveOtherText(original, resolved).q3).toEqual({ questionId: "q3", optionId: "o-b" });
   });
 });
+
+describe("buildReadOnlyAnswers — varias opciones desconocidas en una selección múltiple", () => {
+  it("el texto de «Otro» se asigna a una sola opción; la otra desconocida no lo hereda", () => {
+    const sections: InstrumentSection[] = [
+      {
+        sectionId: "s1",
+        name: "Finca",
+        order: 1,
+        questions: [
+          {
+            questionId: "q-market",
+            text: "¿Dónde comercializa?",
+            isRequired: false,
+            order: 1,
+            type: { typeId: "t", name: "multiple_choice" },
+            options: [{ optionId: "o-coop", text: "Cooperativa" }, { optionId: "o-otro", text: "Otro", isOther: true }] as never,
+          },
+        ],
+      },
+    ];
+    const result = buildReadOnlyAnswers(sections, {
+      "q-market": { questionId: "q-market", optionIds: ["o-coop", "o-archivada", "o-nueva"], otherText: "Feria local" },
+    });
+    expect(result[0].rows[0].displayValue).toBe("Cooperativa, Otro: Feria local, Opción no disponible");
+  });
+});

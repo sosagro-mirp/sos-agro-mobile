@@ -33,7 +33,7 @@ interface DetailSection {
 type DetailState =
   | { kind: "loading" }
   | { kind: "ready"; sections: DetailSection[] }
-  | { kind: "unavailable" };
+  | { kind: "unavailable"; reason: "offline" | "error" };
 
 /**
  * Detalle de solo lectura de una encuesta realizada (spec 92, Alcance 5).
@@ -71,8 +71,10 @@ export default function CompletedSurveyDetailScreen() {
         secureStorage.getActiveUserId(),
       ]);
       if (!draft || Object.keys(draft.answers).length === 0) return null;
-      // Misma regla de dueño que la lista: del encuestador activo o sin dueño.
-      if (draft.ownerUserId && activeUserId && draft.ownerUserId !== activeUserId) return null;
+      // Misma regla de dueño que la lista: sin encuestador activo no hay nada que
+      // mostrar; si no, del encuestador activo o sin dueño.
+      if (!activeUserId) return null;
+      if (draft.ownerUserId && draft.ownerUserId !== activeUserId) return null;
       const instrument = await instrumentCacheStorage.get(draft.instrumentId);
       if (!instrument) return null;
       const sections = buildReadOnlyAnswers(instrument.sections, draft.answers).map((s) => ({
@@ -102,6 +104,7 @@ export default function CompletedSurveyDetailScreen() {
 
     (async () => {
       let sections: DetailSection[] | null = null;
+      let remoteFailed = false;
       try {
         sections = await loadLocal();
       } catch {
@@ -112,11 +115,18 @@ export default function CompletedSurveyDetailScreen() {
           sections = await loadRemote();
         } catch {
           sections = null;
+          remoteFailed = true;
         }
       }
       if (!sections && localFallback) sections = localFallback;
       if (cancelled) return;
-      setState(sections ? { kind: "ready", sections } : { kind: "unavailable" });
+      // «Sin conexión» solo si de verdad no se intentó la red; con conexión y un
+      // 404/5xx del servidor el mensaje es otro.
+      setState(
+        sections
+          ? { kind: "ready", sections }
+          : { kind: "unavailable", reason: remoteFailed && isOnline ? "error" : "offline" },
+      );
     })();
 
     return () => {
@@ -163,7 +173,11 @@ export default function CompletedSurveyDetailScreen() {
           <EmptyState
             icon={WifiOff}
             title="Detalle no disponible"
-            description="El detalle de esta encuesta no está disponible sin conexión"
+            description={
+              state.reason === "error"
+                ? "No se pudo cargar el detalle de esta encuesta. Inténtalo de nuevo más tarde."
+                : "El detalle de esta encuesta no está disponible sin conexión"
+            }
           />
         ) : (
           state.sections.map((section) => (

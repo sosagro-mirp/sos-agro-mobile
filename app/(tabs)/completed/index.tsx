@@ -15,6 +15,8 @@ import type { CompletedSurveyListItem } from "../../../src/lib/mergeCompletedSur
 
 const SEARCH_DEBOUNCE_MS = 400;
 
+const ItemSeparator = () => <View style={{ height: 12 }} />;
+
 export default function CompletedSurveysScreen() {
   const router = useRouter();
   const { colors } = useTheme();
@@ -27,7 +29,7 @@ export default function CompletedSurveysScreen() {
     return () => clearTimeout(timer);
   }, [searchInput]);
 
-  const { items, mode, degraded, isLoading, isRefreshing, isLoadingMore, reload, refresh, loadMore } =
+  const { items, mode, degraded, isLoading, isRefreshing, isLoadingMore, reload, refresh, refreshFocus, loadMore } =
     useCompletedSurveys(search);
 
   // El hook ya carga al montar y al cambiar la búsqueda; el foco solo recarga
@@ -39,8 +41,8 @@ export default function CompletedSurveysScreen() {
         firstFocus.current = false;
         return;
       }
-      void reload({ refresh: true });
-    }, [reload]),
+      void refreshFocus();
+    }, [refreshFocus]),
   );
 
   const openDetail = (item: CompletedSurveyListItem) => {
@@ -89,9 +91,16 @@ export default function CompletedSurveysScreen() {
         <View style={styles.notice}>
           <WifiOff size={16} color={colors.warningFg} />
           <AppText style={styles.noticeText}>
-            Sin conexión — mostrando solo las encuestas guardadas en este dispositivo
+            {mode === "local"
+              ? "Sin conexión — mostrando solo las encuestas guardadas en este dispositivo"
+              : "No se pudieron cargar más encuestas — mostrando las ya cargadas"}
           </AppText>
-          <Pressable onPress={() => void reload()} hitSlop={8} accessibilityRole="button">
+          <Pressable
+            onPress={() => void reload()}
+            style={styles.noticeButton}
+            accessibilityRole="button"
+            accessibilityLabel="Reintentar"
+          >
             <AppText style={styles.noticeAction}>Reintentar</AppText>
           </Pressable>
         </View>
@@ -109,7 +118,7 @@ export default function CompletedSurveysScreen() {
           keyExtractor={(item) => item.key}
           renderItem={({ item }) => <CompletedSurveyCard item={item} onPress={() => openDetail(item)} />}
           contentContainerStyle={styles.list}
-          ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
+          ItemSeparatorComponent={ItemSeparator}
           onEndReached={() => void loadMore()}
           onEndReachedThreshold={0.4}
           refreshControl={
@@ -171,9 +180,11 @@ function createStyles(colors: ThemeColors) {
       borderBottomWidth: 1,
       borderBottomColor: colors.warningFg,
       paddingHorizontal: 14,
-      paddingVertical: 9,
+      paddingVertical: 2,
     },
     noticeText: { flex: 1, fontSize: 12, fontFamily: Fonts.medium, color: colors.warningFg },
+    // 48 dp de alto: es la única acción de recuperación del modo local.
+    noticeButton: { minHeight: 48, minWidth: 48, alignItems: "center", justifyContent: "center", paddingHorizontal: 6 },
     noticeAction: {
       fontSize: 11.5,
       fontFamily: Fonts.bold,
