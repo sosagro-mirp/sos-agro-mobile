@@ -7,10 +7,11 @@ import type { ThemeColors } from "../../theme/colors";
 
 export const OfflineBanner: React.FC = () => {
   const reachability = useSyncStatusStore((state) => state.reachability);
+  const authBlocked = useSyncStatusStore((state) => state.authBlocked);
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
-  if (reachability === 'online') {
+  if (reachability === 'online' && !authBlocked) {
     return null;
   }
 
@@ -18,10 +19,14 @@ export const OfflineBanner: React.FC = () => {
   // inalcanzable" (hay red, pero el backend no responde) son mensajes
   // distintos a propósito: el primero manda a buscar señal, el segundo no
   // debería.
+  // Spec 86 (D3): tercer texto — hay red pero la sesión con el servidor está
+  // por renovar; los datos también se guardan localmente.
   const text =
-    reachability === 'server_unreachable'
-      ? 'No pudimos contactar el servidor — los datos se guardarán localmente'
-      : 'Sin conexión — los datos se guardarán localmente';
+    reachability === 'offline'
+      ? 'Sin conexión — los datos se guardarán localmente'
+      : reachability === 'server_unreachable'
+        ? 'No pudimos contactar el servidor — los datos se guardarán localmente'
+        : 'Sesión por renovar — los datos se guardarán localmente';
 
   return (
     <View style={styles.banner}>

@@ -1,6 +1,7 @@
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq, isNull } from 'drizzle-orm';
 import { db } from './db/db';
 import { changeRequests } from './db/schema';
+import { secureStorage } from './secureStorage';
 
 export interface ChangeRequestEntry {
   id: string;
@@ -10,6 +11,8 @@ export interface ChangeRequestEntry {
   resolvedAt?: Date;
   createdAt: Date;
   syncedAt?: Date;
+  // Spec 86 — dueño de la solicitud (userId de quien la creó).
+  ownerUserId?: string;
 }
 
 function mapRow(row: typeof changeRequests.$inferSelect): ChangeRequestEntry {
@@ -21,12 +24,17 @@ function mapRow(row: typeof changeRequests.$inferSelect): ChangeRequestEntry {
     resolvedAt: row.resolvedAt ?? undefined,
     createdAt: row.createdAt,
     syncedAt: row.syncedAt ?? undefined,
+    ownerUserId: row.ownerUserId ?? undefined,
   };
 }
 
 export const changeRequestStorage = {
-  async create(entry: Omit<ChangeRequestEntry, 'status' | 'syncedAt' | 'resolvedAt'>): Promise<void> {
+  async create(
+    entry: Omit<ChangeRequestEntry, 'status' | 'syncedAt' | 'resolvedAt'>,
+  ): Promise<void> {
+    const ownerUserId = entry.ownerUserId ?? (await secureStorage.getActiveUserId()) ?? null;
     await db.insert(changeRequests).values({
+      ownerUserId,
       id: entry.id,
       description: entry.description,
       farmerId: entry.farmerId ?? null,
@@ -37,11 +45,22 @@ export const changeRequestStorage = {
     });
   },
 
-  async listPendingSync(): Promise<ChangeRequestEntry[]> {
+  // Spec 86 — `ownerUserId` undefined = sin filtro; `null` = solo sin dueño.
+  async listPendingSync(ownerUserId?: string | null): Promise<ChangeRequestEntry[]> {
+    const ownerFilter =
+      ownerUserId === undefined
+        ? undefined
+        : ownerUserId === null
+          ? isNull(changeRequests.ownerUserId)
+          : eq(changeRequests.ownerUserId, ownerUserId);
     const rows = await db
       .select()
       .from(changeRequests)
-      .where(eq(changeRequests.status, 'pending_sync'))
+      .where(
+        ownerFilter
+          ? and(eq(changeRequests.status, 'pending_sync'), ownerFilter)
+          : eq(changeRequests.status, 'pending_sync'),
+      )
       .all();
     return rows.map(mapRow);
   },

@@ -115,7 +115,8 @@ describe('Criterio 1 — la librería está instalada y la configuración deja d
     // que `version` pasa a ser un campo peligroso — subirlo corta el canal OTA
     // en silencio para todo binario ya instalado. Este caso es su guardarraíl.
     expect(buildConfig().runtimeVersion).toEqual({ policy: 'appVersion' });
-    expect(buildConfig().version).toBe('1.0.0');
+    // 2026-09-23: subida a 1.0.1 con el build nativo del spec 86 (PBKDF2 nativo), autorizada por el usuario.
+    expect(buildConfig().version).toBe('1.0.1');
   });
 
   it('registra el mock de `expo-updates` en la configuración de jest', () => {

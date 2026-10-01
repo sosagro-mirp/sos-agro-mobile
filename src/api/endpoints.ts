@@ -8,6 +8,8 @@ export const endpoints = {
   // Surveys
   surveys: "/api/surveys",
   surveySync: (id: string) => `/api/surveys/${id}/sync`,
+  surveysMine: "/api/surveys/mine",
+  surveyResponses: (id: string) => `/api/surveys/${id}/responses`,
 
   // Responses
   responses: "/api/responses",

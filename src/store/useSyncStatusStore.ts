@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { syncQueueStorage } from '../storage/syncQueue';
+import { secureStorage } from '../storage/secureStorage';
 import { mediaUploadQueueStorage } from '../storage/mediaUploadQueueStorage';
 
 /**
@@ -30,6 +31,14 @@ interface SyncStatusState {
    */
   isOnline: boolean;
   reachability: Reachability;
+  /**
+   * Spec 86 (D3): el usuario activo tiene la sesión con el servidor por
+   * renovar (token vencido). Mientras sea `true`, `isOnline` es `false` para
+   * que todas las pantallas que deciden entre camino en línea y sin conexión
+   * tomen solas el camino sin conexión, sin pantallas de error "Unauthorized".
+   * `reachability` NO cambia: sigue reflejando la red real.
+   */
+  authBlocked: boolean;
   pendingCount: number;
   pendingMediaCount: number;
   lastSyncAt: Date | null;
@@ -38,6 +47,7 @@ interface SyncStatusState {
 
   setOnline: (online: boolean) => void;
   setReachability: (reachability: Reachability) => void;
+  setAuthBlocked: (blocked: boolean) => void;
   refreshPendingCount: () => Promise<void>;
   refreshPendingMediaCount: () => Promise<void>;
   setSyncingId: (id: string | null) => void;
@@ -45,9 +55,10 @@ interface SyncStatusState {
   markSyncCompleted: () => void;
 }
 
-export const useSyncStatusStore = create<SyncStatusState>((set) => ({
+export const useSyncStatusStore = create<SyncStatusState>((set, get) => ({
   isOnline: true,
   reachability: 'online',
+  authBlocked: false,
   pendingCount: 0,
   pendingMediaCount: 0,
   lastSyncAt: null,
@@ -59,15 +70,25 @@ export const useSyncStatusStore = create<SyncStatusState>((set) => ({
   // de NetInfo a los dos extremos de `reachability`. `setReachability()` es
   // la única vía para publicar `'server_unreachable'`.
   setOnline(online) {
-    set({ isOnline: online, reachability: online ? 'online' : 'offline' });
+    set({
+      isOnline: online && !get().authBlocked,
+      reachability: online ? 'online' : 'offline',
+    });
   },
 
   setReachability(reachability) {
-    set({ reachability, isOnline: reachability !== 'offline' });
+    set({ reachability, isOnline: reachability !== 'offline' && !get().authBlocked });
+  },
+
+  setAuthBlocked(blocked) {
+    set({ authBlocked: blocked, isOnline: get().reachability !== 'offline' && !blocked });
   },
 
   async refreshPendingCount() {
-    const count = await syncQueueStorage.countPending();
+    // Spec 86: el contador del header es del encuestador activo (más los
+    // registros sin dueño), no el global de la tablet.
+    const activeUserId = (await secureStorage.getActiveUserId().catch(() => null)) ?? undefined;
+    const count = await syncQueueStorage.countPending(activeUserId);
     set({ pendingCount: count });
   },
 

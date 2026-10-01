@@ -1,7 +1,9 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { mediaUploadQueueStorage } from '../storage/mediaUploadQueueStorage';
 import { surveyDraftStore } from '../storage/surveyDraftStore';
-import { httpClient, NetworkError } from '../api/httpClient';
+import { secureStorage } from '../storage/secureStorage';
+import { httpClient, NetworkError, type RequestOptions } from '../api/httpClient';
+import { resolveSyncErrorAction } from '../lib/syncErrorAction';
 import { endpoints } from '../api/endpoints';
 import { createResponse } from '../api/responses';
 import { logger } from '../lib/logger';
@@ -41,6 +43,8 @@ class MediaUploadServiceClass {
   async processPendingForSurvey(
     localSurveyId: string,
     realSurveyId: string,
+    // Spec 86 (D6) — token del dueño de la encuesta (tablet compartida).
+    opts?: RequestOptions,
   ): Promise<Record<string, string>> {
     const { setUploadingMediaId, refreshPendingMediaCount } = useSyncStatusStore.getState();
 
@@ -67,10 +71,19 @@ class MediaUploadServiceClass {
       await refreshPendingMediaCount();
 
       try {
-        await this.uploadEntry(entry, realSurveyId);
+        await this.uploadEntry(entry, realSurveyId, opts);
       } catch (error) {
         if (error instanceof NetworkError) {
           // Propagate so SyncQueueService can retry the whole survey entry
+          setUploadingMediaId(null);
+          throw error;
+        }
+        // Spec 86 (CA-7): un 401 (sesión por renovar) o un 429 no es un fallo
+        // del adjunto: vuelve a pendiente y se propaga para que la cola de
+        // sincronización deje la encuesta pendiente, sin marcar nada `failed`.
+        const action = resolveSyncErrorAction(error);
+        if (action === 'retry_auth' || action === 'retry_transient') {
+          await mediaUploadQueueStorage.resetInFlightToRetry();
           setUploadingMediaId(null);
           throw error;
         }
@@ -99,6 +112,7 @@ class MediaUploadServiceClass {
   private async uploadEntry(
     entry: { id: string; surveyId: string; questionId: string; localPath: string; mimeType: string; fileSizeBytes: number | null },
     realSurveyId: string,
+    opts?: RequestOptions,
   ): Promise<void> {
     await mediaUploadQueueStorage.markInFlight(entry.id);
 
@@ -129,6 +143,7 @@ class MediaUploadServiceClass {
         fileSizeBytes,
         originalFilename: entry.localPath.split('/').pop() ?? 'file',
       },
+      ...(opts ? [opts] : []),
     );
 
     // Upload directly to R2 via presigned URL
@@ -145,6 +160,7 @@ class MediaUploadServiceClass {
     // Confirm upload with backend
     await httpClient.patch<ConfirmUploadResponse>(
       endpoints.mediaAttachmentsConfirm(attachmentId),
+      ...(opts ? [undefined, opts] as const : []),
     );
 
     await mediaUploadQueueStorage.markUploaded(entry.id, attachmentId);
@@ -174,8 +190,14 @@ class MediaUploadServiceClass {
       );
     }
 
+    // M4 (auditoría 44): el reintento manual también sale con el token del
+    // DUEÑO de la encuesta, no con el del encuestador que esté al frente.
+    const owner = await surveyDraftStore.getOwnerUserId(localSurveyId);
+    const ownerToken = owner ? await secureStorage.getTokenFor(owner) : null;
+    const opts: RequestOptions | undefined = ownerToken ? { authToken: ownerToken } : undefined;
+
     await mediaUploadQueueStorage.resetToRetry(entryId);
-    const attachmentIds = await this.processPendingForSurvey(localSurveyId, realSurveyId);
+    const attachmentIds = await this.processPendingForSurvey(localSurveyId, realSurveyId, opts);
 
     const attachmentId = attachmentIds[questionId];
     if (!attachmentId) {
@@ -189,7 +211,10 @@ class MediaUploadServiceClass {
     // of the "failed" list the sync UI surfaces, so there's no retry
     // affordance left for the still-unlinked attachment. Narrow window;
     // recoverable today only via `GET /surveys/:id/media-attachments`.
-    await createResponse({ surveyId: realSurveyId, questionId, attachmentId });
+    await createResponse(
+      { surveyId: realSurveyId, questionId, attachmentId },
+      ...(opts ? [opts] : []),
+    );
   }
 }
 

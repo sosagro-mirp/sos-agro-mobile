@@ -1,5 +1,11 @@
 import { secureStorage } from "../storage/secureStorage";
 import { useSyncStatusStore } from "../store/useSyncStatusStore";
+import { authEvents } from "../lib/authEvents";
+import { classifyAuthFailure } from "../lib/authFailure";
+import { AuthRequiredError, NetworkError, ServerError } from "./httpErrors";
+
+// Reexportadas: los imports existentes de `httpClient` no cambian (spec 86).
+export { NetworkError, ServerError, AuthRequiredError } from "./httpErrors";
 
 // Exportado para `src/api/health.ts` (spec 81, Fase 4): el sondeo de
 // disponibilidad usa su propio fetch, sin pasar por `request()`, así que
@@ -8,34 +14,41 @@ export const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL ?? "http://loca
 const TIMEOUT_MS = 15_000;
 const MAX_RETRIES = 3;
 
-export class NetworkError extends Error {
-  constructor(message = "Sin conexión a internet") {
-    super(message);
-    this.name = "NetworkError";
-  }
+/**
+ * Spec 86 (D6): `authToken` fuerza el token de un dueño concreto (sync de una
+ * tablet compartida). Sin él se usa el token del usuario activo.
+ */
+export interface RequestOptions {
+  authToken?: string;
 }
 
-export class ServerError extends Error {
-  constructor(
-    public readonly status: number,
-    message: string,
-    // Cuerpo parseado de la respuesta 4xx, cuando lo hay — spec 68: el 409 de
-    // colisión de documentId necesita llegar con su payload estructurado
-    // ({ documentId, submittedName, existingFarmer }), no solo el mensaje.
-    public readonly body?: unknown,
-  ) {
-    super(message);
-    this.name = "ServerError";
-  }
-}
+// El login nunca debe llevar `Authorization`: un token viejo haría que un 401
+// por credenciales incorrectas se confundiera con una sesión por renovar.
+const isLoginPath = (path: string) => path.startsWith("/api/auth/login");
 
-async function buildHeaders(extra?: HeadersInit): Promise<HeadersInit> {
-  const token = await secureStorage.getToken();
+async function buildHeaders(
+  path: string,
+  extra?: HeadersInit,
+  opts?: RequestOptions,
+): Promise<{ headers: HeadersInit; token: string | null }> {
+  const token = isLoginPath(path)
+    ? null
+    : (opts?.authToken ?? (await secureStorage.getToken()));
   return {
-    "Content-Type": "application/json",
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...extra,
+    token,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...extra,
+    },
   };
+}
+
+function readServerDateMs(res: Response): number | null {
+  const raw = res.headers?.get?.("date");
+  if (!raw) return null;
+  const parsed = Date.parse(raw);
+  return Number.isNaN(parsed) ? null : parsed;
 }
 
 function fetchWithTimeout(url: string, options: RequestInit): Promise<Response> {
@@ -65,9 +78,10 @@ async function request<T>(
   path: string,
   body?: unknown,
   extraHeaders?: HeadersInit,
+  opts?: RequestOptions,
 ): Promise<T> {
   const url = `${API_BASE_URL}${path}`;
-  const headers = await buildHeaders(extraHeaders);
+  const { headers, token } = await buildHeaders(path, extraHeaders, opts);
   const options: RequestInit = {
     method,
     headers,
@@ -106,6 +120,17 @@ async function request<T>(
     if (res.status >= 400 && res.status < 500) {
       const body = await res.json().catch(() => ({})) as Record<string, unknown>;
       const message = (body?.message as string) ?? `Error ${res.status}`;
+
+      // Spec 86: un 401 con token no es "validación fallida" sino sesión por
+      // renovar o rechazada. Se clasifica con la hora del servidor y se avisa
+      // por `authEvents` (useAuthStore se suscribe).
+      if (res.status === 401 && token) {
+        const serverDateMs = readServerDateMs(res);
+        const kind = classifyAuthFailure(token, serverDateMs);
+        authEvents.emit({ kind, token, serverDateMs });
+        throw new AuthRequiredError({ kind, token, serverDateMs }, message, body);
+      }
+
       throw new ServerError(res.status, message, body);
     }
 
@@ -117,8 +142,12 @@ async function request<T>(
 }
 
 export const httpClient = {
-  get: <T>(path: string) => request<T>("GET", path),
-  post: <T>(path: string, body?: unknown) => request<T>("POST", path, body),
-  patch: <T>(path: string, body?: unknown) => request<T>("PATCH", path, body),
-  delete: <T>(path: string) => request<T>("DELETE", path),
+  get: <T>(path: string, opts?: RequestOptions) =>
+    request<T>("GET", path, undefined, undefined, opts),
+  post: <T>(path: string, body?: unknown, opts?: RequestOptions) =>
+    request<T>("POST", path, body, undefined, opts),
+  patch: <T>(path: string, body?: unknown, opts?: RequestOptions) =>
+    request<T>("PATCH", path, body, undefined, opts),
+  delete: <T>(path: string, opts?: RequestOptions) =>
+    request<T>("DELETE", path, undefined, undefined, opts),
 };

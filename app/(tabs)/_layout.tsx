@@ -1,8 +1,7 @@
 import { Tabs, useRouter } from "expo-router";
 import {
+  ClipboardCheck,
   Clock,
-  LandPlot,
-  LogOut,
   Map,
   FileText,
   MessageSquare,
@@ -19,6 +18,8 @@ import type { ThemeColors } from "../../src/theme/colors";
 import type { EffectiveTheme } from "../../src/theme/resolveTheme";
 import { AppText } from "../../src/components/common/AppText";
 import { ThemeToggle } from "../../src/components/common/ThemeToggle";
+import { AccountButton } from "../../src/components/common/AccountButton";
+import { ReauthBanner } from "../../src/components/auth/ReauthBanner";
 import { resolveTabBarStyle, TAB_BAR_PADDING_TOP } from "../../src/lib/resolveTabBarStyle";
 import { useEffect, useMemo, useRef } from "react";
 
@@ -31,8 +32,10 @@ import { useEffect, useMemo, useRef } from "react";
 const HEADER_COMPACT_BREAKPOINT = 360;
 
 function TabsHeader() {
-  const { user, logout } = useAuthStore();
-  const { isOnline, pendingCount } = useSyncStatusStore();
+  const { user } = useAuthStore();
+  const { isOnline, pendingCount, authBlocked, reachability } = useSyncStatusStore();
+  // Spec 86 (D3): hay red pero la sesión con el servidor está por renovar.
+  const sessionToRenew = authBlocked && reachability !== "offline";
   const { colors, effectiveTheme } = useTheme();
   const { width } = useWindowDimensions();
   const isCompact = width < HEADER_COMPACT_BREAKPOINT;
@@ -74,23 +77,18 @@ function TabsHeader() {
           >
             <View style={[styles.dot, isOnline ? styles.dotOnline : styles.dotOffline]} />
             <AppText style={[styles.statusText, !isOnline && styles.statusTextOffline]}>
-              {isOnline ? "En línea" : "Sin conexión"}
+              {sessionToRenew ? "Sesión por renovar" : isOnline ? "En línea" : "Sin conexión"}
             </AppText>
           </View>
           <View style={styles.themeToggleWrapper}>
             <ThemeToggle size={16} color={colors.headerFg} />
           </View>
-          <Pressable
-            onPress={logout}
-            style={[styles.logoutBtn, isCompact && styles.logoutBtnCompact]}
-            accessibilityRole="button"
-            accessibilityLabel="Cerrar sesión"
-          >
-            <LogOut size={15} color={colors.headerFg} />
-            {isCompact ? null : <AppText style={styles.logoutText}>Salir</AppText>}
-          </Pressable>
+          {/* Spec 86 (CA-20): el botón "Salir" salió del header; la cuenta (cambiar
+              de encuestador, olvidar la tablet) vive en `app/account.tsx`. */}
+          <AccountButton />
         </View>
       </View>
+      <ReauthBanner />
       {pendingCount > 0 ? (
         <View style={styles.pendingBanner}>
           <Clock size={15} color={colors.warningFg} />
@@ -162,7 +160,9 @@ const tabButtonStyles = StyleSheet.create({
 function renderTabLabel(title: string, style: TextStyle) {
   function TabLabel({ color }: { color: string }) {
     return (
-      <AppText style={[style, { color }]} numberOfLines={1}>
+      // Spec 92 (criterio 7): con la letra al 130 % la etiqueta debe caber sin
+      // cortarse. Se encoge la fuente en vez de truncar con «…».
+      <AppText style={[style, { color }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
         {title}
       </AppText>
     );
@@ -248,13 +248,16 @@ export default function TabsLayout() {
             ),
           }}
         />
+        {/* Spec 92: «Realizadas» ocupa el lugar de «Lotes». La ruta de Lotes
+            sigue existiendo (href: null) para no borrar su código. */}
+        <Tabs.Screen name="plots/index" options={{ href: null }} />
         <Tabs.Screen
-          name="plots/index"
+          name="completed/index"
           options={{
-            title: "Lotes",
-            tabBarLabel: renderTabLabel("Lotes", styles.tabLabel),
+            title: "Realizadas",
+            tabBarLabel: renderTabLabel("Realizadas", styles.tabLabel),
             tabBarIcon: ({ color, size }) => (
-              <LandPlot size={size} color={color} />
+              <ClipboardCheck size={size} color={color} />
             ),
           }}
         />
@@ -372,29 +375,6 @@ function createStyles(colors: ThemeColors, effectiveTheme: EffectiveTheme) {
       borderColor: overlayBorder,
       alignItems: "center",
       justifyContent: "center",
-    },
-    logoutBtn: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 6,
-      height: 36,
-      paddingHorizontal: 11,
-      borderRadius: 9,
-      borderWidth: 1,
-      borderColor: overlayBorder,
-    },
-    // Solo-ícono en pantallas angostas (< HEADER_COMPACT_BREAKPOINT): sin
-    // texto no hace falta el padding horizontal amplio, así queda cuadrado
-    // como themeToggleWrapper en vez de un rectángulo con espacio vacío.
-    logoutBtnCompact: {
-      width: 36,
-      paddingHorizontal: 0,
-      justifyContent: "center",
-    },
-    logoutText: {
-      fontSize: 12,
-      fontFamily: Fonts.semiBold,
-      color: colors.headerFg,
     },
     pendingBanner: {
       flexDirection: "row",

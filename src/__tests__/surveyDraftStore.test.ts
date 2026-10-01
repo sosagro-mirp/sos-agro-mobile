@@ -435,3 +435,213 @@ describe('listDrafts', () => {
     expect(drafts).toEqual([]);
   });
 });
+
+// ─── listFinished (spec 92, Fase 3b) ──────────────────────────────────────────
+
+describe('listFinished', () => {
+  const schema = jest.requireActual('../storage/db/schema');
+
+  interface Canned {
+    surveys?: Record<string, unknown>[];
+    responses?: Record<string, unknown>[];
+    pendingSessions?: Record<string, unknown>[];
+    instrumentCache?: Record<string, unknown>[];
+    syncQueue?: Record<string, unknown>[];
+    farmerCache?: Record<string, unknown>[];
+  }
+
+  // Cada tabla responde con sus filas fijas; las condiciones `where` se
+  // ignoran (el filtro por dueño y el ensamblado se prueban en JS).
+  const cannedDb = (canned: Canned) => {
+    const reads: string[] = [];
+    const tables = new Map<unknown, keyof Canned>([
+      [schema.surveys, 'surveys'],
+      [schema.responses, 'responses'],
+      [schema.pendingSessions, 'pendingSessions'],
+      [schema.instrumentCache, 'instrumentCache'],
+      [schema.syncQueue, 'syncQueue'],
+      [schema.farmerCache, 'farmerCache'],
+    ]);
+    mockDb.select.mockImplementation(() => {
+      let name: keyof Canned = 'surveys';
+      const chain = {
+        from: (table: unknown) => {
+          name = tables.get(table) as keyof Canned;
+          reads.push(name);
+          return chain;
+        },
+        where: () => chain,
+        all: () => Promise.resolve(canned[name] ?? []),
+      };
+      return chain;
+    });
+    return reads;
+  };
+
+  const survey = (over: Record<string, unknown>) => ({
+    id: 'sv',
+    instrumentId: 'inst-1',
+    campaignSessionId: null,
+    farmerId: null,
+    status: 'completed',
+    backendSurveyId: null,
+    ownerUserId: 'user-1',
+    createdAt: new Date('2026-09-20T10:00:00.000Z'),
+    updatedAt: new Date('2026-09-20T10:00:00.000Z'),
+    ...over,
+  });
+  const resp = (surveyId: string, questionId: string, over: Record<string, unknown> = {}) => ({
+    id: `${surveyId}:${questionId}`,
+    surveyId,
+    questionId,
+    optionId: null,
+    optionIds: null,
+    textValue: 'x',
+    numericValue: null,
+    booleanValue: null,
+    otherText: null,
+    mediaLocalPath: null,
+    mimeType: null,
+    ...over,
+  });
+  const question = (questionId: string, order: number, over: Record<string, unknown> = {}) => ({
+    questionId,
+    text: questionId,
+    isRequired: false,
+    order,
+    type: { name: 'open_text' },
+    options: [],
+    ...over,
+  });
+  const instrumentRow = (sections: unknown[]) => ({
+    id: 'inst-1',
+    data: JSON.stringify({ instrumentId: 'inst-1', name: 'Bloque 1', sections }),
+    cachedAt: new Date(),
+  });
+
+  it('devuelve las del dueño y las sin dueño, y descarta las de otros', async () => {
+    cannedDb({
+      surveys: [
+        survey({ id: 'mine', ownerUserId: 'user-1' }),
+        survey({ id: 'legacy', ownerUserId: null }),
+        survey({ id: 'theirs', ownerUserId: 'user-2' }),
+      ],
+      responses: [resp('mine', 'q1'), resp('legacy', 'q1'), resp('theirs', 'q1')],
+    });
+
+    const items = await surveyDraftStore.listFinished('user-1');
+
+    expect(items.map((i) => i.clientSurveyId).sort()).toEqual(['legacy', 'mine']);
+  });
+
+  it('excluye las encuestas sin respuestas', async () => {
+    cannedDb({
+      surveys: [survey({ id: 'answered' }), survey({ id: 'skipped' })],
+      responses: [resp('answered', 'q1')],
+    });
+
+    const items = await surveyDraftStore.listFinished('user-1');
+
+    expect(items.map((i) => i.clientSurveyId)).toEqual(['answered']);
+  });
+
+  it('resuelve el productor por la encuesta y, si falta, por la sesión', async () => {
+    cannedDb({
+      surveys: [
+        survey({ id: 'direct', farmerId: 'f-1' }),
+        survey({ id: 'viaSession', campaignSessionId: 'local-sess' }),
+        survey({ id: 'unknown' }),
+      ],
+      responses: [resp('direct', 'q1'), resp('viaSession', 'q1'), resp('unknown', 'q1')],
+      pendingSessions: [{ localSessionId: 'local-sess', realSessionId: null, farmerId: 'f-2' }],
+      farmerCache: [
+        { farmerId: 'f-1', name: 'Ana Pérez', documentId: '1001' },
+        { farmerId: 'f-2', name: 'Luis Gómez', documentId: null },
+      ],
+    });
+
+    const byId = Object.fromEntries(
+      (await surveyDraftStore.listFinished('user-1')).map((i) => [i.clientSurveyId, i]),
+    );
+
+    expect(byId.direct).toMatchObject({ farmerName: 'Ana Pérez', farmerDocumentId: '1001' });
+    expect(byId.viaSession).toMatchObject({ farmerName: 'Luis Gómez', farmerDocumentId: null });
+    expect(byId.unknown).toMatchObject({ farmerName: null, farmerDocumentId: null });
+  });
+
+  it('deja el instrumento en null cuando salió de la caché', async () => {
+    cannedDb({ surveys: [survey({ id: 'a' })], responses: [resp('a', 'q1'), resp('a', 'q2')] });
+
+    const [item] = await surveyDraftStore.listFinished('user-1');
+
+    expect(item.instrumentName).toBeNull();
+    expect(item.responseCount).toBe(2);
+  });
+
+  it('cuenta solo las preguntas visibles con valor del instrumento en caché', async () => {
+    cannedDb({
+      surveys: [survey({ id: 'a' })],
+      responses: [
+        resp('a', 'q-gate', { textValue: null, booleanValue: false }),
+        resp('a', 'q-hidden'),
+        resp('a', 'q-empty', { textValue: '   ' }),
+        resp('a', 'q-shown'),
+      ],
+      instrumentCache: [
+        instrumentRow([
+          {
+            sectionId: 's1',
+            name: 'S1',
+            order: 1,
+            questions: [
+              question('q-gate', 1, { type: { name: 'yes_no' } }),
+              question('q-hidden', 2, { conditionQuestionId: 'q-gate', conditionValue: 'true' }),
+              question('q-empty', 3),
+              question('q-shown', 4, { conditionQuestionId: 'q-gate', conditionValue: 'false' }),
+            ],
+          },
+        ]),
+      ],
+    });
+
+    const [item] = await surveyDraftStore.listFinished('user-1');
+
+    expect(item.instrumentName).toBe('Bloque 1');
+    expect(item.responseCount).toBe(2); // q-gate y q-shown
+  });
+
+  it('marca syncFailed solo si la cola tiene la encuesta en failed_validation', async () => {
+    cannedDb({
+      surveys: [survey({ id: 'bad' }), survey({ id: 'ok', status: 'synced', backendSurveyId: 'srv-9' })],
+      responses: [resp('bad', 'q1'), resp('ok', 'q1')],
+      syncQueue: [{ surveyId: 'bad', status: 'failed_validation' }],
+    });
+
+    const byId = Object.fromEntries(
+      (await surveyDraftStore.listFinished('user-1')).map((i) => [i.clientSurveyId, i]),
+    );
+
+    expect(byId.bad).toMatchObject({ syncFailed: true, status: 'completed' });
+    expect(byId.ok).toMatchObject({ syncFailed: false, status: 'synced', backendSurveyId: 'srv-9' });
+    expect(byId.ok.createdAt).toBe('2026-09-20T10:00:00.000Z');
+  });
+
+  it('no hace lecturas por encuesta: el número de consultas es fijo', async () => {
+    const many = Array.from({ length: 25 }, (_, i) => survey({ id: `s${i}`, farmerId: `f${i}` }));
+    const reads = cannedDb({
+      surveys: many,
+      responses: many.map((s) => resp(s.id as string, 'q1')),
+    });
+
+    await surveyDraftStore.listFinished('user-1');
+
+    expect(reads.length).toBeLessThanOrEqual(6);
+  });
+
+  it('devuelve [] sin tocar otras tablas cuando no hay encuestas terminadas', async () => {
+    const reads = cannedDb({});
+
+    expect(await surveyDraftStore.listFinished('user-1')).toEqual([]);
+    expect(reads).toEqual(['surveys']);
+  });
+});

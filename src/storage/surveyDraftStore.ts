@@ -1,7 +1,11 @@
-import { and, eq, lt } from 'drizzle-orm';
+import { and, eq, inArray, lt, isNull, or } from 'drizzle-orm';
 import { db } from './db/db';
-import { surveys, responses } from './db/schema';
-import type { InstrumentDraftAnswer } from '../types';
+import { surveys, responses, farmerCache, pendingSessions, instrumentCache, syncQueue } from './db/schema';
+import type { InstrumentDraftAnswer, InstrumentResponse } from '../types';
+import { buildLocalFinishedSurveys } from '../lib/buildLocalFinishedSurveys';
+import type { LocalFinishedSurvey } from '../lib/mergeCompletedSurveys';
+import type { CompletedStepLocal } from '../lib/planNextStepAfterCompletion';
+import { secureStorage } from './secureStorage';
 
 export interface SurveyDraft {
   surveyId: string;
@@ -9,8 +13,20 @@ export interface SurveyDraft {
   campaignSessionId?: string;
   farmerId?: string;
   stepOrder?: number;
+  // Spec 86 — dueño del borrador (userId de quien lo creó).
+  ownerUserId?: string;
   answers: Record<string, InstrumentDraftAnswer>;
   updatedAt: Date;
+}
+
+// Un JSON corrupto en UNA fila no debe tumbar toda la lista local de «Realizadas».
+function safeParse<T>(raw: string | null | undefined): T | undefined {
+  if (!raw) return undefined;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return undefined;
+  }
 }
 
 export const surveyDraftStore = {
@@ -20,9 +36,13 @@ export const surveyDraftStore = {
     campaignSessionId?: string;
     farmerId?: string;
     stepOrder?: number;
+    ownerUserId?: string;
   }): Promise<void> {
     const now = new Date();
+    // Spec 86 — por defecto el usuario activo al crear el borrador.
+    const ownerUserId = params.ownerUserId ?? (await secureStorage.getActiveUserId()) ?? null;
     await db.insert(surveys).values({
+      ownerUserId,
       id: params.surveyId,
       instrumentId: params.instrumentId,
       campaignSessionId: params.campaignSessionId ?? null,
@@ -163,19 +183,152 @@ export const surveyDraftStore = {
       campaignSessionId: survey.campaignSessionId ?? undefined,
       farmerId: survey.farmerId ?? undefined,
       stepOrder: survey.stepOrder ?? undefined,
+      ownerUserId: survey.ownerUserId ?? undefined,
       answers,
       updatedAt: survey.updatedAt,
     };
   },
 
-  async listDrafts(): Promise<SurveyDraft[]> {
+  // Spec 91 — pasos ya completados de una sesión de campaña, leídos de
+  // SQLite (fuente de verdad local). Usada para no confiar ciegamente en
+  // getNextStep() del backend cuando el bloque recién terminado todavía no
+  // le llegó: ver planNextStepAfterCompletion().
+  async listCompletedStepsForSession(campaignSessionId: string): Promise<CompletedStepLocal[]> {
+    const rows = await db
+      .select({ stepOrder: surveys.stepOrder, instrumentId: surveys.instrumentId })
+      .from(surveys)
+      .where(
+        and(
+          eq(surveys.campaignSessionId, campaignSessionId),
+          inArray(surveys.status, ['completed', 'synced']),
+        ),
+      )
+      .all();
+
+    return rows.map((r) => ({ stepOrder: r.stepOrder, instrumentId: r.instrumentId }));
+  },
+
+  /**
+   * Spec 86 — sin argumento lista todos los borradores. Con `ownerUserId`, solo
+   * los de ese encuestador más los que no tienen dueño (anteriores a m0013).
+   */
+  async listDrafts(ownerUserId?: string): Promise<SurveyDraft[]> {
     const rows = await db
       .select()
       .from(surveys)
-      .where(eq(surveys.status, 'draft'))
+      .where(
+        ownerUserId === undefined
+          ? eq(surveys.status, 'draft')
+          : and(
+              eq(surveys.status, 'draft'),
+              or(eq(surveys.ownerUserId, ownerUserId), isNull(surveys.ownerUserId)),
+            ),
+      )
       .all();
 
     return Promise.all(rows.map((r) => this.loadDraft(r.id) as Promise<SurveyDraft>));
+  },
+
+  /**
+   * Spec 92 (Fase 3b) — encuestas locales `completed`/`synced` del encuestador
+   * para la pestaña «Realizadas». Regla de dueño «del usuario o sin dueño»
+   * (spec 86); excluye las que no tienen respuestas. Hace un número fijo de
+   * lecturas (6), una por tabla, sin importar cuántas encuestas haya.
+   */
+  async listFinished(ownerUserId: string): Promise<LocalFinishedSurvey[]> {
+    const surveyRows = (
+      await db.select().from(surveys).where(inArray(surveys.status, ['completed', 'synced'])).all()
+    ).filter((r) => r.ownerUserId === null || r.ownerUserId === ownerUserId);
+    if (surveyRows.length === 0) return [];
+
+    const surveyIds = surveyRows.map((r) => r.id);
+    const sessionIds = [...new Set(surveyRows.map((r) => r.campaignSessionId).filter((v): v is string => !!v))];
+    const instrumentIds = [...new Set(surveyRows.map((r) => r.instrumentId))];
+
+    const [responseRows, sessionRows, instrumentRows, failedRows] = await Promise.all([
+      db.select().from(responses).where(inArray(responses.surveyId, surveyIds)).all(),
+      sessionIds.length === 0
+        ? Promise.resolve([])
+        : db
+            .select()
+            .from(pendingSessions)
+            .where(or(inArray(pendingSessions.localSessionId, sessionIds), inArray(pendingSessions.realSessionId, sessionIds)))
+            .all(),
+      db.select().from(instrumentCache).where(inArray(instrumentCache.id, instrumentIds)).all(),
+      db
+        .select()
+        .from(syncQueue)
+        .where(and(inArray(syncQueue.surveyId, surveyIds), eq(syncQueue.status, 'failed_validation')))
+        .all(),
+    ]);
+
+    const sessionFarmerIds = new Map<string, string | null>();
+    for (const s of sessionRows) {
+      sessionFarmerIds.set(s.localSessionId, s.farmerId);
+      if (s.realSessionId) sessionFarmerIds.set(s.realSessionId, s.farmerId);
+    }
+
+    const farmerIds = [
+      ...new Set([
+        ...surveyRows.map((r) => r.farmerId),
+        ...sessionFarmerIds.values(),
+      ].filter((v): v is string => !!v)),
+    ];
+    const farmerRows =
+      farmerIds.length === 0
+        ? []
+        : await db.select().from(farmerCache).where(inArray(farmerCache.farmerId, farmerIds)).all();
+
+    const answersBySurvey = new Map<string, Record<string, InstrumentDraftAnswer>>();
+    for (const row of responseRows) {
+      const answers = answersBySurvey.get(row.surveyId) ?? {};
+      answers[row.questionId] = {
+        questionId: row.questionId,
+        optionId: row.optionId ?? undefined,
+        optionIds: safeParse<string[]>(row.optionIds),
+        textValue: row.textValue ?? undefined,
+        numericValue: row.numericValue ?? undefined,
+        booleanValue: row.booleanValue ?? undefined,
+        otherText: row.otherText ?? undefined,
+        mediaLocalPath: row.mediaLocalPath ?? undefined,
+        mimeType: row.mimeType ?? undefined,
+      };
+      answersBySurvey.set(row.surveyId, answers);
+    }
+
+    return buildLocalFinishedSurveys(ownerUserId, {
+      surveys: surveyRows,
+      answersBySurvey,
+      farmers: new Map(farmerRows.map((f) => [f.farmerId, { name: f.name, documentId: f.documentId }])),
+      sessionFarmerIds,
+      instruments: new Map(
+        instrumentRows.flatMap((i): Array<[string, InstrumentResponse]> => {
+          const parsed = safeParse<InstrumentResponse>(i.data);
+          return parsed ? [[i.id, parsed]] : [];
+        }),
+      ),
+      failedSurveyIds: new Set(failedRows.map((f) => f.surveyId)),
+    });
+  },
+
+  /** Spec 86 — dueño de una encuesta local (`null` si es anterior a m0013). */
+  async getOwnerUserId(surveyId: string): Promise<string | null> {
+    const row = await db
+      .select({ owner: surveys.ownerUserId })
+      .from(surveys)
+      .where(eq(surveys.id, surveyId))
+      .get();
+    return row?.owner ?? null;
+  },
+
+  /** Spec 86 — borradores de otros encuestadores en esta tablet (para el aviso). */
+  async countDraftsOfOthers(ownerUserId: string): Promise<number> {
+    const all = await db
+      .select({ id: surveys.id, owner: surveys.ownerUserId })
+      .from(surveys)
+      .where(eq(surveys.status, 'draft'))
+      .all();
+    return all.filter((r) => r.owner !== null && r.owner !== ownerUserId).length;
   },
 
   async markCompleted(surveyId: string): Promise<void> {

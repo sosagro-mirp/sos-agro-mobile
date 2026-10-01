@@ -10,7 +10,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { CircleAlert, Check, ArrowRight, ChevronLeft, LoaderCircle } from "lucide-react-native";
 import { useInstrumentSurveyStore } from "../../../src/store/useInstrumentSurveyStore";
-import { isAnswerComplete } from "../../../src/lib/isAnswerComplete";
+import { isAnswerAcceptable } from "../../../src/lib/isAnswerConsistent";
 import { AppText } from "../../../src/components/common/AppText";
 import { Fonts } from "../../../src/theme/fonts";
 import { useTheme } from "../../../src/theme/ThemeProvider";
@@ -39,11 +39,11 @@ export default function ReviewScreen() {
 
   // Decisión pendiente #2 del spec 74 (2026-08-25): "Enviar encuesta" se
   // bloquea mientras falte alguna obligatoria — antes no se bloqueaba nunca.
-  // `isAnswerComplete` ya es la misma función que usa `canAdvance()` en el
-  // flujo de pregunta, así que el criterio de "completa" no diverge entre
+  // `isAnswerAcceptable` (obligatoriedad + coherencia, spec 87) es la misma
+  // función que usa `canAdvance()` en el flujo de pregunta, así que el criterio de "completa" no diverge entre
   // pantallas.
   const missingCount = visible.filter(
-    ({ question }) => !isAnswerComplete(question, answers[question.questionId]),
+    ({ question }) => !isAnswerAcceptable(question, answers[question.questionId]),
   ).length;
   const canSubmit = missingCount === 0 && !isSubmitting;
 
@@ -109,7 +109,7 @@ export default function ReviewScreen() {
         <View style={styles.cards}>
           {visible.map(({ question, sectionName }, index) => {
             const answer = answers[question.questionId];
-            const missing = !isAnswerComplete(question, answer);
+            const missing = !isAnswerAcceptable(question, answer);
             const hasAnswer = answer !== undefined;
 
             return (

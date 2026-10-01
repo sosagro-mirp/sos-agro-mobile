@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { buildResponsesPayload } from '../lib/buildResponsesPayload';
 import { flattenSections } from '../lib/flattenSections';
 import { isQuestionVisible } from '../lib/isQuestionVisible';
-import { isAnswerComplete } from '../lib/isAnswerComplete';
+import { isAnswerAcceptable } from '../lib/isAnswerConsistent';
 import { resolveResumeIndex } from '../lib/resolveResumeIndex';
 import { surveyDraftStore } from '../storage/surveyDraftStore';
 import { syncQueueStorage } from '../storage/syncQueue';
@@ -143,7 +143,9 @@ export const useInstrumentSurveyStore = create<InstrumentSurveyState>((set, get)
     const visible = visibleQuestions();
     const current = visible[currentIndex];
     if (!current) return false;
-    return isAnswerComplete(current.question, answers[current.question.questionId]);
+    // Spec 87: además de la obligatoriedad, la respuesta debe ser coherente
+    // (un número sin unidad, o al revés, no deja avanzar aunque sea opcional).
+    return isAnswerAcceptable(current.question, answers[current.question.questionId]);
   },
 
   visibleQuestions() {

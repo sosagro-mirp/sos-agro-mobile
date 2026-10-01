@@ -33,6 +33,8 @@ jest.mock('../storage/syncQueue', () => ({
     getActiveBySurveyId: jest.fn(),
     resetInFlightToRetry: jest.fn(),
     resetInFlightToRetryBySurveyId: jest.fn(),
+    resetInFlightToRetryById: jest.fn(),
+    claimPendingBySurveyId: jest.fn(),
     countPending: jest.fn().mockResolvedValue(0),
   },
 }));
@@ -173,12 +175,12 @@ import { DocumentIdCollisionError } from '../api/farmers';
 import { mergeFarmerResults } from '../lib/mergeFarmerResults';
 import { withNetworkRetry } from '../lib/withNetworkRetry';
 
-const mockGetPendingBySurveyId = syncQueueStorage.getPendingBySurveyId as jest.Mock;
 const mockGetActiveBySurveyId = syncQueueStorage.getActiveBySurveyId as jest.Mock;
 const mockResetBySurveyId =
   syncQueueStorage.resetInFlightToRetryBySurveyId as unknown as jest.Mock;
+const mockClaimPendingBySurveyId = syncQueueStorage.claimPendingBySurveyId as jest.Mock;
+const mockResetById = syncQueueStorage.resetInFlightToRetryById as jest.Mock;
 const mockMarkInFlight = syncQueueStorage.markInFlight as jest.Mock;
-const mockIncrementAttempts = syncQueueStorage.incrementAttempts as jest.Mock;
 const mockLoadDraft = surveyDraftStore.loadDraft as jest.Mock;
 const mockGetByLocal = pendingSessionStorage.getByLocal as jest.Mock;
 const mockSyncStatusGetState = useSyncStatusStore.getState as jest.Mock;
@@ -318,16 +320,25 @@ describe('Criterios 4 y 5 — withNetworkRetry', () => {
 // ─── Criterio 6 — processSurveyNow desatasca su propia entrada ──────────────
 
 describe('Criterio 6 — una entrada in_flight se recupera desde el camino interactivo', () => {
-  it('resetea la entrada de ese surveyId antes de consultarla', async () => {
-    mockGetPendingBySurveyId.mockResolvedValue(null);
+  it('resetea la entrada de ese surveyId antes de reclamarla otra vez', async () => {
+    // Spec 91 — corrección de auditoría (docs/reports/auditorias/45-…):
+    // `processSurveyNow()` ya no consulta con `getPendingBySurveyId()`
+    // seguido de `processEntry()` (ventana insegura entre leer y procesar);
+    // reclama de forma atómica con `claimPendingBySurveyId()`. La primera
+    // reclamación no encuentra nada pending (la entrada sigue in_flight);
+    // sin un `processAll()` vivo, se resetea y se reclama de nuevo.
+    mockClaimPendingBySurveyId.mockResolvedValue(null);
     mockGetActiveBySurveyId.mockResolvedValue(null);
 
     await SyncQueueService.processSurveyNow('local_survey_s1');
 
     expect(mockResetBySurveyId).toHaveBeenCalledWith('local_survey_s1');
-    // El reset ocurre ANTES de la consulta, o la consulta seguiría viendo null.
+    // El reset ocurre ANTES de la segunda reclamación, o esta seguiría viendo null.
+    expect(mockClaimPendingBySurveyId.mock.invocationCallOrder[0]).toBeLessThan(
+      mockResetBySurveyId.mock.invocationCallOrder[0],
+    );
     expect(mockResetBySurveyId.mock.invocationCallOrder[0]).toBeLessThan(
-      mockGetPendingBySurveyId.mock.invocationCallOrder[0],
+      mockClaimPendingBySurveyId.mock.invocationCallOrder[1],
     );
   });
 
@@ -339,14 +350,17 @@ describe('Criterio 6 — una entrada in_flight se recupera desde el camino inter
       status: 'in_flight' as const,
     };
 
-    // Primer llamado: la entrada está in_flight → hoy caería al bucle de
-    // espera y volvería sin sincronizar. Tras el reset debe verse `pending`.
+    // Primer llamado: la entrada está in_flight → la primera reclamación no
+    // encuentra nada pending y caería al bucle de espera. Tras el reset,
+    // debe verse `pending` y la segunda reclamación sí la toma.
     mockResetBySurveyId.mockImplementation(async () => {
       entry.status = 'pending' as never;
     });
-    mockGetPendingBySurveyId.mockImplementation(async () =>
-      entry.status === 'pending' ? entry : null,
-    );
+    mockClaimPendingBySurveyId.mockImplementation(async () => {
+      if (entry.status !== 'pending') return null;
+      entry.status = 'in_flight' as never;
+      return entry;
+    });
     mockLoadDraft.mockResolvedValue(null);
 
     await SyncQueueService.processSurveyNow('local_survey_s1');
@@ -366,15 +380,19 @@ describe('Criterio 7 — el aplazamiento por sesión provisional devuelve la ent
       attempts: 0,
       status: 'pending' as const,
     };
-    mockGetPendingBySurveyId.mockResolvedValue(entry);
+    mockClaimPendingBySurveyId.mockResolvedValue(entry);
     mockGetByLocal.mockResolvedValue({ status: 'pending' });
 
     await SyncQueueService.processSurveyNow('local_survey_s1');
 
     expect(mockMarkInFlight).toHaveBeenCalledWith('q2');
     // Debe volver a quedar procesable sin depender del finally de processAll().
-    expect(mockIncrementAttempts.mock.calls.length + mockResetBySurveyId.mock.calls.length)
-      .toBeGreaterThan(0);
+    // Spec 91 — corrección de auditoría (docs/reports/auditorias/45-…): la
+    // reclamación atómica (`claimPendingBySurveyId`) ya la encontró pending
+    // de entrada, así que `resetInFlightToRetryBySurveyId` no tiene por qué
+    // dispararse aquí — el que sí debe dispararse es `resetInFlightToRetryById`,
+    // el que usa `resolveCampaignSession()` al aplazar.
+    expect(mockResetById).toHaveBeenCalledWith('q2');
   });
 });
 
