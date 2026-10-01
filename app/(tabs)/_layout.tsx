@@ -21,6 +21,7 @@ import { ThemeToggle } from "../../src/components/common/ThemeToggle";
 import { AccountButton } from "../../src/components/common/AccountButton";
 import { ReauthBanner } from "../../src/components/auth/ReauthBanner";
 import { resolveTabBarStyle, TAB_BAR_PADDING_TOP } from "../../src/lib/resolveTabBarStyle";
+import { resolveTabLabelFontSize } from "../../src/lib/resolveTabLabelFontSize";
 import { useEffect, useMemo, useRef } from "react";
 
 // Pantallas angostas (spec 74, Fase 3 — a pedido del usuario): por debajo de
@@ -124,7 +125,10 @@ function TabBarButton(props: any) {
     <Pressable
       accessibilityState={{ selected }}
       onPress={onPress}
-      style={style}
+      // La librería pone 5 dp de relleno a cada lado del botón; se quitan para
+      // que la etiqueta disponga de todo el ancho de la pestaña (ver
+      // resolveTabLabelFontSize, que calcula el tamaño con ese ancho).
+      style={[style, tabButtonStyles.button]}
       {...rest}
     >
       {selected ? (
@@ -136,6 +140,7 @@ function TabBarButton(props: any) {
 }
 
 const tabButtonStyles = StyleSheet.create({
+  button: { paddingHorizontal: 0 },
   indicator: {
     position: "absolute",
     // El botón de la pestaña empieza DESPUÉS del paddingTop que
@@ -150,21 +155,27 @@ const tabButtonStyles = StyleSheet.create({
   },
 });
 
-// Spec 74, Fase 2 — hallazgo TC-074-12: con las cinco etiquetas completas
-// (deuda de la Fase 2, no abreviadas — ver "Qué NO debe cambiar" del spec)
-// y la fuente del sistema al 130%, el `<Label>` por defecto de la librería
-// envuelve a dos líneas y el tab bar se lee como si hubiera más de cinco
-// pestañas. `AppText` ya trae el techo `MAX_FONT_SCALE = 1.3` (spec 24/62)
-// para texto de layout fijo — se reutiliza acá en vez de reinventar un tope
-// nuevo, con `numberOfLines={1}` para garantizar una sola línea.
-function renderTabLabel(title: string, style: TextStyle) {
+// Etiquetas visibles del tab bar, en orden. Su longitud fija el tamaño de letra
+// común (ver `resolveTabLabelFontSize`).
+const TAB_LABELS = {
+  campaign: "Campañas",
+  drafts: "Borradores",
+  sync: "Sincronización",
+  requests: "Solicitudes",
+  completed: "Realizadas",
+} as const;
+
+// Todas las etiquetas usan el MISMO tamaño, calculado para que quepa la más
+// larga en una línea. Historia: el `<Label>` de la librería envolvía a dos líneas
+// con letra grande (spec 74, TC-074-12); `numberOfLines={1}` las cortaba; y
+// `adjustsFontSizeToFit` por etiqueta (spec 92) dejaba cada una con un tamaño
+// distinto. `allowFontScaling={false}` porque la escala ya viene en `fontSize`.
+function renderTabLabel(title: string, style: TextStyle, fontSize: number) {
   function TabLabel({ color }: { color: string }) {
     return (
-      // Spec 92 (criterio 7): con la letra al 130 % la etiqueta debe caber sin
-      // cortarse. Se encoge la fuente en vez de truncar con «…».
-      <AppText style={[style, { color }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+      <Text style={[style, { color, fontSize }]} numberOfLines={1} allowFontScaling={false}>
         {title}
-      </AppText>
+      </Text>
     );
   }
   return TabLabel;
@@ -179,6 +190,11 @@ export default function TabsLayout() {
     [insets.bottom, colors],
   );
   const draftCount = useDraftCountStore((s) => s.count);
+  const { width: windowWidth, fontScale } = useWindowDimensions();
+  const labelFontSize = useMemo(
+    () => resolveTabLabelFontSize({ windowWidth, fontScale, labels: Object.values(TAB_LABELS) }),
+    [windowWidth, fontScale],
+  );
 
   // Fuente reactiva del badge de Borradores (spec 74, deuda diferida de la
   // Fase 3 a esta fase): sin esto el conteo solo se conocería después de
@@ -202,8 +218,8 @@ export default function TabsLayout() {
         <Tabs.Screen
           name="campaign/index"
           options={{
-            title: "Campañas",
-            tabBarLabel: renderTabLabel("Campañas", styles.tabLabel),
+            title: TAB_LABELS.campaign,
+            tabBarLabel: renderTabLabel(TAB_LABELS.campaign, styles.tabLabel, labelFontSize),
             tabBarIcon: ({ color, size }) => (
               <Map size={size} color={color} />
             ),
@@ -212,8 +228,8 @@ export default function TabsLayout() {
         <Tabs.Screen
           name="drafts/index"
           options={{
-            title: "Borradores",
-            tabBarLabel: renderTabLabel("Borradores", styles.tabLabel),
+            title: TAB_LABELS.drafts,
+            tabBarLabel: renderTabLabel(TAB_LABELS.drafts, styles.tabLabel, labelFontSize),
             tabBarIcon: ({ color, size }) => (
               <View>
                 <FileText size={size} color={color} />
@@ -231,8 +247,8 @@ export default function TabsLayout() {
         <Tabs.Screen
           name="sync/index"
           options={{
-            title: "Sincronización",
-            tabBarLabel: renderTabLabel("Sincronización", styles.tabLabel),
+            title: TAB_LABELS.sync,
+            tabBarLabel: renderTabLabel(TAB_LABELS.sync, styles.tabLabel, labelFontSize),
             tabBarIcon: ({ color, size }) => (
               <RefreshCw size={size} color={color} />
             ),
@@ -241,8 +257,8 @@ export default function TabsLayout() {
         <Tabs.Screen
           name="requests/index"
           options={{
-            title: "Solicitudes",
-            tabBarLabel: renderTabLabel("Solicitudes", styles.tabLabel),
+            title: TAB_LABELS.requests,
+            tabBarLabel: renderTabLabel(TAB_LABELS.requests, styles.tabLabel, labelFontSize),
             tabBarIcon: ({ color, size }) => (
               <MessageSquare size={size} color={color} />
             ),
@@ -254,8 +270,8 @@ export default function TabsLayout() {
         <Tabs.Screen
           name="completed/index"
           options={{
-            title: "Realizadas",
-            tabBarLabel: renderTabLabel("Realizadas", styles.tabLabel),
+            title: TAB_LABELS.completed,
+            tabBarLabel: renderTabLabel(TAB_LABELS.completed, styles.tabLabel, labelFontSize),
             tabBarIcon: ({ color, size }) => (
               <ClipboardCheck size={size} color={color} />
             ),
