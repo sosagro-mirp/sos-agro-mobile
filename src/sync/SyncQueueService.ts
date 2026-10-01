@@ -15,7 +15,6 @@ import { buildResponsesPayload } from '../lib/buildResponsesPayload';
 import { flattenSections } from '../lib/flattenSections';
 import { findIncompleteNumericUnitAnswers } from '../lib/findIncompleteNumericUnitAnswers';
 import { discardedAnswersStorage } from '../storage/discardedAnswersStorage';
-import { resolveOtherOptions, preserveOtherText } from '../lib/resolveOtherOptions';
 import { isLocalId } from '../lib/isLocalId';
 import { useSyncStatusStore } from '../store/useSyncStatusStore';
 import { useCampaignSessionStore } from '../store/useCampaignSessionStore';
@@ -1093,29 +1092,11 @@ class SyncQueueServiceClass {
       await discardedAnswersStorage.record(entry.surveyId, realSurveyId, discarded);
     }
 
-    const resolvedAnswers = await resolveOtherOptions(
-      flattenedQuestions,
-      draft.answers,
-      ...this.authArgs(entry),
-    );
-
-    // Persist resolved answers so a retry doesn't create the same dynamic option twice.
-    const hasChanges = Object.keys(resolvedAnswers).some(
-      (qId) => resolvedAnswers[qId] !== draft.answers[qId],
-    );
-    if (hasChanges) {
-      const toPersist = preserveOtherText(draft.answers, resolvedAnswers);
-      await surveyDraftStore.saveMultipleAnswers(entry.surveyId, toPersist);
-      for (const [qId, answer] of Object.entries(resolvedAnswers)) {
-        if (answer !== draft.answers[qId]) {
-          logger.info(
-            `[Sync] resolved other option — questionId: ${qId}, newOptionId: ${answer.optionId}`,
-          );
-        }
-      }
-    }
-
-    return buildResponsesPayload(realSurveyId, flattenedQuestions, resolvedAnswers, attachmentIds);
+    // Spec 86 — el texto de "Otros" viaja en la propia respuesta (textValue de la
+    // fila isOther); la app ya no crea opciones en el instrumento al sincronizar.
+    // El borrador local conserva `optionId` de "Otros" y `otherText`, así que el
+    // detalle de «Realizadas» (spec 92) lo muestra sin pasos extra.
+    return buildResponsesPayload(realSurveyId, flattenedQuestions, draft.answers, attachmentIds);
   }
 
   private async handleNetworkError(entry: SyncQueueEntry, interactive = false): Promise<void> {

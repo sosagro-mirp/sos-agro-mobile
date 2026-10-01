@@ -320,6 +320,49 @@ describe('loadDraft', () => {
   });
 });
 
+// ─── Spec 86: texto de «Otros» en el borrador ─────────────────────────────────
+
+describe('saveAnswer → loadDraft con el texto de «Otros» (spec 86)', () => {
+  beforeEach(async () => {
+    await surveyDraftStore.createDraft({ surveyId: 'sv-o', instrumentId: 'inst-1' });
+  });
+
+  it('conserva otherText en selección única y en múltiple al reanudar el borrador', async () => {
+    await surveyDraftStore.saveAnswer('sv-o', 'q-single', {
+      questionId: 'q-single',
+      optionId: 'opt-other',
+      otherText: 'Carrotanque',
+    });
+    await surveyDraftStore.saveAnswer('sv-o', 'q-multi', {
+      questionId: 'q-multi',
+      optionIds: ['opt-a', 'opt-other'],
+      otherText: 'Lulo',
+    });
+
+    const draft = await surveyDraftStore.loadDraft('sv-o');
+
+    expect(draft!.answers['q-single']).toMatchObject({
+      optionId: 'opt-other',
+      otherText: 'Carrotanque',
+    });
+    expect(draft!.answers['q-multi']).toMatchObject({
+      optionIds: ['opt-a', 'opt-other'],
+      otherText: 'Lulo',
+    });
+  });
+
+  it('sin texto de «Otros», otherText vuelve indefinido (no la cadena "null")', async () => {
+    await surveyDraftStore.saveAnswer('sv-o', 'q-multi', {
+      questionId: 'q-multi',
+      optionIds: ['opt-a'],
+    });
+
+    const draft = await surveyDraftStore.loadDraft('sv-o');
+
+    expect(draft!.answers['q-multi'].otherText).toBeUndefined();
+  });
+});
+
 // ─── markCompleted ────────────────────────────────────────────────────────────
 
 describe('markCompleted', () => {
