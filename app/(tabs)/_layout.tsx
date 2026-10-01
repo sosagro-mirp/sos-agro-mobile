@@ -1,7 +1,7 @@
 import { Tabs, useRouter } from "expo-router";
 import {
+  ClipboardCheck,
   Clock,
-  LandPlot,
   Map,
   FileText,
   MessageSquare,
@@ -160,7 +160,9 @@ const tabButtonStyles = StyleSheet.create({
 function renderTabLabel(title: string, style: TextStyle) {
   function TabLabel({ color }: { color: string }) {
     return (
-      <AppText style={[style, { color }]} numberOfLines={1}>
+      // Spec 92 (criterio 7): con la letra al 130 % la etiqueta debe caber sin
+      // cortarse. Se encoge la fuente en vez de truncar con «…».
+      <AppText style={[style, { color }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
         {title}
       </AppText>
     );
@@ -246,13 +248,16 @@ export default function TabsLayout() {
             ),
           }}
         />
+        {/* Spec 92: «Realizadas» ocupa el lugar de «Lotes». La ruta de Lotes
+            sigue existiendo (href: null) para no borrar su código. */}
+        <Tabs.Screen name="plots/index" options={{ href: null }} />
         <Tabs.Screen
-          name="plots/index"
+          name="completed/index"
           options={{
-            title: "Lotes",
-            tabBarLabel: renderTabLabel("Lotes", styles.tabLabel),
+            title: "Realizadas",
+            tabBarLabel: renderTabLabel("Realizadas", styles.tabLabel),
             tabBarIcon: ({ color, size }) => (
-              <LandPlot size={size} color={color} />
+              <ClipboardCheck size={size} color={color} />
             ),
           }}
         />
