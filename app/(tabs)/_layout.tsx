@@ -1,7 +1,7 @@
 import { Tabs, useRouter } from "expo-router";
 import {
+  ClipboardCheck,
   Clock,
-  LandPlot,
   Map,
   FileText,
   MessageSquare,
@@ -246,13 +246,16 @@ export default function TabsLayout() {
             ),
           }}
         />
+        {/* Spec 92: «Realizadas» ocupa el lugar de «Lotes». La ruta de Lotes
+            sigue existiendo (href: null) para no borrar su código. */}
+        <Tabs.Screen name="plots/index" options={{ href: null }} />
         <Tabs.Screen
-          name="plots/index"
+          name="completed/index"
           options={{
-            title: "Lotes",
-            tabBarLabel: renderTabLabel("Lotes", styles.tabLabel),
+            title: "Realizadas",
+            tabBarLabel: renderTabLabel("Realizadas", styles.tabLabel),
             tabBarIcon: ({ color, size }) => (
-              <LandPlot size={size} color={color} />
+              <ClipboardCheck size={size} color={color} />
             ),
           }}
         />

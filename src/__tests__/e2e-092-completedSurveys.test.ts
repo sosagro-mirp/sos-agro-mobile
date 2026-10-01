@@ -329,3 +329,61 @@ describe("groupRemoteResponses", () => {
     expect(result[0].rows[0].displayValue).toBe("Sin respuesta");
   });
 });
+
+// ─── Fase 4 — modo local y búsqueda con el servidor como filtro ──────────────
+
+describe("mergeCompletedSurveys — opciones de la lista (Fase 4)", () => {
+  const syncedLocal: LocalFinishedSurvey = {
+    clientSurveyId: "local_synced",
+    backendSurveyId: "srv-synced",
+    status: "synced",
+    syncFailed: false,
+    farmerName: "Luis Gómez",
+    farmerDocumentId: "2002",
+    instrumentName: "Bloque 1",
+    responseCount: 3,
+    createdAt: "2026-09-19T08:00:00.000Z",
+  };
+
+  it("modo local: una local synced sí aporta fila propia, marcada como enviada", () => {
+    const result = mergeCompletedSurveys([], [syncedLocal], undefined, { includeSyncedLocals: true });
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      clientSurveyId: "local_synced",
+      surveyId: "srv-synced",
+      submissionStatus: "sent",
+      dateSource: "local",
+    });
+  });
+
+  it("modo remoto (por defecto): la misma local synced no agrega fila", () => {
+    expect(mergeCompletedSurveys([], [syncedLocal])).toHaveLength(0);
+  });
+
+  it("remoteFiltered: no descarta una fila del servidor que coincidió por documento", () => {
+    const remote: MySurveyItem[] = [
+      {
+        surveyId: "srv-doc",
+        clientSurveyId: null,
+        instrumentName: "Bloque 1",
+        campaignName: null,
+        farmer: { farmerId: "f-9", name: "Marta Ruiz" },
+        responseCount: 2,
+        createdAt: "2026-09-21T08:00:00.000Z",
+        updatedAt: "2026-09-21T08:00:00.000Z",
+      },
+    ];
+
+    // Buscar por documento: el servidor la devolvió, pero el nombre no contiene "9999".
+    expect(mergeCompletedSurveys(remote, [], "9999")).toHaveLength(0);
+    expect(mergeCompletedSurveys(remote, [], "9999", { remoteFiltered: true })).toHaveLength(1);
+  });
+
+  it("remoteFiltered: las locales sin fila del servidor sí se filtran por la búsqueda", () => {
+    const pending: LocalFinishedSurvey = { ...syncedLocal, clientSurveyId: "local_p", status: "completed", backendSurveyId: null };
+
+    expect(mergeCompletedSurveys([], [pending], "perez", { remoteFiltered: true })).toHaveLength(0);
+    expect(mergeCompletedSurveys([], [pending], "gomez", { remoteFiltered: true })).toHaveLength(1);
+  });
+});

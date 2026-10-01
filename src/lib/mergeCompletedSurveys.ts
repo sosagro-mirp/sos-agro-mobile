@@ -60,10 +60,25 @@ function matchesSearch(farmerName: string | null, farmerDocumentId: string | nul
  * dispositivo local aporta la fecha de aplicación real (D6) y el estado de
  * envío mientras no se confirme la sincronización (D7).
  */
+export interface MergeCompletedSurveysOptions {
+  /**
+   * Modo local (spec 92, Alcance 4): sin acumulado del servidor, las locales
+   * `synced` sí aportan fila propia — es lo único que hay para mostrar.
+   */
+  includeSyncedLocals?: boolean;
+  /**
+   * En modo remoto el servidor ya filtró `search` (por nombre o documento);
+   * el filtro local solo aplica a las filas que no vienen del servidor, para
+   * no descartar una coincidencia por documento que el dispositivo no conoce.
+   */
+  remoteFiltered?: boolean;
+}
+
 export function mergeCompletedSurveys(
   remoteItems: MySurveyItem[],
   localItems: LocalFinishedSurvey[],
   search?: string,
+  options: MergeCompletedSurveysOptions = {},
 ): CompletedSurveyListItem[] {
   const localByClientId = new Map(localItems.map((local) => [local.clientSurveyId, local]));
   const localByBackendId = new Map(
@@ -72,6 +87,7 @@ export function mergeCompletedSurveys(
       .map((local) => [local.backendSurveyId, local]),
   );
 
+  const remoteKeys = new Set<string>();
   const consumedLocalIds = new Set<string>();
   const seenSurveyIds = new Set<string>();
   const results: CompletedSurveyListItem[] = [];
@@ -84,9 +100,11 @@ export function mergeCompletedSurveys(
       (remote.clientSurveyId ? localByClientId.get(remote.clientSurveyId) : undefined) ??
       localByBackendId.get(remote.surveyId);
     if (local) consumedLocalIds.add(local.clientSurveyId);
+    const key = local?.clientSurveyId ?? `remote:${remote.surveyId}`;
+    remoteKeys.add(key);
 
     results.push({
-      key: local?.clientSurveyId ?? `remote:${remote.surveyId}`,
+      key,
       surveyId: remote.surveyId,
       clientSurveyId: local?.clientSurveyId ?? remote.clientSurveyId,
       instrumentName: remote.instrumentName,
@@ -104,7 +122,7 @@ export function mergeCompletedSurveys(
     // Ya sincronizada pero sin fila propia del servidor en el acumulado
     // (todavía no llegó esa página, o quedó huérfana): no se agrega — el
     // servidor es la autoridad y evita una fila fantasma.
-    if (local.status === "synced") continue;
+    if (local.status === "synced" && !options.includeSyncedLocals) continue;
 
     results.push({
       key: local.clientSurveyId,
@@ -123,6 +141,7 @@ export function mergeCompletedSurveys(
   const needle = search?.trim();
   const filtered = needle
     ? results.filter((item) => {
+        if (options.remoteFiltered && remoteKeys.has(item.key)) return true;
         const local = item.clientSurveyId ? localByClientId.get(item.clientSurveyId) : undefined;
         return matchesSearch(item.farmerName, local?.farmerDocumentId ?? null, needle);
       })
