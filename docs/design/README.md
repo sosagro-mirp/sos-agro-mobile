@@ -168,5 +168,10 @@ Pantallas que el lienzo de Claude Design no incluye. Se construyeron
 | `CompletedSurveyCard` | 92 | Tarjeta de borradores (radio 12, borde `border`); insignias con `StatusBadge`: ámbar + `Clock` «Pendiente de envío», verde + `Check` «Enviada», rojo + `CircleAlert` «Error de envío» (léxico único de cola, decisión 3) |
 | `completed/[id]` — detalle de solo lectura | 92 | Cabecera con `ChevronLeft` de 48 dp, secciones con etiqueta en mayúsculas 10/800, filas pregunta (11.5) / respuesta (14.5/500) en tarjeta de radio 12 |
 
-La etiqueta «Realizadas» se dibuja con `AppText` (tope de escala 1.3, una línea),
-igual que las demás pestañas (regla del spec 74).
+**Etiquetas del tab bar:** las cinco usan un **único tamaño de letra**, calculado
+por `src/lib/resolveTabLabelFontSize.ts` para que la más larga quepa en una línea
+según el ancho de la pantalla (base 11, con la escala del sistema topada en 1.3).
+No se truncan ni se encogen por separado. El botón de cada pestaña no lleva relleno
+lateral. La pestaña de sincronización se rotula «Sincronizar» (11 caracteres): con
+«Sincronización» (14) la letra bajaba a ~7.4 px a 360 dp; ahora queda en ~9.4 px a
+360 dp y en los 11 px de diseño desde 412 dp. El título de la pantalla no cambia.
