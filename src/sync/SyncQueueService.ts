@@ -15,7 +15,7 @@ import { buildResponsesPayload } from '../lib/buildResponsesPayload';
 import { flattenSections } from '../lib/flattenSections';
 import { findIncompleteNumericUnitAnswers } from '../lib/findIncompleteNumericUnitAnswers';
 import { discardedAnswersStorage } from '../storage/discardedAnswersStorage';
-import { resolveOtherOptions } from '../lib/resolveOtherOptions';
+import { resolveOtherOptions, preserveOtherText } from '../lib/resolveOtherOptions';
 import { isLocalId } from '../lib/isLocalId';
 import { useSyncStatusStore } from '../store/useSyncStatusStore';
 import { useCampaignSessionStore } from '../store/useCampaignSessionStore';
@@ -1104,7 +1104,8 @@ class SyncQueueServiceClass {
       (qId) => resolvedAnswers[qId] !== draft.answers[qId],
     );
     if (hasChanges) {
-      await surveyDraftStore.saveMultipleAnswers(entry.surveyId, resolvedAnswers);
+      const toPersist = preserveOtherText(draft.answers, resolvedAnswers);
+      await surveyDraftStore.saveMultipleAnswers(entry.surveyId, toPersist);
       for (const [qId, answer] of Object.entries(resolvedAnswers)) {
         if (answer !== draft.answers[qId]) {
           logger.info(

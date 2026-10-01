@@ -119,6 +119,7 @@ function AppStack() {
       />
       <Stack.Screen name="instrument/[id]/review" />
       <Stack.Screen name="instrument/[id]/completed" />
+      <Stack.Screen name="completed/[id]" />
       <Stack.Screen name="dev/logs" />
     </Stack>
   );

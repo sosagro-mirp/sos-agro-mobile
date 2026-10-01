@@ -1,7 +1,9 @@
 import { and, eq, inArray, lt, isNull, or } from 'drizzle-orm';
 import { db } from './db/db';
-import { surveys, responses } from './db/schema';
-import type { InstrumentDraftAnswer } from '../types';
+import { surveys, responses, farmerCache, pendingSessions, instrumentCache, syncQueue } from './db/schema';
+import type { InstrumentDraftAnswer, InstrumentResponse } from '../types';
+import { buildLocalFinishedSurveys } from '../lib/buildLocalFinishedSurveys';
+import type { LocalFinishedSurvey } from '../lib/mergeCompletedSurveys';
 import type { CompletedStepLocal } from '../lib/planNextStepAfterCompletion';
 import { secureStorage } from './secureStorage';
 
@@ -15,6 +17,16 @@ export interface SurveyDraft {
   ownerUserId?: string;
   answers: Record<string, InstrumentDraftAnswer>;
   updatedAt: Date;
+}
+
+// Un JSON corrupto en UNA fila no debe tumbar toda la lista local de «Realizadas».
+function safeParse<T>(raw: string | null | undefined): T | undefined {
+  if (!raw) return undefined;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return undefined;
+  }
 }
 
 export const surveyDraftStore = {
@@ -215,6 +227,88 @@ export const surveyDraftStore = {
       .all();
 
     return Promise.all(rows.map((r) => this.loadDraft(r.id) as Promise<SurveyDraft>));
+  },
+
+  /**
+   * Spec 92 (Fase 3b) — encuestas locales `completed`/`synced` del encuestador
+   * para la pestaña «Realizadas». Regla de dueño «del usuario o sin dueño»
+   * (spec 86); excluye las que no tienen respuestas. Hace un número fijo de
+   * lecturas (6), una por tabla, sin importar cuántas encuestas haya.
+   */
+  async listFinished(ownerUserId: string): Promise<LocalFinishedSurvey[]> {
+    const surveyRows = (
+      await db.select().from(surveys).where(inArray(surveys.status, ['completed', 'synced'])).all()
+    ).filter((r) => r.ownerUserId === null || r.ownerUserId === ownerUserId);
+    if (surveyRows.length === 0) return [];
+
+    const surveyIds = surveyRows.map((r) => r.id);
+    const sessionIds = [...new Set(surveyRows.map((r) => r.campaignSessionId).filter((v): v is string => !!v))];
+    const instrumentIds = [...new Set(surveyRows.map((r) => r.instrumentId))];
+
+    const [responseRows, sessionRows, instrumentRows, failedRows] = await Promise.all([
+      db.select().from(responses).where(inArray(responses.surveyId, surveyIds)).all(),
+      sessionIds.length === 0
+        ? Promise.resolve([])
+        : db
+            .select()
+            .from(pendingSessions)
+            .where(or(inArray(pendingSessions.localSessionId, sessionIds), inArray(pendingSessions.realSessionId, sessionIds)))
+            .all(),
+      db.select().from(instrumentCache).where(inArray(instrumentCache.id, instrumentIds)).all(),
+      db
+        .select()
+        .from(syncQueue)
+        .where(and(inArray(syncQueue.surveyId, surveyIds), eq(syncQueue.status, 'failed_validation')))
+        .all(),
+    ]);
+
+    const sessionFarmerIds = new Map<string, string | null>();
+    for (const s of sessionRows) {
+      sessionFarmerIds.set(s.localSessionId, s.farmerId);
+      if (s.realSessionId) sessionFarmerIds.set(s.realSessionId, s.farmerId);
+    }
+
+    const farmerIds = [
+      ...new Set([
+        ...surveyRows.map((r) => r.farmerId),
+        ...sessionFarmerIds.values(),
+      ].filter((v): v is string => !!v)),
+    ];
+    const farmerRows =
+      farmerIds.length === 0
+        ? []
+        : await db.select().from(farmerCache).where(inArray(farmerCache.farmerId, farmerIds)).all();
+
+    const answersBySurvey = new Map<string, Record<string, InstrumentDraftAnswer>>();
+    for (const row of responseRows) {
+      const answers = answersBySurvey.get(row.surveyId) ?? {};
+      answers[row.questionId] = {
+        questionId: row.questionId,
+        optionId: row.optionId ?? undefined,
+        optionIds: safeParse<string[]>(row.optionIds),
+        textValue: row.textValue ?? undefined,
+        numericValue: row.numericValue ?? undefined,
+        booleanValue: row.booleanValue ?? undefined,
+        otherText: row.otherText ?? undefined,
+        mediaLocalPath: row.mediaLocalPath ?? undefined,
+        mimeType: row.mimeType ?? undefined,
+      };
+      answersBySurvey.set(row.surveyId, answers);
+    }
+
+    return buildLocalFinishedSurveys(ownerUserId, {
+      surveys: surveyRows,
+      answersBySurvey,
+      farmers: new Map(farmerRows.map((f) => [f.farmerId, { name: f.name, documentId: f.documentId }])),
+      sessionFarmerIds,
+      instruments: new Map(
+        instrumentRows.flatMap((i): Array<[string, InstrumentResponse]> => {
+          const parsed = safeParse<InstrumentResponse>(i.data);
+          return parsed ? [[i.id, parsed]] : [];
+        }),
+      ),
+      failedSurveyIds: new Set(failedRows.map((f) => f.surveyId)),
+    });
   },
 
   /** Spec 86 — dueño de una encuesta local (`null` si es anterior a m0013). */

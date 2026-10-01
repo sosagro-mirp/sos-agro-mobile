@@ -156,3 +156,17 @@ foco de A**:
 
 La adopción de la Variante B **no está decidida**: es la Fase 9 del spec 74 y
 tiene su propia compuerta de aprobación.
+
+## Pantallas posteriores al diseño importado
+
+Pantallas que el lienzo de Claude Design no incluye. Se construyeron
+**reutilizando** los tokens, componentes y léxico de arriba, sin tokens nuevos.
+
+| Pantalla | Spec | Piezas reutilizadas |
+|---|---|---|
+| `completed/index` — pestaña «Realizadas» (reemplaza «Lotes», ícono `ClipboardCheck`) | 92 | Cabecera de pestaña como Borradores (19/800 + metadato 11.5), `SkeletonCard` al cargar, `EmptyState`, banner ámbar de conectividad de nivel 2 con acción «Reintentar», buscador de 48 dp con radio 11 |
+| `CompletedSurveyCard` | 92 | Tarjeta de borradores (radio 12, borde `border`); insignias con `StatusBadge`: ámbar + `Clock` «Pendiente de envío», verde + `Check` «Enviada», rojo + `CircleAlert` «Error de envío» (léxico único de cola, decisión 3) |
+| `completed/[id]` — detalle de solo lectura | 92 | Cabecera con `ChevronLeft` de 48 dp, secciones con etiqueta en mayúsculas 10/800, filas pregunta (11.5) / respuesta (14.5/500) en tarjeta de radio 12 |
+
+La etiqueta «Realizadas» se dibuja con `AppText` (tope de escala 1.3, una línea),
+igual que las demás pestañas (regla del spec 74).
