@@ -387,3 +387,111 @@ describe("mergeCompletedSurveys — opciones de la lista (Fase 4)", () => {
     expect(mergeCompletedSurveys([], [pending], "gomez", { remoteFiltered: true })).toHaveLength(1);
   });
 });
+
+// ─── TC-092-04 (hallazgos de la ronda manual) ────────────────────────────────
+
+describe("detalle — «Otro» ya sincronizado y número con unidad (TC-092-04)", () => {
+  const mkQuestion = (over: Partial<InstrumentSection["questions"][number]>): InstrumentSection["questions"][number] => ({
+    questionId: "q",
+    text: "Pregunta",
+    isRequired: false,
+    order: 1,
+    type: { typeId: "t", name: "open_text" },
+    options: [],
+    ...over,
+  });
+  const section = (questions: InstrumentSection["questions"]): InstrumentSection[] => [
+    { sectionId: "s1", name: "Finca", order: 1, questions },
+  ];
+
+  it("una opción que ya no está en el instrumento, con el texto guardado, se muestra como «Otro: …»", () => {
+    const sections = section([
+      mkQuestion({
+        questionId: "q-crop",
+        type: { typeId: "t", name: "single_choice" },
+        options: [{ optionId: "o-cafe", text: "Café" }, { optionId: "o-otro", text: "Otro", isOther: true }] as never,
+      }),
+    ]);
+    // El servidor creó una opción nueva ("o-nueva") al sincronizar; no está en la caché.
+    const result = buildReadOnlyAnswers(sections, { "q-crop": { questionId: "q-crop", optionId: "o-nueva", otherText: "Aguacate" } });
+    expect(result[0].rows[0].displayValue).toBe("Otro: Aguacate");
+  });
+
+  it("sin texto guardado sigue mostrando «Opción no disponible»", () => {
+    const sections = section([
+      mkQuestion({ questionId: "q-crop", type: { typeId: "t", name: "single_choice" }, options: [{ optionId: "o-cafe", text: "Café" }] as never }),
+    ]);
+    const result = buildReadOnlyAnswers(sections, { "q-crop": { questionId: "q-crop", optionId: "o-nueva" } });
+    expect(result[0].rows[0].displayValue).toBe("Opción no disponible");
+  });
+
+  it("selección múltiple: la opción conocida y el «Otro» resuelto van en una sola fila", () => {
+    const sections = section([
+      mkQuestion({
+        questionId: "q-market",
+        type: { typeId: "t", name: "multiple_choice" },
+        options: [{ optionId: "o-coop", text: "Cooperativa" }, { optionId: "o-otro", text: "Otro", isOther: true }] as never,
+      }),
+    ]);
+    const result = buildReadOnlyAnswers(sections, {
+      "q-market": { questionId: "q-market", optionIds: ["o-coop", "o-nueva"], otherText: "Feria local" },
+    });
+    expect(result[0].rows[0].displayValue).toBe("Cooperativa, Otro: Feria local");
+  });
+
+  it("numeric_with_unit muestra el valor con su unidad", () => {
+    const sections = section([
+      mkQuestion({
+        questionId: "q-area",
+        type: { typeId: "t", name: "numeric_with_unit" },
+        options: [{ optionId: "u-ha", text: "Hectáreas" }, { optionId: "u-m2", text: "Metros cuadrados" }] as never,
+      }),
+    ]);
+    const result = buildReadOnlyAnswers(sections, { "q-area": { questionId: "q-area", numericValue: 2.5, optionId: "u-ha" } });
+    expect(result[0].rows[0].displayValue).toBe("2.5 Hectáreas");
+  });
+
+  it("groupRemoteResponses: numeric_with_unit del servidor muestra valor y unidad", () => {
+    const rows: RemoteSurveyResponseRow[] = [
+      {
+        responseId: "r1",
+        questionId: "q-area",
+        questionText: "¿Cuál es el área sembrada?",
+        questionType: "numeric_with_unit",
+        sectionId: "s1",
+        sectionTitle: "Finca",
+        sectionOrder: 1,
+        textValue: null,
+        numericValue: 2.5,
+        booleanValue: null,
+        optionText: "Hectáreas",
+        hasAttachment: false,
+      },
+    ];
+    expect(groupRemoteResponses(rows)[0].rows[0].displayValue).toBe("2.5 Hectáreas");
+  });
+});
+
+describe("preserveOtherText (sincronización conserva el texto de «Otro»)", () => {
+  // Import local para no alterar los imports del resto del archivo.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { preserveOtherText } = require("../lib/resolveOtherOptions") as typeof import("../lib/resolveOtherOptions");
+
+  it("conserva otherText en las respuestas que la resolución cambió", () => {
+    const original = { q1: { questionId: "q1", optionId: "o-otro", otherText: "Aguacate" } };
+    const resolved = { q1: { questionId: "q1", optionId: "o-nueva", otherText: undefined } };
+    expect(preserveOtherText(original, resolved).q1).toEqual({ questionId: "q1", optionId: "o-nueva", otherText: "Aguacate" });
+  });
+
+  it("no toca las respuestas que no cambiaron", () => {
+    const answer = { questionId: "q2", textValue: "hola" };
+    const result = preserveOtherText({ q2: answer }, { q2: answer });
+    expect(result.q2).toBe(answer);
+  });
+
+  it("no inventa texto cuando el original no lo tenía", () => {
+    const original = { q3: { questionId: "q3", optionId: "o-a" } };
+    const resolved = { q3: { questionId: "q3", optionId: "o-b" } };
+    expect(preserveOtherText(original, resolved).q3).toEqual({ questionId: "q3", optionId: "o-b" });
+  });
+});

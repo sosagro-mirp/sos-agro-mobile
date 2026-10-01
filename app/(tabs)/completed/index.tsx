@@ -74,7 +74,7 @@ export default function CompletedSurveysScreen() {
           <TextInput
             value={searchInput}
             onChangeText={setSearchInput}
-            placeholder="Buscar por productor o documento"
+            placeholder="Productor o documento"
             placeholderTextColor={colors.textMuted}
             style={styles.searchInput}
             autoCorrect={false}

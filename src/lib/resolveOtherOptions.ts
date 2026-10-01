@@ -55,3 +55,22 @@ export async function resolveOtherOptions(
 
   return resolved;
 }
+
+/**
+ * Spec 92 — `resolveOtherOptions` borra `otherText` al sustituir «Otro» por la
+ * opción creada en el servidor. Esa opción no existe en el instrumento en caché,
+ * así que el detalle de «Realizadas» solo puede mostrar «Otro: …» si el texto se
+ * conserva en el borrador local. Esto no afecta al payload (`buildResponsesPayload`
+ * no envía `otherText`) ni a los reintentos (el id ya no es el de «Otro», así que
+ * no se vuelve a crear la opción).
+ */
+export function preserveOtherText(original: AnswersMap, resolved: AnswersMap): AnswersMap {
+  const result: AnswersMap = { ...resolved };
+  for (const questionId of Object.keys(resolved)) {
+    const before = original[questionId];
+    if (resolved[questionId] !== before && before?.otherText) {
+      result[questionId] = { ...resolved[questionId]!, otherText: before.otherText };
+    }
+  }
+  return result;
+}

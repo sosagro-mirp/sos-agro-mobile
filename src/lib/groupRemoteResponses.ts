@@ -32,6 +32,11 @@ function formatValue(row: RemoteSurveyResponseRow, mergedOptionTexts: string[]):
     return row.hasAttachment ? (MEDIA_LABELS[row.questionType] ?? MEDIA_EMPTY_LABEL) : MEDIA_EMPTY_LABEL;
   }
 
+  if (row.questionType === "numeric_with_unit" && row.numericValue != null) {
+    // El servidor guarda el valor en `numericValue` y la unidad como opción.
+    return mergedOptionTexts.length > 0 ? `${row.numericValue} ${mergedOptionTexts.join(", ")}` : String(row.numericValue);
+  }
+
   if (mergedOptionTexts.length > 0) {
     // El servidor no conserva el prefijo "Otro:"; el texto ya viene tal cual
     // lo escribió el encuestador en `optionText` (spec 92, D2/Alcance 5).

@@ -8,7 +8,7 @@ import { instrumentCacheStorage } from "../../src/storage/instrumentCache";
 import { secureStorage } from "../../src/storage/secureStorage";
 import { surveyDraftStore } from "../../src/storage/surveyDraftStore";
 import { useSyncStatusStore } from "../../src/store/useSyncStatusStore";
-import { buildReadOnlyAnswers } from "../../src/lib/buildReadOnlyAnswers";
+import { buildReadOnlyAnswers, MISSING_OPTION_LABEL } from "../../src/lib/buildReadOnlyAnswers";
 import { groupRemoteResponses } from "../../src/lib/groupRemoteResponses";
 import { formatCompletedDate } from "../../src/components/completed/CompletedSurveyCard";
 import { AppText } from "../../src/components/common/AppText";
@@ -62,6 +62,7 @@ export default function CompletedSurveyDetailScreen() {
 
   useEffect(() => {
     let cancelled = false;
+    let localFallback: DetailSection[] | null = null;
 
     async function loadLocal(): Promise<DetailSection[] | null> {
       if (!localId) return null;
@@ -74,11 +75,19 @@ export default function CompletedSurveyDetailScreen() {
       if (draft.ownerUserId && activeUserId && draft.ownerUserId !== activeUserId) return null;
       const instrument = await instrumentCacheStorage.get(draft.instrumentId);
       if (!instrument) return null;
-      return buildReadOnlyAnswers(instrument.sections, draft.answers).map((s) => ({
+      const sections = buildReadOnlyAnswers(instrument.sections, draft.answers).map((s) => ({
         sectionId: s.sectionId,
         title: s.sectionName,
         rows: s.rows,
       }));
+      // Una opción «Otro» ya sincronizada por una versión anterior perdió su
+      // texto y su id no está en la caché: con conexión, el servidor la resuelve.
+      const hasUnresolved = sections.some((sec) => sec.rows.some((r) => r.displayValue.includes(MISSING_OPTION_LABEL)));
+      if (hasUnresolved && remoteId && isOnline) {
+        localFallback = sections;
+        return null;
+      }
+      return sections;
     }
 
     async function loadRemote(): Promise<DetailSection[] | null> {
@@ -105,6 +114,7 @@ export default function CompletedSurveyDetailScreen() {
           sections = null;
         }
       }
+      if (!sections && localFallback) sections = localFallback;
       if (cancelled) return;
       setState(sections ? { kind: "ready", sections } : { kind: "unavailable" });
     })();

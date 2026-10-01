@@ -24,7 +24,7 @@ const MEDIA_LABELS: Partial<Record<string, string>> = {
 
 const MEDIA_EMPTY_LABEL = "Sin evidencia capturada";
 const NO_ANSWER_LABEL = "Sin respuesta";
-const MISSING_OPTION_LABEL = "Opción no disponible";
+export const MISSING_OPTION_LABEL = "Opción no disponible";
 
 function isMediaQuestion(typeName: string): boolean {
   return typeName in MEDIA_LABELS;
@@ -32,7 +32,12 @@ function isMediaQuestion(typeName: string): boolean {
 
 function optionLabel(question: InstrumentQuestion, optionId: string, otherText: string | undefined): string {
   const option = question.options.find((candidate) => candidate.optionId === optionId);
-  if (!option) return MISSING_OPTION_LABEL;
+  if (!option) {
+    // Tras sincronizar, el servidor sustituye «Otro» por una opción nueva con el
+    // texto escrito (`resolveOtherOptions`) y esa opción no está en el
+    // instrumento en caché: si el texto sigue guardado, se muestra como «Otro».
+    return otherText?.trim() ? `Otro: ${otherText.trim()}` : MISSING_OPTION_LABEL;
+  }
   if (option.isOther) return `Otro: ${otherText ?? ""}`;
   return option.text;
 }
@@ -51,11 +56,18 @@ function formatAnswer(question: InstrumentQuestion, answer: InstrumentDraftAnswe
     return labels.length > 0 ? labels.join(", ") : NO_ANSWER_LABEL;
   }
 
+  if (typeName === "numeric_with_unit") {
+    const unit = answer.optionId !== undefined ? optionLabel(question, answer.optionId, answer.otherText) : null;
+    if (answer.numericValue != null && unit) return `${answer.numericValue} ${unit}`;
+    if (answer.numericValue != null) return String(answer.numericValue);
+    return unit ?? NO_ANSWER_LABEL;
+  }
+
   if (answer.optionId !== undefined) {
     return optionLabel(question, answer.optionId, answer.otherText);
   }
 
-  if (typeName === "numeric" || typeName === "numeric_with_unit") {
+  if (typeName === "numeric") {
     return answer.numericValue != null ? String(answer.numericValue) : NO_ANSWER_LABEL;
   }
 
