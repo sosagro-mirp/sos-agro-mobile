@@ -148,7 +148,10 @@ Módulos de API (`src/api/`):
 - Timeout / sin conexión (`NetworkError`) → no se reintenta dentro de `httpClient`; se propaga a
   `SyncQueueService`, que reintenta en la siguiente corrida de sync (backoff exponencial hasta
   `MAX_CONSECUTIVE_NETWORK_FAILURES = 5` fallos consecutivos).
-- 4xx → no reintentables; `syncQueue` los marca como `failed_validation`
+- 401 con token (`AuthRequiredError`, spec 86) → sesión por renovar: el ítem vuelve a `pending`, sin
+  sumar intentos; se corta el grupo de ese dueño. Nunca `failed_validation`.
+- 429 → error pasajero (spec 86): el ítem vuelve a `pending` y se corta la corrida.
+- Demás 4xx (403, 422…) → no reintentables; `syncQueue` los marca como `failed_validation`
 
 ---
 
@@ -251,10 +254,25 @@ Reintentos: backoff exponencial, máx 5 intentos. Errores 4xx → `failed_valida
 
 ## Flujos de uso de la aplicación
 
-### 1. Autenticación
-`login.tsx` → `POST /api/auth/login` → token en `expo-secure-store` → `useAuthStore` hidratado → tabs.
+### 1. Autenticación (spec 86)
+`login.tsx` → `POST /api/auth/login` → token **por usuario** en `expo-secure-store`
+(`sosagro_token_<userId>` + puntero `sosagro_active_user_id`) + credencial sin conexión (PBKDF2 con
+`@noble/hashes`, `offlineCredentialStorage`) → `useAuthStore` hidratado → tabs.
 
-Al relanzar la app, `_layout.tsx` restaura la sesión (`restoreSession()` lee SecureStore → `GET /api/auth/me`).
+- **Tablets compartidas:** el login muestra "¿Quién va a encuestar?" con los usuarios que ya ingresaron
+  en esa tablet; sin red se verifica la contraseña contra la credencial local (vigencia 30 días,
+  bloqueo escalonado tras 5 fallos, 10 fallos exigen conexión).
+- **Sesión local ≠ sesión con el servidor** (`useAuthStore.serverState`): un token vencido nunca cierra
+  la sesión local; solo pasa a `reauth_required` (aviso "Renovar" con red) y apaga
+  `useSyncStatusStore.isOnline` vía `authBlocked` para que las pantallas tomen el camino sin conexión.
+  El 401 se clasifica en vencido/rechazado con la hora del servidor (`lib/authFailure.ts`).
+- **Dueño por registro:** `owner_user_id` en `sync_queue`, `surveys` y `change_requests` (m0013). La
+  sync agrupa por dueño y envía cada ítem con el token de su dueño (`opts.authToken`).
+- **Salir:** ya no hay botón en el header; `app/account.tsx` ofrece "Cambiar de encuestador" (conserva
+  todo) y "Cerrar sesión y olvidar esta tablet" (advertencia fuerte si hay pendientes; nunca borra SQLite).
+
+Al relanzar la app, `_layout.tsx` restaura la sesión (`restoreSession()` lee la sesión activa de
+SecureStore; `GET /api/auth/me` es solo un refresco en segundo plano).
 
 ### 2. Descarga de campaña
 Usuario selecciona campaña → descarga en 3 fases:

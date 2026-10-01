@@ -9,12 +9,13 @@ import {
 } from "react-native";
 import { useRouter, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { FileText, User, Trash2, ArrowRight } from "lucide-react-native";
+import { FileText, User, Users, Trash2, ArrowRight } from "lucide-react-native";
 import { surveyDraftStore, type SurveyDraft } from "../../../src/storage/surveyDraftStore";
 import { instrumentCacheStorage } from "../../../src/storage/instrumentCache";
 import { farmerCacheStorage } from "../../../src/storage/farmerCache";
 import { useInstrumentSurveyStore } from "../../../src/store/useInstrumentSurveyStore";
 import { useDraftCountStore } from "../../../src/store/useDraftCountStore";
+import { secureStorage } from "../../../src/storage/secureStorage";
 import { AppText } from "../../../src/components/common/AppText";
 import { DestructiveButton } from "../../../src/components/common/DestructiveButton";
 import { ConfirmSheet } from "../../../src/components/common/ConfirmSheet";
@@ -57,13 +58,16 @@ export default function DraftsScreen() {
   const [error, setError] = useState<string | null>(null);
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const othersCount = useDraftCountStore((s) => s.othersCount);
 
   useFocusEffect(
     useCallback(() => {
       setIsLoading(true);
       setError(null);
-      surveyDraftStore
-        .listDrafts()
+      // Spec 86 (CA-18): solo los borradores del encuestador activo.
+      secureStorage
+        .getActiveUserId()
+        .then((activeUserId) => surveyDraftStore.listDrafts(activeUserId ?? undefined))
         .then((raw) => Promise.all(raw.map(enrichDraft)))
         .then(setDrafts)
         .catch((err) =>
@@ -196,6 +200,17 @@ export default function DraftsScreen() {
         </View>
       ) : null}
 
+      {/* Spec 86 (CA-18): los borradores de otros encuestadores no se listan ni
+          se pueden retomar, pero se avisa que existen. */}
+      {othersCount > 0 && !isLoading ? (
+        <View style={styles.othersNotice}>
+          <Users size={15} color={colors.infoFg} />
+          <Text style={styles.othersNoticeText}>
+            {othersCount} borrador{othersCount !== 1 ? "es" : ""} de otros encuestadores en esta tablet
+          </Text>
+        </View>
+      ) : null}
+
       <ScrollView contentContainerStyle={styles.list}>
         {isLoading ? (
           <ActivityIndicator size="large" color={colors.brand} style={styles.loader} />
@@ -324,6 +339,23 @@ function DraftCard({
 
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
+    othersNotice: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      backgroundColor: colors.infoBg,
+      marginHorizontal: 16,
+      marginTop: 8,
+      paddingVertical: 8,
+      paddingHorizontal: 12,
+      borderRadius: 10,
+    },
+    othersNoticeText: {
+      flex: 1,
+      fontFamily: Fonts.medium,
+      fontSize: 12.5,
+      color: colors.infoFg,
+    },
     root: { flex: 1, backgroundColor: colors.surfaceMuted },
     header: {
       paddingHorizontal: 20,

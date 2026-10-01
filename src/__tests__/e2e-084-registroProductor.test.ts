@@ -18,9 +18,20 @@
 
 // ─── Mocks (hoisted) ─────────────────────────────────────────────────────────
 
+// Spec 86 — la sync procesa por dueño con el token guardado de cada uno: estas
+// suites simulan una sesión activa con token para que `processAll()` corra.
+jest.mock('../storage/secureStorage', () => ({
+  secureStorage: {
+    getActiveUserId: jest.fn().mockResolvedValue('user-1'),
+    getTokenFor: jest.fn().mockResolvedValue('token-1'),
+  },
+}));
+
 jest.mock('../storage/syncQueue', () => ({
   syncQueueStorage: {
     dequeueNextPending: jest.fn(),
+    // Spec 86 — sin dueño (registros anteriores): se procesan con la sesión activa.
+    listPendingOwners: jest.fn().mockResolvedValue([null]),
     markInFlight: jest.fn(),
     markSynced: jest.fn(),
     markFailedValidation: jest.fn(),

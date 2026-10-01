@@ -1,4 +1,4 @@
-import { httpClient, ServerError } from './httpClient';
+import { httpClient, ServerError, type RequestOptions } from './httpClient';
 import { endpoints } from './endpoints';
 import type { FarmerSearchResult, ExtractFarmerResult, ExtractCropsResult } from '../types';
 
@@ -46,6 +46,7 @@ export const searchFarmers = async (query: string): Promise<FarmerSearchResult[]
 export const extractFarmer = async (
   surveyId: string,
   options?: { resolution?: ExtractFarmerResolution },
+  opts?: RequestOptions,
 ): Promise<ExtractFarmerResult> => {
   try {
     // The Farmer entity exposes its PK as `id` (not `farmerId`) — normalise here,
@@ -56,6 +57,7 @@ export const extractFarmer = async (
     }>(
       endpoints.surveyExtractFarmer(surveyId),
       options?.resolution ? { resolution: options.resolution } : {},
+      ...(opts ? [opts] : []),
     );
     return {
       farmer: { ...raw.farmer, farmerId: raw.farmer.farmerId ?? raw.farmer.id ?? '' },
@@ -78,5 +80,5 @@ export const extractFarmer = async (
   }
 };
 
-export const extractCrops = (surveyId: string): Promise<ExtractCropsResult> =>
-  httpClient.post(endpoints.surveyExtractCrops(surveyId), {});
+export const extractCrops = (surveyId: string, opts?: RequestOptions): Promise<ExtractCropsResult> =>
+  httpClient.post(endpoints.surveyExtractCrops(surveyId), {}, ...(opts ? [opts] : []));

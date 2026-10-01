@@ -19,13 +19,20 @@ jest.mock('../storage/mediaUploadQueueStorage', () => ({
     markFailed: jest.fn().mockResolvedValue(undefined),
     getUploadedForSurvey: jest.fn().mockResolvedValue([]),
     resetToRetry: jest.fn().mockResolvedValue(undefined),
+    resetInFlightToRetry: jest.fn().mockResolvedValue(undefined),
   },
 }));
 
 jest.mock('../storage/surveyDraftStore', () => ({
   surveyDraftStore: {
     getBackendSurveyId: jest.fn(),
+    // Spec 86 — dueño de la encuesta, para reintentar con su token.
+    getOwnerUserId: jest.fn().mockResolvedValue(null),
   },
+}));
+
+jest.mock('../storage/secureStorage', () => ({
+  secureStorage: { getTokenFor: jest.fn().mockResolvedValue(null) },
 }));
 
 jest.mock('../api/httpClient', () => {
@@ -58,6 +65,8 @@ import { mediaUploadQueueStorage } from '../storage/mediaUploadQueueStorage';
 import { surveyDraftStore } from '../storage/surveyDraftStore';
 import { httpClient } from '../api/httpClient';
 import { createResponse } from '../api/responses';
+import { AuthRequiredError } from '../api/httpErrors';
+import { secureStorage } from '../storage/secureStorage';
 
 const mockDequeueNextPending = mediaUploadQueueStorage.dequeueNextPending as jest.Mock;
 const mockGetUploadedForSurvey = mediaUploadQueueStorage.getUploadedForSurvey as jest.Mock;
@@ -155,5 +164,41 @@ describe('MediaUploadService.retryEntry', () => {
     await MediaUploadService.retryEntry('media-1', 'q1', LOCAL_SURVEY_ID);
 
     expect(mockCreateResponse).not.toHaveBeenCalled();
+  });
+});
+
+
+// ─── Spec 86 (M4/M5): dueño del token y 401 ───────────────────────────────────
+
+describe('MediaUploadService — token del dueño y 401 (spec 86)', () => {
+  it('retryEntry envía el reintento y el createResponse con el token del DUEÑO de la encuesta', async () => {
+    (surveyDraftStore.getOwnerUserId as jest.Mock).mockResolvedValueOnce('user-a');
+    (secureStorage.getTokenFor as jest.Mock).mockResolvedValueOnce('token-of-a');
+    mockGetBackendSurveyId.mockResolvedValue(REAL_SURVEY_ID);
+    mockDequeueNextPending.mockResolvedValueOnce(pendingEntry()).mockResolvedValueOnce(null);
+    mockGetUploadedForSurvey.mockResolvedValue([{ questionId: 'q1', attachmentId: 'attach-1' }]);
+    mockHttpPost.mockResolvedValue({ attachmentId: 'attach-1', presignedUrl: 'https://r2.test/put' });
+
+    await MediaUploadService.retryEntry('media-1', 'q1', LOCAL_SURVEY_ID);
+
+    expect(mockHttpPost.mock.calls[0][2]).toEqual({ authToken: 'token-of-a' });
+    expect(mockCreateResponse).toHaveBeenCalledWith(
+      { surveyId: REAL_SURVEY_ID, questionId: 'q1', attachmentId: 'attach-1' },
+      { authToken: 'token-of-a' },
+    );
+  });
+
+  it('un 401 se propaga y NO marca el adjunto como fallido (vuelve a pendiente)', async () => {
+    mockDequeueNextPending.mockResolvedValueOnce(pendingEntry()).mockResolvedValue(null);
+    mockHttpPost.mockRejectedValue(
+      new AuthRequiredError({ kind: 'expired', token: 't', serverDateMs: Date.now() }),
+    );
+
+    await expect(
+      MediaUploadService.processPendingForSurvey(LOCAL_SURVEY_ID, REAL_SURVEY_ID),
+    ).rejects.toBeInstanceOf(AuthRequiredError);
+
+    expect(mediaUploadQueueStorage.markFailed).not.toHaveBeenCalled();
+    expect(mediaUploadQueueStorage.resetInFlightToRetry).toHaveBeenCalled();
   });
 });
