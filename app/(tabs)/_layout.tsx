@@ -160,7 +160,10 @@ const tabButtonStyles = StyleSheet.create({
 const TAB_LABELS = {
   campaign: "Campañas",
   drafts: "Borradores",
-  sync: "Sincronización",
+  // «Sincronizar» y no «Sincronización»: con 14 caracteres obligaba a bajar las
+  // cinco etiquetas a ~7 px en teléfonos de 360 dp (decisión del usuario, 2026-10-01).
+  // El título de la pantalla sigue siendo «Sincronización».
+  sync: "Sincronizar",
   requests: "Solicitudes",
   completed: "Realizadas",
 } as const;

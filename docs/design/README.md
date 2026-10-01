@@ -172,5 +172,6 @@ Pantallas que el lienzo de Claude Design no incluye. Se construyeron
 por `src/lib/resolveTabLabelFontSize.ts` para que la más larga quepa en una línea
 según el ancho de la pantalla (base 11, con la escala del sistema topada en 1.3).
 No se truncan ni se encogen por separado. El botón de cada pestaña no lleva relleno
-lateral. Con «Sincronización» (14 caracteres) la letra queda en ~7.4 px a 360 dp y
-~9 px a 427 dp; una etiqueta más corta permitiría letra más grande.
+lateral. La pestaña de sincronización se rotula «Sincronizar» (11 caracteres): con
+«Sincronización» (14) la letra bajaba a ~7.4 px a 360 dp; ahora queda en ~9.4 px a
+360 dp y en los 11 px de diseño desde 412 dp. El título de la pantalla no cambia.
