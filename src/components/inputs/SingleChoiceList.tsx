@@ -94,6 +94,7 @@ export function SingleChoiceList({
             onFocus={() => setOtherFocused(true)}
             onBlur={() => setOtherFocused(false)}
             placeholder="Especifica aquí..."
+            maxLength={255}
             placeholderTextColor={colors.textMuted}
             multiline
             numberOfLines={2}

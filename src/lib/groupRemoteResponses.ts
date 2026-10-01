@@ -73,8 +73,12 @@ export function groupRemoteResponses(rows: RemoteSurveyResponseRow[]): RemoteSec
   for (const questionId of questionOrder) {
     const group = rowsByQuestion.get(questionId)!;
     const first = group[0];
+    // Spec 89: la respuesta a «Otros» trae la opción en `optionText` y lo que
+    // escribió el encuestador en `textValue`; se muestra el texto escrito. (Antes
+    // del spec 89 el servidor creaba una opción con ese texto, que ya venía en
+    // `optionText`: ese formato sigue funcionando igual.)
     const optionTexts = group
-      .map((row) => row.optionText)
+      .map((row) => (row.optionText && row.textValue?.trim() ? row.textValue.trim() : row.optionText))
       .filter((text): text is string => Boolean(text));
 
     if (!sections.has(first.sectionId)) {

@@ -472,30 +472,6 @@ describe("detalle — «Otro» ya sincronizado y número con unidad (TC-092-04)"
   });
 });
 
-describe("preserveOtherText (sincronización conserva el texto de «Otro»)", () => {
-  // Import local para no alterar los imports del resto del archivo.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { preserveOtherText } = require("../lib/resolveOtherOptions") as typeof import("../lib/resolveOtherOptions");
-
-  it("conserva otherText en las respuestas que la resolución cambió", () => {
-    const original = { q1: { questionId: "q1", optionId: "o-otro", otherText: "Aguacate" } };
-    const resolved = { q1: { questionId: "q1", optionId: "o-nueva", otherText: undefined } };
-    expect(preserveOtherText(original, resolved).q1).toEqual({ questionId: "q1", optionId: "o-nueva", otherText: "Aguacate" });
-  });
-
-  it("no toca las respuestas que no cambiaron", () => {
-    const answer = { questionId: "q2", textValue: "hola" };
-    const result = preserveOtherText({ q2: answer }, { q2: answer });
-    expect(result.q2).toBe(answer);
-  });
-
-  it("no inventa texto cuando el original no lo tenía", () => {
-    const original = { q3: { questionId: "q3", optionId: "o-a" } };
-    const resolved = { q3: { questionId: "q3", optionId: "o-b" } };
-    expect(preserveOtherText(original, resolved).q3).toEqual({ questionId: "q3", optionId: "o-b" });
-  });
-});
-
 describe("buildReadOnlyAnswers — varias opciones desconocidas en una selección múltiple", () => {
   it("el texto de «Otro» se asigna a una sola opción; la otra desconocida no lo hereda", () => {
     const sections: InstrumentSection[] = [
@@ -519,5 +495,43 @@ describe("buildReadOnlyAnswers — varias opciones desconocidas en una selecció
       "q-market": { questionId: "q-market", optionIds: ["o-coop", "o-archivada", "o-nueva"], otherText: "Feria local" },
     });
     expect(result[0].rows[0].displayValue).toBe("Cooperativa, Otro: Feria local, Opción no disponible");
+  });
+});
+
+// ─── Spec 89 — «Otros» guarda su texto en la respuesta (textValue) ───────────
+
+describe("groupRemoteResponses con el formato del spec 89", () => {
+  const row = (over: Partial<RemoteSurveyResponseRow>): RemoteSurveyResponseRow => ({
+    responseId: "r",
+    questionId: "q-crop",
+    questionText: "¿Qué cultivo principal tiene?",
+    questionType: "single_choice",
+    sectionId: "s1",
+    sectionTitle: "Finca",
+    sectionOrder: 1,
+    textValue: null,
+    numericValue: null,
+    booleanValue: null,
+    optionText: null,
+    hasAttachment: false,
+    ...over,
+  });
+
+  it("la fila de «Otros» muestra el texto escrito (textValue), no el nombre de la opción", () => {
+    const sections = groupRemoteResponses([row({ optionText: "Otro", textValue: "Aguacate" })]);
+    expect(sections[0].rows[0].displayValue).toBe("Aguacate");
+  });
+
+  it("selección múltiple: la opción normal y el texto de «Otros» van en una sola fila", () => {
+    const sections = groupRemoteResponses([
+      row({ responseId: "r1", questionId: "q-m", questionType: "multiple_choice", optionText: "Cooperativa" }),
+      row({ responseId: "r2", questionId: "q-m", questionType: "multiple_choice", optionText: "Otro", textValue: "Feria local" }),
+    ]);
+    expect(sections[0].rows[0].displayValue).toBe("Cooperativa, Feria local");
+  });
+
+  it("«Otros» sin texto conserva el nombre de la opción", () => {
+    const sections = groupRemoteResponses([row({ optionText: "Otro", textValue: "   " })]);
+    expect(sections[0].rows[0].displayValue).toBe("Otro");
   });
 });

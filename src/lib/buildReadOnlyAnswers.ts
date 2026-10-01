@@ -33,9 +33,10 @@ function isMediaQuestion(typeName: string): boolean {
 function optionLabel(question: InstrumentQuestion, optionId: string, otherText: string | undefined): string {
   const option = question.options.find((candidate) => candidate.optionId === optionId);
   if (!option) {
-    // Tras sincronizar, el servidor sustituye «Otro» por una opción nueva con el
-    // texto escrito (`resolveOtherOptions`) y esa opción no está en el
-    // instrumento en caché: si el texto sigue guardado, se muestra como «Otro».
+    // Antes del spec 89, al sincronizar se sustituía «Otro» por una opción nueva
+    // con el texto escrito, que no está en el instrumento en caché. Esos
+    // borradores ya sincronizados siguen en los dispositivos: si conservan el
+    // texto, se muestra como «Otro».
     return otherText?.trim() ? `Otro: ${otherText.trim()}` : MISSING_OPTION_LABEL;
   }
   if (option.isOther) return `Otro: ${otherText ?? ""}`;
