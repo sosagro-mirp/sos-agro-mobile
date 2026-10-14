@@ -954,7 +954,11 @@ export default function OrchestratorScreen() {
       });
       store.startDocumentCorrection(instrumentId, docQuestionId);
 
-      setDocumentCollisionPending(null);
+      // Se conserva `documentCollisionPending`: esta pantalla sigue montada
+      // debajo de la pregunta, y si el encuestador vuelve con «Atrás» sin
+      // confirmar, el aviso debe reaparecer completo (antes salía vacío, con
+      // `screenState` aún en 'document_collision_pending' y los datos en null).
+      // Al confirmar la corrección se vuelve a montar el orquestador desde cero.
       setModalLoading(false);
       router.push(`/instrument/${instrumentId}/question/${docIndex}`);
     } catch (err) {
