@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, StyleSheet, Text, View, Pressable } from "react-native";
+import { ActivityIndicator, Alert, StyleSheet, Text, View, Pressable } from "react-native";
 import { ChevronLeft } from "lucide-react-native";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -26,6 +26,7 @@ import { fetchFarmerConsentStatus } from "../../../src/api/consents";
 import { consentDocumentCacheStorage } from "../../../src/storage/consentDocumentCache";
 import { hasValidConsent } from "../../../src/lib/hasValidConsent";
 import { isLocalId } from "../../../src/lib/isLocalId";
+import { resolveResumeSessionId } from "../../../src/lib/resolveResumeSessionId";
 import { PendingCollisionCard } from "../../../src/components/campaign/PendingCollisionCard";
 import {
   pendingCollisionStorage,
@@ -309,24 +310,47 @@ export default function PreSurveyScreen() {
   // No guarda el estado del conflicto: rehidrata la sesión y deja que el
   // orquestador repita la extracción (idempotente), que vuelve a mostrar el
   // aviso si la colisión sigue vigente o continúa el flujo si ya no existe.
-  const handleContinuePendingCollision = (entry: PendingCollisionEntry) => {
+  const handleContinuePendingCollision = async (entry: PendingCollisionEntry) => {
     setError(null);
+    // Una sesión creada sin conexión pudo sincronizarse mientras tanto.
+    const sessionId = await resolveResumeSessionId(entry.sessionId);
     startSession(campaign);
     setNewFarmerMode(entry.phase);
     if (entry.phase === "registro") setInjectionRegistroSurveyId(entry.surveyId);
     else setInjectionS1SurveyId(entry.surveyId);
-    if (isLocalId(entry.sessionId)) applyOfflineSession(entry.sessionId);
-    else applySessionResponse({
-        sessionId: entry.sessionId,
+    if (isLocalId(sessionId)) applyOfflineSession(sessionId);
+    else {
+      applySessionResponse({
+        sessionId,
         campaign: { campaignId: campaign.campaignId, name: campaign.name },
       });
+    }
+    // Igual que una persona nueva en el flujo normal (`needsConsent` con
+    // `isNew`): el orquestador ofrece registrar el consentimiento.
     setConsentPending(true);
-    router.push(`/campaign/${id}/session/${entry.sessionId}/orchestrator`);
+    router.push(`/campaign/${id}/session/${sessionId}/orchestrator`);
   };
 
-  const handleDiscardPendingCollision = async (entry: PendingCollisionEntry) => {
-    await pendingCollisionStorage.remove(entry.surveyId);
-    setPendingCollisions((list) => list.filter((e) => e.surveyId !== entry.surveyId));
+  // Irreversible: borra la oferta de retomar, y con ella la única vía desde la
+  // app a esa sesión. Por eso pide confirmación.
+  const handleDiscardPendingCollision = (entry: PendingCollisionEntry) => {
+    Alert.alert(
+      "Descartar registro",
+      `¿Descartar el registro de ${entry.submittedName}? Ya no podrás retomarlo desde la app.`,
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Descartar",
+          style: "destructive",
+          onPress: () => {
+            if (!user?.userId) return;
+            void pendingCollisionStorage.remove(user.userId, entry.surveyId).then(() => {
+              setPendingCollisions((list) => list.filter((e) => e.surveyId !== entry.surveyId));
+            });
+          },
+        },
+      ],
+    );
   };
 
   const handleNewFarmer = async () => {

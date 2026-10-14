@@ -915,10 +915,13 @@ export default function OrchestratorScreen() {
       // llamada fallaba con "Sin conexión" y la corrección era imposible. El
       // instrumento ya está en la caché local porque se acaba de responder.
       if (!draft || !surveyId) {
-        setDocumentCollisionPending(null);
+        // No debería pasar (el borrador sigue en SQLite). Se avisa en vez de
+        // reintentar en silencio: el encuestador tocó «Corregir» y debe ver
+        // por qué no pasa nada.
         setModalLoading(false);
-        hasStarted.current = false;
-        run();
+        setDocumentCollisionPending(null);
+        setScreenState('error');
+        setErrorMessage('No se encontró la encuesta para corregir el documento. Intenta de nuevo.');
         return;
       }
       const instrumentId = draft.instrumentId;
@@ -950,7 +953,6 @@ export default function OrchestratorScreen() {
         restoredAnswers: draft.answers,
       });
       store.startDocumentCorrection(instrumentId, docQuestionId);
-      await pendingCollisionStorage.remove(surveyId);
 
       setDocumentCollisionPending(null);
       setModalLoading(false);
@@ -1110,8 +1112,10 @@ export default function OrchestratorScreen() {
   // Spec 68, Fase 10 — deja constancia local de que esta sesión quedó con el
   // Registro sin terminar por una colisión, para que la pre-encuesta ofrezca
   // «Continuar» si el encuestador sale con «Atrás». Se retira apenas el
-  // agricultor queda resuelto (`injectionPhase` vuelve a 'none') o al corregir
-  // el documento (ver `handleCorrectDocument`).
+  // agricultor queda resuelto (`injectionPhase` vuelve a 'none'). NO se retira
+  // al tocar «Corregir el documento»: si el encuestador sale de esa pregunta
+  // sin confirmar, la sesión debe seguir siendo recuperable; una colisión nueva
+  // simplemente reescribe el marcador.
   useEffect(() => {
     if (screenState !== 'document_collision_pending' || !documentCollisionPending) return;
     const { registroSurveyId, s1SurveyId, campaign } = useCampaignSessionStore.getState();
@@ -1132,8 +1136,9 @@ export default function OrchestratorScreen() {
 
   useEffect(() => {
     if (store.injectionPhase !== 'none') return;
-    void pendingCollisionStorage.remove(store.registroSurveyId, store.s1SurveyId);
-  }, [store.injectionPhase, store.registroSurveyId, store.s1SurveyId]);
+    if (!userId) return;
+    void pendingCollisionStorage.remove(userId, store.registroSurveyId, store.s1SurveyId);
+  }, [store.injectionPhase, store.registroSurveyId, store.s1SurveyId, userId]);
 
   // Spec 81, Fase 3 — el "Reintentar" de las pantallas de error fuerza un
   // `processAll()` (y resetea el tope de fallos consecutivos) antes de

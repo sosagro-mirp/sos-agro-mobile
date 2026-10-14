@@ -7,8 +7,13 @@ import * as SecureStore from "expo-secure-store";
 // extraído en línea). Este marcador es lo que permite ofrecer «Continuar» sin
 // mostrarlo para todo Registro terminado. Vive en SecureStore (como el resto
 // de preferencias pequeñas) para no abrir una migración de SQLite.
-const KEY = "sosagro_pending_document_collisions";
-const MAX_ENTRIES = 10;
+//
+// SecureStore admite ~2048 bytes por valor y cada entrada pesa ~330: la lista
+// se guarda **por encuestador** (tablet compartida, spec 86; así un usuario no
+// desaloja los marcadores de otro y `forgetDevice()` puede borrar los suyos) y
+// se limita a 5 entradas por usuario (~1,7 KB).
+const keyFor = (userId: string) => `sosagro_pending_document_collisions_${userId}`;
+const MAX_ENTRIES = 5;
 
 export interface PendingCollisionEntry {
   /** Id local de la encuesta de Registro (o S1 en el flujo legado). */
@@ -63,9 +68,9 @@ function isEntry(v: unknown): v is PendingCollisionEntry {
   );
 }
 
-async function readAll(): Promise<PendingCollisionEntry[]> {
+async function readAll(userId: string): Promise<PendingCollisionEntry[]> {
   try {
-    const raw = await SecureStore.getItemAsync(KEY);
+    const raw = await SecureStore.getItemAsync(keyFor(userId));
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed.filter(isEntry) : [];
@@ -74,10 +79,10 @@ async function readAll(): Promise<PendingCollisionEntry[]> {
   }
 }
 
-async function writeAll(list: PendingCollisionEntry[]): Promise<void> {
+async function writeAll(userId: string, list: PendingCollisionEntry[]): Promise<void> {
   try {
-    if (list.length === 0) await SecureStore.deleteItemAsync(KEY);
-    else await SecureStore.setItemAsync(KEY, JSON.stringify(list));
+    if (list.length === 0) await SecureStore.deleteItemAsync(keyFor(userId));
+    else await SecureStore.setItemAsync(keyFor(userId), JSON.stringify(list));
   } catch {
     // Best-effort: sin marcador solo se pierde la oferta de «Continuar».
   }
@@ -85,16 +90,21 @@ async function writeAll(list: PendingCollisionEntry[]): Promise<void> {
 
 export const pendingCollisionStorage = {
   async add(entry: PendingCollisionEntry): Promise<void> {
-    await writeAll(upsertEntry(await readAll(), entry));
+    await writeAll(entry.userId, upsertEntry(await readAll(entry.userId), entry));
   },
 
-  async remove(...surveyIds: (string | null | undefined)[]): Promise<void> {
-    const all = await readAll();
+  async remove(userId: string, ...surveyIds: (string | null | undefined)[]): Promise<void> {
+    const all = await readAll(userId);
     const next = removeEntries(all, surveyIds);
-    if (next.length !== all.length) await writeAll(next);
+    if (next.length !== all.length) await writeAll(userId, next);
   },
 
   async listFor(campaignId: string, userId: string): Promise<PendingCollisionEntry[]> {
-    return filterForCampaign(await readAll(), campaignId, userId);
+    return filterForCampaign(await readAll(userId), campaignId, userId);
+  },
+
+  /** `forgetDevice()`: nombres y documentos de agricultores no deben quedar en la tablet. */
+  async clearFor(userId: string): Promise<void> {
+    await writeAll(userId, []);
   },
 };
