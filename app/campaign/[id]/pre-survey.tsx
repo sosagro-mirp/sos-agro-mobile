@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View, Pressable } from "react-native";
 import { ChevronLeft } from "lucide-react-native";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useCachedCampaignsStore } from "../../../src/store/useCachedCampaignsStore";
 import { useCampaignSessionStore } from "../../../src/store/useCampaignSessionStore";
@@ -25,6 +25,12 @@ import type { CropSummary, FarmerSearchResult } from "../../../src/types";
 import { fetchFarmerConsentStatus } from "../../../src/api/consents";
 import { consentDocumentCacheStorage } from "../../../src/storage/consentDocumentCache";
 import { hasValidConsent } from "../../../src/lib/hasValidConsent";
+import { isLocalId } from "../../../src/lib/isLocalId";
+import { PendingCollisionCard } from "../../../src/components/campaign/PendingCollisionCard";
+import {
+  pendingCollisionStorage,
+  type PendingCollisionEntry,
+} from "../../../src/storage/pendingCollisionStorage";
 
 /**
  * Spec 78 — decide si hay que pasar por la pantalla de consentimiento antes
@@ -95,14 +101,32 @@ export default function PreSurveyScreen() {
     setSelectedFarmer,
     setNewFarmerMode,
     setConsentPending,
+    setInjectionRegistroSurveyId,
+    setInjectionS1SurveyId,
   } = useCampaignSessionStore();
   const { isOnline } = useSyncStatusStore();
   const { user } = useAuthStore();
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Spec 68, Fase 10 — Registros que quedaron con la colisión sin resolver.
+  const [pendingCollisions, setPendingCollisions] = useState<PendingCollisionEntry[]>([]);
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
+
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!user?.userId) return;
+      let active = true;
+      void pendingCollisionStorage.listFor(id, user.userId).then((list) => {
+        if (active) setPendingCollisions(list);
+      });
+      return () => {
+        active = false;
+      };
+    }, [id, user?.userId]),
+  );
 
   if (!campaign) {
     return (
@@ -281,6 +305,30 @@ export default function PreSurveyScreen() {
     await startSession_({ farmerId, farmerName, crops: farmer?.farm?.crops ?? undefined });
   };
 
+  // Spec 68, Fase 10 — retoma el Registro cuya colisión quedó sin resolver.
+  // No guarda el estado del conflicto: rehidrata la sesión y deja que el
+  // orquestador repita la extracción (idempotente), que vuelve a mostrar el
+  // aviso si la colisión sigue vigente o continúa el flujo si ya no existe.
+  const handleContinuePendingCollision = (entry: PendingCollisionEntry) => {
+    setError(null);
+    startSession(campaign);
+    setNewFarmerMode(entry.phase);
+    if (entry.phase === "registro") setInjectionRegistroSurveyId(entry.surveyId);
+    else setInjectionS1SurveyId(entry.surveyId);
+    if (isLocalId(entry.sessionId)) applyOfflineSession(entry.sessionId);
+    else applySessionResponse({
+        sessionId: entry.sessionId,
+        campaign: { campaignId: campaign.campaignId, name: campaign.name },
+      });
+    setConsentPending(true);
+    router.push(`/campaign/${id}/session/${entry.sessionId}/orchestrator`);
+  };
+
+  const handleDiscardPendingCollision = async (entry: PendingCollisionEntry) => {
+    await pendingCollisionStorage.remove(entry.surveyId);
+    setPendingCollisions((list) => list.filter((e) => e.surveyId !== entry.surveyId));
+  };
+
   const handleNewFarmer = async () => {
     await startSession_({ isNew: true });
   };
@@ -308,6 +356,15 @@ export default function PreSurveyScreen() {
         </View>
         <View style={styles.headerSpacer} />
       </View>
+
+      {pendingCollisions.map((entry) => (
+        <PendingCollisionCard
+          key={entry.surveyId}
+          entry={entry}
+          onContinue={handleContinuePendingCollision}
+          onDiscard={handleDiscardPendingCollision}
+        />
+      ))}
 
       {error ? (
         <View style={styles.errorBox}>

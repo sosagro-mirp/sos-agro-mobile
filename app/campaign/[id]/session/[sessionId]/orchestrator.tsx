@@ -29,6 +29,8 @@ import { resolveRegistrationFlowCode } from "../../../../../src/lib/instrumentCo
 import { chooseRegistrationFlow } from "../../../../../src/lib/registrationFlow";
 import { applyPendingConsentToFarmer } from "../../../../../src/lib/applyPendingConsentToFarmer";
 import { sessionCropsStorage } from "../../../../../src/storage/sessionCropsStorage";
+import { pendingCollisionStorage } from "../../../../../src/storage/pendingCollisionStorage";
+import { useAuthStore } from "../../../../../src/store/useAuthStore";
 import { DuplicateAlertModal } from "../../../../../src/components/campaign/DuplicateAlertModal";
 import { DocumentCollisionModal } from "../../../../../src/components/campaign/DocumentCollisionModal";
 import { NetworkError } from "../../../../../src/api/httpClient";
@@ -115,6 +117,7 @@ export default function OrchestratorScreen() {
     phase: 'registro' | 's1';
   } | null>(null);
   const hasStarted = useRef(false);
+  const userId = useAuthStore((s) => s.user?.userId);
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
@@ -947,6 +950,7 @@ export default function OrchestratorScreen() {
         restoredAnswers: draft.answers,
       });
       store.startDocumentCorrection(instrumentId, docQuestionId);
+      await pendingCollisionStorage.remove(surveyId);
 
       setDocumentCollisionPending(null);
       setModalLoading(false);
@@ -1102,6 +1106,34 @@ export default function OrchestratorScreen() {
     setDocumentCollisionPending(null);
     router.back();
   }, [router]);
+
+  // Spec 68, Fase 10 — deja constancia local de que esta sesión quedó con el
+  // Registro sin terminar por una colisión, para que la pre-encuesta ofrezca
+  // «Continuar» si el encuestador sale con «Atrás». Se retira apenas el
+  // agricultor queda resuelto (`injectionPhase` vuelve a 'none') o al corregir
+  // el documento (ver `handleCorrectDocument`).
+  useEffect(() => {
+    if (screenState !== 'document_collision_pending' || !documentCollisionPending) return;
+    const { registroSurveyId, s1SurveyId, campaign } = useCampaignSessionStore.getState();
+    const phase = documentCollisionPending.phase;
+    const surveyId = phase === 'registro' ? registroSurveyId : s1SurveyId;
+    if (!surveyId || !campaign?.campaignId || !resolvedSessionId || !userId) return;
+    void pendingCollisionStorage.add({
+      surveyId,
+      phase,
+      sessionId: resolvedSessionId,
+      campaignId: campaign.campaignId,
+      userId,
+      documentId: documentCollisionPending.documentId,
+      submittedName: documentCollisionPending.submittedName,
+      createdAt: Date.now(),
+    });
+  }, [screenState, documentCollisionPending, resolvedSessionId, userId]);
+
+  useEffect(() => {
+    if (store.injectionPhase !== 'none') return;
+    void pendingCollisionStorage.remove(store.registroSurveyId, store.s1SurveyId);
+  }, [store.injectionPhase, store.registroSurveyId, store.s1SurveyId]);
 
   // Spec 81, Fase 3 — el "Reintentar" de las pantallas de error fuerza un
   // `processAll()` (y resetea el tope de fallos consecutivos) antes de
