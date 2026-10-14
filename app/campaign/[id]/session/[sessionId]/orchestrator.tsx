@@ -906,16 +906,28 @@ export default function OrchestratorScreen() {
       const isRegistro = documentCollisionPending?.phase === 'registro';
       const { registroSurveyId, s1SurveyId } = useCampaignSessionStore.getState();
       const surveyId = isRegistro ? registroSurveyId : s1SurveyId;
-      const { instrumentId, name } = await fetchInstrumentByCode(isRegistro ? 'S_REG' : 'S1');
+      const draft = surveyId ? await surveyDraftStore.loadDraft(surveyId) : null;
+      // Spec 68 (TC-068-07) — el id del instrumento sale del propio borrador
+      // en SQLite, no de `fetchInstrumentByCode` (HTTP sin caché): offline esa
+      // llamada fallaba con "Sin conexión" y la corrección era imposible. El
+      // instrumento ya está en la caché local porque se acaba de responder.
+      if (!draft || !surveyId) {
+        setDocumentCollisionPending(null);
+        setModalLoading(false);
+        hasStarted.current = false;
+        run();
+        return;
+      }
+      const instrumentId = draft.instrumentId;
       const instrument = await getOrDownloadInstrument(instrumentId);
+      const name = instrument.name;
       const flatQuestions = flattenSections(instrument.sections);
       const docIndex = flatQuestions.findIndex(
         ({ question }) => question.systemField === 'farmer.documentId',
       );
       const docQuestionId = flatQuestions[docIndex]?.question.questionId;
-      const draft = surveyId ? await surveyDraftStore.loadDraft(surveyId) : null;
 
-      if (docIndex < 0 || !docQuestionId || !draft || !surveyId) {
+      if (docIndex < 0 || !docQuestionId) {
         // No debería pasar (el instrumento siempre tiene la pregunta de documento y su
         // borrador sigue en SQLite) — degradar a reintentar en vez de dejar
         // la pantalla muerta o navegar a un flujo que rebotaría.
