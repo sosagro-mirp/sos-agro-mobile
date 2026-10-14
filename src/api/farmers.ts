@@ -45,7 +45,7 @@ export const searchFarmers = async (query: string): Promise<FarmerSearchResult[]
 
 export const extractFarmer = async (
   surveyId: string,
-  options?: { resolution?: ExtractFarmerResolution },
+  options?: { resolution?: ExtractFarmerResolution; correctedDocumentId?: string },
   opts?: RequestOptions,
 ): Promise<ExtractFarmerResult> => {
   try {
@@ -56,7 +56,15 @@ export const extractFarmer = async (
       existed: boolean;
     }>(
       endpoints.surveyExtractFarmer(surveyId),
-      options?.resolution ? { resolution: options.resolution } : {},
+      {
+        ...(options?.resolution ? { resolution: options.resolution } : {}),
+        // Spec 68, Fase 8 — el documento corregido viaja aquí porque reenviar
+        // la encuesta no lo propaga: ya está sincronizada y el batch de
+        // respuestas es idempotente por diseño en el backend.
+        ...(options?.correctedDocumentId
+          ? { correctedDocumentId: options.correctedDocumentId }
+          : {}),
+      },
       ...(opts ? [opts] : []),
     );
     return {

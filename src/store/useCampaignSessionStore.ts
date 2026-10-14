@@ -60,6 +60,24 @@ interface CampaignSessionState {
    */
   lastCompletedSurveyId: string | null;
 
+  /**
+   * Spec 68, Fase 8 — "Corregir el documento" del aviso de colisión. Mientras
+   * está activo, la pantalla de pregunta sabe que el encuestador entró a
+   * corregir un único dato y no a seguir llenando S1a: al confirmar la
+   * pregunta vuelve al orquestador en vez de avanzar a la siguiente.
+   * `questionId` es la pregunta `farmer.documentId` de S1a.
+   */
+  documentCorrection: { instrumentId: string; questionId: string } | null;
+
+  /**
+   * Documento ya corregido y pendiente de enviar al backend. Se pasa como
+   * `correctedDocumentId` en el siguiente `extractFarmer()` — reenviar la
+   * encuesta no sirve: para este punto ya está sincronizada y
+   * `ResponsesService.createMany()` ignora un batch cuya encuesta ya tiene
+   * respuestas.
+   */
+  pendingCorrectedDocumentId: string | null;
+
   startSession: (campaign: CampaignRender) => void;
   applySessionResponse: (response: CampaignSessionResponse) => void;
   applyNextStep: (nextStep: NextStepResponse) => void;
@@ -88,6 +106,11 @@ interface CampaignSessionState {
   setLastCompletedSurveyId: (surveyId: string) => void;
   /** Spec 91 — consumido (ya se esperó / se cayó al camino local); nada más que hacer con él. */
   clearLastCompletedSurveyId: () => void;
+  // Corrección del documento tras un aviso de colisión (spec 68, Fase 8)
+  startDocumentCorrection: (instrumentId: string, questionId: string) => void;
+  applyDocumentCorrection: (documentId: string) => void;
+  clearDocumentCorrection: () => void;
+  clearPendingCorrectedDocumentId: () => void;
 }
 
 const initialState = {
@@ -108,6 +131,8 @@ const initialState = {
   localFarmerId: null,
   consentPending: false,
   lastCompletedSurveyId: null,
+  documentCorrection: null as { instrumentId: string; questionId: string } | null,
+  pendingCorrectedDocumentId: null as string | null,
 };
 
 export const useCampaignSessionStore = create<CampaignSessionState>((set, get) => ({
@@ -225,5 +250,23 @@ export const useCampaignSessionStore = create<CampaignSessionState>((set, get) =
 
   clearLastCompletedSurveyId() {
     set({ lastCompletedSurveyId: null });
+  },
+
+  startDocumentCorrection(instrumentId, questionId) {
+    set({ documentCorrection: { instrumentId, questionId } });
+  },
+
+  // El modo se cierra al aplicar la corrección: el encuestador ya vuelve al
+  // orquestador, y lo único que sobrevive es el documento pendiente de enviar.
+  applyDocumentCorrection(documentId) {
+    set({ documentCorrection: null, pendingCorrectedDocumentId: documentId });
+  },
+
+  clearDocumentCorrection() {
+    set({ documentCorrection: null });
+  },
+
+  clearPendingCorrectedDocumentId() {
+    set({ pendingCorrectedDocumentId: null });
   },
 }));

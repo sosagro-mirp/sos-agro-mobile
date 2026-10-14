@@ -14,6 +14,8 @@ import { useRouter } from "expo-router";
 import { Check, ChevronLeft, ArrowRight, List, X } from "lucide-react-native";
 import { useInstrumentSurveyStore } from "../../store/useInstrumentSurveyStore";
 import { useCampaignSessionStore } from "../../store/useCampaignSessionStore";
+import { surveyDraftStore } from "../../storage/surveyDraftStore";
+import { advanceWithinCampaign } from "../../lib/campaignNavigation";
 import { OfflineBanner } from "../network/OfflineBanner";
 import { ConsentModal } from "../campaign/ConsentModal";
 import { QuestionContainer } from "./QuestionContainer";
@@ -72,6 +74,13 @@ export const QuestionScreen: React.FC<QuestionScreenProps> = ({
   const consentPending = useCampaignSessionStore((s) => s.consentPending);
   const setConsentPending = useCampaignSessionStore((s) => s.setConsentPending);
   const [consentModalVisible, setConsentModalVisible] = useState(false);
+  // Spec 68, Fase 8 — modo "Corregir el documento": el encuestador entró a
+  // esta pantalla desde el aviso de colisión para arreglar un único dato, no
+  // para seguir llenando S1a. Confirmar la pregunta lo devuelve al
+  // orquestador, que reintenta la extracción con el documento corregido.
+  const documentCorrection = useCampaignSessionStore((s) => s.documentCorrection);
+  const applyDocumentCorrection = useCampaignSessionStore((s) => s.applyDocumentCorrection);
+  const campaign = useCampaignSessionStore((s) => s.campaign);
 
   const visible = visibleQuestions();
   const total = visible.length;
@@ -79,6 +88,44 @@ export const QuestionScreen: React.FC<QuestionScreenProps> = ({
 
   const isFirst = currentIndex === 0;
   const isLast = currentIndex === total - 1;
+
+  // Solo la pregunta del documento de S1a entra en modo corrección: cualquier
+  // otra pantalla de pregunta —de este instrumento o de otro— sigue con el
+  // flujo normal.
+  const isCorrectingDocument =
+    !!documentCorrection &&
+    documentCorrection.instrumentId === instrumentId &&
+    currentItem?.question.questionId === documentCorrection.questionId;
+
+  const confirmDocumentCorrection = async () => {
+    if (!currentItem) return;
+    const { surveyId, answers: current, reset } = useInstrumentSurveyStore.getState();
+    const answer = current[currentItem.question.questionId];
+    const corrected = answer?.textValue?.trim();
+    if (!corrected) return;
+
+    // Guardado explícito: el `setAnswer` del store persiste con 250 ms de
+    // debounce y aquí se sale de la pantalla de inmediato. Sin esto, una
+    // corrección confirmada rápido no llegaría a SQLite y el camino offline
+    // (`extractFarmerLocally`) seguiría leyendo el documento viejo.
+    if (surveyId) {
+      await surveyDraftStore.saveAnswer(surveyId, currentItem.question.questionId, answer);
+    }
+
+    applyDocumentCorrection(corrected);
+    reset();
+
+    const campaignId = campaign?.campaignId;
+    if (campaignId && sessionId) {
+      advanceWithinCampaign(
+        router,
+        campaignId,
+        `/campaign/${campaignId}/session/${sessionId}/orchestrator`,
+      );
+    } else {
+      router.replace("/(tabs)/campaign");
+    }
+  };
 
   const handleChange = (answer: InstrumentDraftAnswer) => {
     if (!currentItem) return;
@@ -108,6 +155,10 @@ export const QuestionScreen: React.FC<QuestionScreenProps> = ({
   // TransactionTooLargeException (Sentry REACT-NATIVE-3, 2026-08-18).
   // Con `replace` solo vive una pantalla de pregunta a la vez.
   const handleNext = () => {
+    if (isCorrectingDocument) {
+      void confirmDocumentCorrection();
+      return;
+    }
     if (isLast) {
       onFinished();
       return;
@@ -265,12 +316,18 @@ export const QuestionScreen: React.FC<QuestionScreenProps> = ({
             disabled={!canAdvance()}
             style={[styles.nextButton, !canAdvance() && styles.nextButtonDisabled]}
             accessibilityRole="button"
-            accessibilityLabel={isLast ? "Finalizar encuesta" : "Siguiente pregunta"}
+            accessibilityLabel={
+              isCorrectingDocument
+                ? "Confirmar documento corregido"
+                : isLast
+                  ? "Finalizar encuesta"
+                  : "Siguiente pregunta"
+            }
           >
             <Text
               style={[styles.nextButtonText, !canAdvance() && styles.nextButtonTextDisabled]}
             >
-              {isLast ? "Finalizar" : "Siguiente"}
+              {isCorrectingDocument ? "Confirmar documento" : isLast ? "Finalizar" : "Siguiente"}
             </Text>
             <ArrowRight
               size={19}

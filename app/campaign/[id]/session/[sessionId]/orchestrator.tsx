@@ -29,6 +29,8 @@ import { resolveRegistrationFlowCode } from "../../../../../src/lib/instrumentCo
 import { chooseRegistrationFlow } from "../../../../../src/lib/registrationFlow";
 import { applyPendingConsentToFarmer } from "../../../../../src/lib/applyPendingConsentToFarmer";
 import { sessionCropsStorage } from "../../../../../src/storage/sessionCropsStorage";
+import { pendingCollisionStorage } from "../../../../../src/storage/pendingCollisionStorage";
+import { useAuthStore } from "../../../../../src/store/useAuthStore";
 import { DuplicateAlertModal } from "../../../../../src/components/campaign/DuplicateAlertModal";
 import { DocumentCollisionModal } from "../../../../../src/components/campaign/DocumentCollisionModal";
 import { NetworkError } from "../../../../../src/api/httpClient";
@@ -115,6 +117,7 @@ export default function OrchestratorScreen() {
     phase: 'registro' | 's1';
   } | null>(null);
   const hasStarted = useRef(false);
+  const userId = useAuthStore((s) => s.user?.userId);
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
@@ -343,7 +346,13 @@ export default function OrchestratorScreen() {
     setSavingStep(false);
 
     try {
-      const { injectionPhase, registroSurveyId, s1SurveyId, s2SurveyId } =
+      const {
+        injectionPhase,
+        registroSurveyId,
+        s1SurveyId,
+        s2SurveyId,
+        pendingCorrectedDocumentId,
+      } =
         useCampaignSessionStore.getState();
 
       // Spec 84 — Registro: un solo instrumento reemplaza a S1+S2. Al
@@ -363,11 +372,19 @@ export default function OrchestratorScreen() {
             );
           }
           try {
+            // Spec 68, Fase 8 — mismo override que en la rama S1.
             const { farmer } = await withNetworkRetry(
-              () => extractFarmer(realRegistroSurveyId),
+              () =>
+                extractFarmer(
+                  realRegistroSurveyId,
+                  pendingCorrectedDocumentId
+                    ? { correctedDocumentId: pendingCorrectedDocumentId }
+                    : undefined,
+                ),
               { onRetry: setRetryAttempt },
             );
             setRetryAttempt(0);
+            store.clearPendingCorrectedDocumentId();
             await cacheFarmerIdentity({
               farmerId: farmer.farmerId,
               name: farmer.name,
@@ -394,6 +411,8 @@ export default function OrchestratorScreen() {
           } catch (err) {
             // Spec 68 — igual que en la rama S1: nunca fusionar en silencio.
             if (err instanceof DocumentIdCollisionError) {
+              // El backend ya persistió la corrección antes de esta colisión.
+              store.clearPendingCorrectedDocumentId();
               setDocumentCollisionPending({
                 documentId: err.documentId,
                 submittedName: err.submittedName,
@@ -484,11 +503,21 @@ export default function OrchestratorScreen() {
             // cualquier pantalla de error (ver backlog "NetworkError
             // intermitente en extract-farmer muestra 'Sin conexión' con red
             // sana").
+            // Spec 68, Fase 8 — si el encuestador acaba de corregir el
+            // documento, viaja aquí como override: la encuesta ya está
+            // sincronizada y reenviarla no propagaría la corrección.
             const { farmer } = await withNetworkRetry(
-              () => extractFarmer(realS1SurveyId),
+              () =>
+                extractFarmer(
+                  realS1SurveyId,
+                  pendingCorrectedDocumentId
+                    ? { correctedDocumentId: pendingCorrectedDocumentId }
+                    : undefined,
+                ),
               { onRetry: setRetryAttempt },
             );
             setRetryAttempt(0);
+            store.clearPendingCorrectedDocumentId();
             await cacheFarmerIdentity({
               farmerId: farmer.farmerId,
               name: farmer.name,
@@ -507,6 +536,11 @@ export default function OrchestratorScreen() {
             // fusionar en silencio: detener el avance con el aviso en vez
             // de dejar que caiga al catch genérico de más abajo.
             if (err instanceof DocumentIdCollisionError) {
+              // El override ya se aplicó en el backend antes de detectar esta
+              // segunda colisión: el documento corregido está persistido y
+              // reenviarlo no aporta nada. Si el encuestador vuelve a
+              // corregir, `applyDocumentCorrection()` fija uno nuevo.
+              store.clearPendingCorrectedDocumentId();
               setDocumentCollisionPending({
                 documentId: err.documentId,
                 submittedName: err.submittedName,
@@ -860,37 +894,87 @@ export default function OrchestratorScreen() {
 
   // "Corregir el documento": vuelve a la pregunta farmer.documentId del
   // instrumento que disparó la colisión — el Registro (spec 84) o, en el
-  // respaldo legado, S1a — con las respuestas ya digitadas intactas (su
-  // store sigue inicializado, no hace falta re-crear nada). Funciona igual
-  // online y offline: no requiere red. Criterio 9.
+  // respaldo legado, S1a — con las respuestas ya digitadas intactas.
+  // Funciona igual online y offline: no requiere red. Criterio 9.
+  //
+  // Spec 68, Fase 8 — la versión anterior daba por hecho que el store de la
+  // encuesta seguía inicializado. No lo está: `completed.tsx` ya llamó a
+  // `reset()` antes de navegar aquí, así que el `instrumentId` del store vale
+  // null y el guard de `question/[index].tsx` expulsaba al encuestador a la
+  // pestaña de campañas, perdiendo la entrevista. Hay que rehidratar el store
+  // desde el borrador (que sigue en SQLite) antes de navegar.
   const handleCorrectDocument = useCallback(async () => {
     setModalLoading(true);
     try {
-      const code = documentCollisionPending?.phase === 'registro' ? 'REG' : 'S1';
-      const { instrumentId } = await fetchInstrumentByCode(code === 'REG' ? 'S_REG' : code);
+      const isRegistro = documentCollisionPending?.phase === 'registro';
+      const { registroSurveyId, s1SurveyId } = useCampaignSessionStore.getState();
+      const surveyId = isRegistro ? registroSurveyId : s1SurveyId;
+      const draft = surveyId ? await surveyDraftStore.loadDraft(surveyId) : null;
+      // Spec 68 (TC-068-07) — el id del instrumento sale del propio borrador
+      // en SQLite, no de `fetchInstrumentByCode` (HTTP sin caché): offline esa
+      // llamada fallaba con "Sin conexión" y la corrección era imposible. El
+      // instrumento ya está en la caché local porque se acaba de responder.
+      if (!draft || !surveyId) {
+        // No debería pasar (el borrador sigue en SQLite). Se avisa en vez de
+        // reintentar en silencio: el encuestador tocó «Corregir» y debe ver
+        // por qué no pasa nada.
+        setModalLoading(false);
+        setDocumentCollisionPending(null);
+        setScreenState('error');
+        setErrorMessage('No se encontró la encuesta para corregir el documento. Intenta de nuevo.');
+        return;
+      }
+      const instrumentId = draft.instrumentId;
       const instrument = await getOrDownloadInstrument(instrumentId);
+      const name = instrument.name;
       const flatQuestions = flattenSections(instrument.sections);
       const docIndex = flatQuestions.findIndex(
         ({ question }) => question.systemField === 'farmer.documentId',
       );
+      const docQuestionId = flatQuestions[docIndex]?.question.questionId;
 
-      setDocumentCollisionPending(null);
-      setModalLoading(false);
-
-      if (docIndex >= 0) {
-        router.push(`/instrument/${instrumentId}/question/${docIndex}`);
-      } else {
-        // No debería pasar (S1a siempre tiene la pregunta de documento) —
-        // degradar a reintentar en vez de dejar la pantalla muerta.
+      if (docIndex < 0 || !docQuestionId) {
+        // No debería pasar (el instrumento siempre tiene la pregunta de documento y su
+        // borrador sigue en SQLite) — degradar a reintentar en vez de dejar
+        // la pantalla muerta o navegar a un flujo que rebotaría.
+        setDocumentCollisionPending(null);
+        setModalLoading(false);
         hasStarted.current = false;
         run();
+        return;
       }
+
+      initializeSurvey({
+        surveyId,
+        instrumentId,
+        instrumentName: name,
+        sections: instrument.sections,
+        campaignSessionId: resolvedSessionId ?? undefined,
+        restoredAnswers: draft.answers,
+      });
+      store.startDocumentCorrection(instrumentId, docQuestionId);
+
+      // Se conserva `documentCollisionPending`: esta pantalla sigue montada
+      // debajo de la pregunta, y si el encuestador vuelve con «Atrás» sin
+      // confirmar, el aviso debe reaparecer completo (antes salía vacío, con
+      // `screenState` aún en 'document_collision_pending' y los datos en null).
+      // Al confirmar la corrección se vuelve a montar el orquestador desde cero.
+      setModalLoading(false);
+      router.push(`/instrument/${instrumentId}/question/${docIndex}`);
     } catch (err) {
       setModalLoading(false);
       setScreenState('error');
       setErrorMessage(err instanceof Error ? err.message : 'Error al volver al documento');
     }
-  }, [documentCollisionPending, getOrDownloadInstrument, router, run]);
+  }, [
+    documentCollisionPending,
+    getOrDownloadInstrument,
+    router,
+    run,
+    initializeSurvey,
+    resolvedSessionId,
+    store,
+  ]);
 
   // "Es la misma persona" / "Registrar aparte". Offline solo la segunda
   // tiene sentido (el modal oculta la primera, ver `allowSamePerson`):
@@ -985,6 +1069,10 @@ export default function OrchestratorScreen() {
         }
       }
 
+      // Si el encuestador volvió de la pregunta de corrección sin confirmar y
+      // resolvió desde el aviso, el modo corrección no debe seguir activo.
+      store.clearDocumentCorrection();
+
       if (isRegistro) {
         store.completeRegistroInjection(resolvedFarmerId, resolvedFarmerName);
       } else {
@@ -1028,6 +1116,37 @@ export default function OrchestratorScreen() {
     setDocumentCollisionPending(null);
     router.back();
   }, [router]);
+
+  // Spec 68, Fase 10 — deja constancia local de que esta sesión quedó con el
+  // Registro sin terminar por una colisión, para que la pre-encuesta ofrezca
+  // «Continuar» si el encuestador sale con «Atrás». Se retira apenas el
+  // agricultor queda resuelto (`injectionPhase` vuelve a 'none'). NO se retira
+  // al tocar «Corregir el documento»: si el encuestador sale de esa pregunta
+  // sin confirmar, la sesión debe seguir siendo recuperable; una colisión nueva
+  // simplemente reescribe el marcador.
+  useEffect(() => {
+    if (screenState !== 'document_collision_pending' || !documentCollisionPending) return;
+    const { registroSurveyId, s1SurveyId, campaign } = useCampaignSessionStore.getState();
+    const phase = documentCollisionPending.phase;
+    const surveyId = phase === 'registro' ? registroSurveyId : s1SurveyId;
+    if (!surveyId || !campaign?.campaignId || !resolvedSessionId || !userId) return;
+    void pendingCollisionStorage.add({
+      surveyId,
+      phase,
+      sessionId: resolvedSessionId,
+      campaignId: campaign.campaignId,
+      userId,
+      documentId: documentCollisionPending.documentId,
+      submittedName: documentCollisionPending.submittedName,
+      createdAt: Date.now(),
+    });
+  }, [screenState, documentCollisionPending, resolvedSessionId, userId]);
+
+  useEffect(() => {
+    if (store.injectionPhase !== 'none') return;
+    if (!userId) return;
+    void pendingCollisionStorage.remove(userId, store.registroSurveyId, store.s1SurveyId);
+  }, [store.injectionPhase, store.registroSurveyId, store.s1SurveyId, userId]);
 
   // Spec 81, Fase 3 — el "Reintentar" de las pantallas de error fuerza un
   // `processAll()` (y resetea el tope de fallos consecutivos) antes de
