@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, StyleSheet, Text, View, Pressable } from "react-native";
 import { ChevronLeft } from "lucide-react-native";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
@@ -112,12 +112,16 @@ export default function PreSurveyScreen() {
   const [error, setError] = useState<string | null>(null);
   // Spec 68, Fase 10 — Registros que quedaron con la colisión sin resolver.
   const [pendingCollisions, setPendingCollisions] = useState<PendingCollisionEntry[]>([]);
+  // «Continuar» espera una consulta antes de navegar: sin esto un segundo toque
+  // hacía un segundo `push` al orquestador.
+  const continuing = useRef(false);
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
 
   useFocusEffect(
     useCallback(() => {
+      continuing.current = false;
       if (!user?.userId) return;
       let active = true;
       void pendingCollisionStorage.listFor(id, user.userId).then((list) => {
@@ -307,10 +311,12 @@ export default function PreSurveyScreen() {
   };
 
   // Spec 68, Fase 10 — retoma el Registro cuya colisión quedó sin resolver.
-  // No guarda el estado del conflicto: rehidrata la sesión y deja que el
+  // Rehidrata la sesión y deja que el
   // orquestador repita la extracción (idempotente), que vuelve a mostrar el
   // aviso si la colisión sigue vigente o continúa el flujo si ya no existe.
   const handleContinuePendingCollision = async (entry: PendingCollisionEntry) => {
+    if (continuing.current) return;
+    continuing.current = true;
     setError(null);
     // Una sesión creada sin conexión pudo sincronizarse mientras tanto.
     const sessionId = await resolveResumeSessionId(entry.sessionId);
@@ -329,6 +335,7 @@ export default function PreSurveyScreen() {
     // `isNew`): el orquestador ofrece registrar el consentimiento.
     setConsentPending(true);
     router.push(`/campaign/${id}/session/${sessionId}/orchestrator`);
+    // Se libera al volver a enfocar la pantalla (ver `useFocusEffect`).
   };
 
   // Irreversible: borra la oferta de retomar, y con ella la única vía desde la

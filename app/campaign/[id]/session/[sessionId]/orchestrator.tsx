@@ -1069,6 +1069,10 @@ export default function OrchestratorScreen() {
         }
       }
 
+      // Si el encuestador volvió de la pregunta de corrección sin confirmar y
+      // resolvió desde el aviso, el modo corrección no debe seguir activo.
+      store.clearDocumentCorrection();
+
       if (isRegistro) {
         store.completeRegistroInjection(resolvedFarmerId, resolvedFarmerName);
       } else {
