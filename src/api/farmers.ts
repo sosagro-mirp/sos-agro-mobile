@@ -1,6 +1,6 @@
 import { httpClient, ServerError, type RequestOptions } from './httpClient';
 import { endpoints } from './endpoints';
-import type { FarmerSearchResult, ExtractFarmerResult, ExtractCropsResult } from '../types';
+import type { CropSummary, FarmerSearchResult, ExtractFarmerResult, ExtractCropsResult } from '../types';
 
 // Spec 68 — el documentId digitado en S1a ya pertenece a otro agricultor con
 // un nombre que no corresponde (ver `farmers/name-matching.ts` en backend/).
@@ -54,6 +54,8 @@ export const extractFarmer = async (
     const raw = await httpClient.post<{
       farmer: Omit<FarmerSearchResult, 'farmerId'> & { id?: string; farmerId?: string };
       existed: boolean;
+      crops?: CropSummary[];
+      extraction?: ExtractFarmerResult['extraction'];
     }>(
       endpoints.surveyExtractFarmer(surveyId),
       {
@@ -70,6 +72,8 @@ export const extractFarmer = async (
     return {
       farmer: { ...raw.farmer, farmerId: raw.farmer.farmerId ?? raw.farmer.id ?? '' },
       existed: raw.existed,
+      crops: raw.crops,
+      extraction: raw.extraction,
     };
   } catch (err) {
     // Spec 68 — nunca dejar que un 409 sin resolución se confunda con

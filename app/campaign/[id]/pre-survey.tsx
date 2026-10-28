@@ -304,6 +304,7 @@ export default function PreSurveyScreen() {
         documentId: farmer.documentId,
         phone: farmer.phone,
         farmName: farmer.farm?.name,
+        farmId: farmer.farm?.farmId,
         crops: farmer.farm?.crops ?? undefined,
       });
     }

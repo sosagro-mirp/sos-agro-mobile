@@ -9,7 +9,6 @@ import { useInstrumentSurveyStore } from "../../../../../src/store/useInstrument
 import { useSyncStatusStore } from "../../../../../src/store/useSyncStatusStore";
 import { getNextStep } from "../../../../../src/api/campaignSessions";
 import { fetchInstrumentByCode } from "../../../../../src/api/instruments";
-import { extractFarmer, extractCrops, DocumentIdCollisionError } from "../../../../../src/api/farmers";
 import { overwriteSurvey, skipStepApi } from "../../../../../src/api/surveys";
 import { surveyDraftStore } from "../../../../../src/storage/surveyDraftStore";
 import { syncQueueStorage } from "../../../../../src/storage/syncQueue";
@@ -26,7 +25,12 @@ import type { LocalFarmerDraft } from "../../../../../src/lib/extractFarmerLocal
 import { flattenSections } from "../../../../../src/lib/flattenSections";
 import { cacheFarmerIdentity } from "../../../../../src/lib/cacheFarmerIdentity";
 import { resolveRegistrationFlowCode } from "../../../../../src/lib/instrumentCodeAliases";
-import { chooseRegistrationFlow } from "../../../../../src/lib/registrationFlow";
+import {
+  cacheResolvedFarmer,
+  chooseRegistrationFlow,
+  resolveCropsOnline,
+  resolveExtractionOnline,
+} from "../../../../../src/lib/registrationFlow";
 import { applyPendingConsentToFarmer } from "../../../../../src/lib/applyPendingConsentToFarmer";
 import { sessionCropsStorage } from "../../../../../src/storage/sessionCropsStorage";
 import { pendingCollisionStorage } from "../../../../../src/storage/pendingCollisionStorage";
@@ -371,60 +375,43 @@ export default function OrchestratorScreen() {
               `No se pudo sincronizar la encuesta de Registro (${registroSurveyId}) antes de extraer el agricultor`,
             );
           }
-          try {
-            // Spec 68, Fase 8 — mismo override que en la rama S1.
-            const { farmer } = await withNetworkRetry(
-              () =>
-                extractFarmer(
-                  realRegistroSurveyId,
-                  pendingCorrectedDocumentId
-                    ? { correctedDocumentId: pendingCorrectedDocumentId }
-                    : undefined,
-                ),
-              { onRetry: setRetryAttempt },
-            );
-            setRetryAttempt(0);
-            store.clearPendingCorrectedDocumentId();
-            await cacheFarmerIdentity({
-              farmerId: farmer.farmerId,
-              name: farmer.name,
-              documentId: farmer.documentId,
-              phone: farmer.phone,
-              farmName: farmer.farm?.name,
-              crops: farmer.farm?.crops ?? undefined,
+          // Spec 96 — una sola lectura de la extracción que el backend hizo en el
+          // batch; el alias solo viaja con el documento corregido (spec 68, Fase 8).
+          const outcome = await withNetworkRetry(
+            () =>
+              resolveExtractionOnline(
+                realRegistroSurveyId,
+                pendingCorrectedDocumentId
+                  ? { correctedDocumentId: pendingCorrectedDocumentId }
+                  : undefined,
+              ),
+            { onRetry: setRetryAttempt },
+          );
+          setRetryAttempt(0);
+          // El backend ya persistió la corrección (también si volvió a colisionar).
+          store.clearPendingCorrectedDocumentId();
+          if (outcome.kind === 'collision') {
+            setDocumentCollisionPending({
+              documentId: outcome.documentId,
+              submittedName: outcome.submittedName,
+              existingFarmerName: outcome.existingFarmerName,
+              offline: false,
+              phase: 'registro',
             });
-            if (resolvedSessionId) {
-              await applyPendingConsentToFarmer(resolvedSessionId, farmer.farmerId);
-            }
-            const cropsResult = await withNetworkRetry(
-              () => extractCrops(realRegistroSurveyId),
-              { onRetry: setRetryAttempt },
-            );
-            setRetryAttempt(0);
-            if (resolvedSessionId) {
-              await sessionCropsStorage.save(resolvedSessionId, cropsResult.crops);
-            }
-            store.completeRegistroInjection(farmer.farmerId, farmer.name);
-            const nextStep = await getNextStep(resolvedSessionId);
-            store.applyNextStep(nextStep);
-            await checkAndNavigate(nextStep);
-          } catch (err) {
-            // Spec 68 — igual que en la rama S1: nunca fusionar en silencio.
-            if (err instanceof DocumentIdCollisionError) {
-              // El backend ya persistió la corrección antes de esta colisión.
-              store.clearPendingCorrectedDocumentId();
-              setDocumentCollisionPending({
-                documentId: err.documentId,
-                submittedName: err.submittedName,
-                existingFarmerName: err.existingFarmerName,
-                offline: false,
-                phase: 'registro',
-              });
-              setScreenState('document_collision_pending');
-              return;
-            }
-            throw err;
+            setScreenState('document_collision_pending');
+            return;
           }
+          if (outcome.kind === 'blocked') throw new Error(outcome.message);
+
+          await cacheResolvedFarmer(registroSurveyId, outcome);
+          if (resolvedSessionId) {
+            await applyPendingConsentToFarmer(resolvedSessionId, outcome.farmerId);
+            await sessionCropsStorage.save(resolvedSessionId, outcome.crops);
+          }
+          store.completeRegistroInjection(outcome.farmerId, outcome.farmerName);
+          const nextStep = await getNextStep(resolvedSessionId);
+          store.applyNextStep(nextStep);
+          await checkAndNavigate(nextStep);
         } else {
           // Offline: extraer productor y luego cultivos localmente, sobre la
           // misma encuesta.
@@ -454,6 +441,8 @@ export default function OrchestratorScreen() {
               await applyPendingConsentToFarmer(resolvedSessionId, draft.farmerId);
             }
             store.applyLocalFarmer(draft);
+            // Spec 96 — el borrador guarda su id provisional para enviarlo como `clientFarmerId`.
+            if (draft.isProvisional) await surveyDraftStore.setFarmerId(registroSurveyId, draft.farmerId);
 
             const { campaign } = useCampaignSessionStore.getState();
             if (campaign?.campaignId && resolvedSessionId) {
@@ -497,62 +486,41 @@ export default function OrchestratorScreen() {
               `No se pudo sincronizar la encuesta S1 (${s1SurveyId}) antes de extraer el agricultor`,
             );
           }
-          try {
-            // Spec 81, Fase 2 — un NetworkError aquí ya no revienta al
-            // primer microcorte: se reintenta con backoff antes de mostrar
-            // cualquier pantalla de error (ver backlog "NetworkError
-            // intermitente en extract-farmer muestra 'Sin conexión' con red
-            // sana").
-            // Spec 68, Fase 8 — si el encuestador acaba de corregir el
-            // documento, viaja aquí como override: la encuesta ya está
-            // sincronizada y reenviarla no propagaría la corrección.
-            const { farmer } = await withNetworkRetry(
-              () =>
-                extractFarmer(
-                  realS1SurveyId,
-                  pendingCorrectedDocumentId
-                    ? { correctedDocumentId: pendingCorrectedDocumentId }
-                    : undefined,
-                ),
-              { onRetry: setRetryAttempt },
-            );
-            setRetryAttempt(0);
-            store.clearPendingCorrectedDocumentId();
-            await cacheFarmerIdentity({
-              farmerId: farmer.farmerId,
-              name: farmer.name,
-              documentId: farmer.documentId,
-              phone: farmer.phone,
-              farmName: farmer.farm?.name,
-              crops: farmer.farm?.crops ?? undefined,
+          // Spec 81, Fase 2 — reintento con backoff ante microcortes. Spec 96 —
+          // lectura de la extracción del batch; el documento corregido (spec 68,
+          // Fase 8) viaja por el alias porque reenviar la encuesta no lo propaga.
+          const outcome = await withNetworkRetry(
+            () =>
+              resolveExtractionOnline(
+                realS1SurveyId,
+                pendingCorrectedDocumentId
+                  ? { correctedDocumentId: pendingCorrectedDocumentId }
+                  : undefined,
+              ),
+            { onRetry: setRetryAttempt },
+          );
+          setRetryAttempt(0);
+          store.clearPendingCorrectedDocumentId();
+          // Spec 68 — documento de otra persona: nunca fusionar en silencio.
+          if (outcome.kind === 'collision') {
+            setDocumentCollisionPending({
+              documentId: outcome.documentId,
+              submittedName: outcome.submittedName,
+              existingFarmerName: outcome.existingFarmerName,
+              offline: false,
+              phase: 's1',
             });
-            if (resolvedSessionId) {
-              await applyPendingConsentToFarmer(resolvedSessionId, farmer.farmerId);
-            }
-            store.completeS1Injection(farmer.farmerId, farmer.name);
-            await injectInstrument('S2');
-          } catch (err) {
-            // Spec 68 — el documentId ya pertenece a otra persona. Nunca
-            // fusionar en silencio: detener el avance con el aviso en vez
-            // de dejar que caiga al catch genérico de más abajo.
-            if (err instanceof DocumentIdCollisionError) {
-              // El override ya se aplicó en el backend antes de detectar esta
-              // segunda colisión: el documento corregido está persistido y
-              // reenviarlo no aporta nada. Si el encuestador vuelve a
-              // corregir, `applyDocumentCorrection()` fija uno nuevo.
-              store.clearPendingCorrectedDocumentId();
-              setDocumentCollisionPending({
-                documentId: err.documentId,
-                submittedName: err.submittedName,
-                existingFarmerName: err.existingFarmerName,
-                offline: false,
-                phase: 's1',
-              });
-              setScreenState('document_collision_pending');
-              return;
-            }
-            throw err;
+            setScreenState('document_collision_pending');
+            return;
           }
+          if (outcome.kind === 'blocked') throw new Error(outcome.message);
+
+          await cacheResolvedFarmer(s1SurveyId, outcome);
+          if (resolvedSessionId) {
+            await applyPendingConsentToFarmer(resolvedSessionId, outcome.farmerId);
+          }
+          store.completeS1Injection(outcome.farmerId, outcome.farmerName);
+          await injectInstrument('S2');
         } else {
           // Offline: extract farmer locally from S1 responses
           const draft = await extractFarmerLocally(s1SurveyId);
@@ -589,6 +557,7 @@ export default function OrchestratorScreen() {
               await applyPendingConsentToFarmer(resolvedSessionId, draft.farmerId);
             }
             store.applyLocalFarmer(draft);
+            if (draft.isProvisional) await surveyDraftStore.setFarmerId(s1SurveyId, draft.farmerId);
             store.completeS1Injection(draft.farmerId, draft.name);
             await injectInstrument('S2');
           } else {
@@ -611,13 +580,13 @@ export default function OrchestratorScreen() {
               `No se pudo sincronizar la encuesta S2 (${s2SurveyId}) antes de extraer los cultivos`,
             );
           }
-          const cropsResult = await withNetworkRetry(
-            () => extractCrops(realS2SurveyId),
+          const s2Crops = await withNetworkRetry(
+            () => resolveCropsOnline(realS2SurveyId),
             { onRetry: setRetryAttempt },
           );
           setRetryAttempt(0);
           if (resolvedSessionId) {
-            await sessionCropsStorage.save(resolvedSessionId, cropsResult.crops);
+            await sessionCropsStorage.save(resolvedSessionId, s2Crops);
           }
           store.completeS2Injection();
           const nextStep = await getNextStep(resolvedSessionId);
@@ -1006,6 +975,9 @@ export default function OrchestratorScreen() {
           farmName: draft.farmName,
         });
         store.applyLocalFarmer(draft);
+        const { registroSurveyId: regId, s1SurveyId: s1Id } = useCampaignSessionStore.getState();
+        const localId = isRegistro ? regId : s1Id;
+        if (localId && draft.isProvisional) await surveyDraftStore.setFarmerId(localId, draft.farmerId);
         resolvedFarmerId = draft.farmerId;
         resolvedFarmerName = draft.name;
 
@@ -1047,25 +1019,23 @@ export default function OrchestratorScreen() {
           );
           return;
         }
-        const { farmer } = await extractFarmer(realSurveyId, { resolution });
-        await cacheFarmerIdentity({
-          farmerId: farmer.farmerId,
-          name: farmer.name,
-          documentId: farmer.documentId,
-          phone: farmer.phone,
-          farmName: farmer.farm?.name,
-          crops: farmer.farm?.crops ?? undefined,
-        });
-        resolvedFarmerId = farmer.farmerId;
-        resolvedFarmerName = farmer.name;
+        // Spec 96 (C3) — la decisión viaja una vez por el alias; finca y cultivos
+        // salen de su respuesta, sin `extract-crops`.
+        const outcome = await resolveExtractionOnline(realSurveyId, { resolution });
+        if (outcome.kind !== 'resolved') {
+          throw new Error(
+            outcome.kind === 'blocked'
+              ? outcome.message
+              : 'No se pudo registrar al agricultor. Inténtalo de nuevo.',
+          );
+        }
+        await cacheResolvedFarmer(localSurveyId, outcome);
+        resolvedFarmerId = outcome.farmerId;
+        resolvedFarmerName = outcome.farmerName;
 
-        // Spec 84 — el Registro sigue con la extracción de cultivos sobre la
-        // misma encuesta, en vez de inyectar un segundo instrumento.
-        if (isRegistro) {
-          const cropsResult = await extractCrops(realSurveyId);
-          if (resolvedSessionId) {
-            await sessionCropsStorage.save(resolvedSessionId, cropsResult.crops);
-          }
+        // Spec 84 — el Registro sigue con los cultivos de la misma encuesta.
+        if (isRegistro && resolvedSessionId) {
+          await sessionCropsStorage.save(resolvedSessionId, outcome.crops);
         }
       }
 

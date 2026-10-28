@@ -64,6 +64,7 @@ jest.mock('../api/surveys', () => ({
   markSurveyAsSynced: jest.fn(),
   createSurvey: jest.fn(),
   skipStepApi: jest.fn(),
+  getSurveyExtraction: jest.fn(),
 }));
 
 jest.mock('../api/campaignSessions', () => ({
@@ -176,7 +177,7 @@ import { syncQueueStorage } from '../storage/syncQueue';
 import { surveyDraftStore } from '../storage/surveyDraftStore';
 import { instrumentCacheStorage } from '../storage/instrumentCache';
 import { submitResponsesBatch } from '../api/responses';
-import { markSurveyAsSynced } from '../api/surveys';
+import { markSurveyAsSynced, getSurveyExtraction } from '../api/surveys';
 import { markSessionAsSynced } from '../api/campaignSessions';
 import { extractFarmer, extractCrops, DocumentIdCollisionError } from '../api/farmers';
 import { sessionCropsStorage } from '../storage/sessionCropsStorage';
@@ -195,6 +196,7 @@ const mockMarkFailedValidation = syncQueueStorage.markFailedValidation as jest.M
 const mockLoadDraft = surveyDraftStore.loadDraft as jest.Mock;
 const mockInstrumentCacheGet = instrumentCacheStorage.get as jest.Mock;
 const mockExtractFarmer = extractFarmer as jest.Mock;
+const mockGetExtraction = getSurveyExtraction as unknown as jest.Mock;
 const mockExtractCrops = extractCrops as jest.Mock;
 const mockSessionCropsSave = sessionCropsStorage.save as jest.Mock;
 const mockBuildResponsesPayload = buildResponsesPayload as jest.Mock;
@@ -256,7 +258,37 @@ beforeEach(() => {
     existed: false,
   });
   mockExtractCrops.mockResolvedValue({ crops: [CAFE] });
+  // Spec 96 — el backend extrae dentro del batch; la cola solo lee el resultado.
+  mockGetExtraction.mockResolvedValue(extractionView());
 });
+
+// Spec 96 — forma de `GET /surveys/:id/extraction` (spec 95).
+function extractionView(overrides: Record<string, unknown> = {}) {
+  return {
+    status: 'done',
+    farmerId: 'real-farmer-1',
+    farmerName: 'Productora Registro',
+    existed: false,
+    clientFarmerId: null,
+    farm: null,
+    farmCropId: null,
+    crops: [CAFE],
+    openDiscrepancies: 0,
+    extractedAt: '2026-10-28T12:00:00.000Z',
+    ...overrides,
+  };
+}
+
+const COLLISION_VIEW = {
+  status: 'collision',
+  farmerId: null,
+  farmerName: null,
+  collision: {
+    documentId: '1084084084',
+    submittedName: 'Productora Registro',
+    existingFarmer: { farmerId: 'real-farmer-otro', name: 'Otra Persona' },
+  },
+};
 
 // ─── Resolución de códigos ───────────────────────────────────────────────────
 
@@ -299,61 +331,58 @@ describe('Criterios 5 y 6 — elección entre Registro y S1/S2', () => {
 // ─── Sincronización ──────────────────────────────────────────────────────────
 
 describe('Criterio 5 — sincronizar un borrador de Registro', () => {
-  it('extrae productor y luego cultivos sobre la misma encuesta, y guarda los cultivos de la sesión', async () => {
+  it('lee la extracción del batch, sin extract-*, y guarda los cultivos de la sesión', async () => {
     givenQueuedDraftOf('S_REG');
 
     await SyncQueueService.processAll();
 
-    expect(mockExtractFarmer).toHaveBeenCalledWith('survey-1');
-    expect(mockExtractCrops).toHaveBeenCalledWith('survey-1');
-    expect(mockExtractFarmer.mock.invocationCallOrder[0]).toBeLessThan(
-      mockExtractCrops.mock.invocationCallOrder[0],
-    );
+    expect(mockGetExtraction).toHaveBeenCalledTimes(1);
+    expect(mockGetExtraction.mock.calls[0][0]).toBe('survey-1');
+    expect(mockExtractFarmer).not.toHaveBeenCalled();
+    expect(mockExtractCrops).not.toHaveBeenCalled();
     expect(mockSessionCropsSave).toHaveBeenCalledWith('session-1', [CAFE]);
     expect(mockMarkFailedValidation).not.toHaveBeenCalled();
     expect(mockMarkSynced).toHaveBeenCalledWith('entry-1');
   });
 
-  it('ante colisión de documento resuelve como separate_person y aun así extrae los cultivos', async () => {
+  it('ante colisión de documento resuelve como separate_person y los cultivos salen del alias', async () => {
     givenQueuedDraftOf('S_REG');
-    mockExtractFarmer
-      .mockRejectedValueOnce(
-        new DocumentIdCollisionError({
-          documentId: '1084084084',
-          submittedName: 'Productora Registro',
-          existingFarmer: { farmerId: 'real-farmer-otro', name: 'Otra Persona' },
-        }),
-      )
-      .mockResolvedValueOnce({
-        farmer: { farmerId: 'real-farmer-2', name: 'Productora Registro', documentId: '1084084084' },
-        existed: false,
-      });
+    mockGetExtraction.mockResolvedValue(extractionView(COLLISION_VIEW));
+    mockExtractFarmer.mockResolvedValueOnce({
+      farmer: { farmerId: 'real-farmer-2', name: 'Productora Registro', documentId: '1084084084' },
+      existed: false,
+      crops: [CAFE],
+    });
 
     await SyncQueueService.processAll();
 
-    expect(mockExtractFarmer).toHaveBeenNthCalledWith(2, 'survey-1', { resolution: 'separate_person' });
-    expect(mockExtractCrops).toHaveBeenCalledWith('survey-1');
+    expect(mockExtractFarmer).toHaveBeenCalledTimes(1);
+    expect(mockExtractFarmer).toHaveBeenCalledWith('survey-1', { resolution: 'separate_person' });
+    expect(mockExtractCrops).not.toHaveBeenCalled();
+    expect(mockSessionCropsSave).toHaveBeenCalledWith('session-1', [CAFE]);
     expect(mockMarkFailedValidation).not.toHaveBeenCalled();
   });
 });
 
-describe('Criterio 6 — los borradores S1a y S1b siguen como antes', () => {
-  it('S1a solo extrae el productor', async () => {
+describe('Criterio 6 — los borradores S1a y S1b siguen la misma lectura', () => {
+  it('S1a lee la extracción y no llama a extract-farmer', async () => {
     givenQueuedDraftOf('S1a');
 
     await SyncQueueService.processAll();
 
-    expect(mockExtractFarmer).toHaveBeenCalledWith('survey-1');
+    expect(mockGetExtraction).toHaveBeenCalledTimes(1);
+    expect(mockExtractFarmer).not.toHaveBeenCalled();
     expect(mockExtractCrops).not.toHaveBeenCalled();
   });
 
-  it('S1b solo extrae los cultivos', async () => {
+  it('S1b lee la extracción y no llama a extract-crops', async () => {
     givenQueuedDraftOf('S1b');
 
     await SyncQueueService.processAll();
 
+    expect(mockGetExtraction).toHaveBeenCalledTimes(1);
     expect(mockExtractFarmer).not.toHaveBeenCalled();
-    expect(mockExtractCrops).toHaveBeenCalledWith('survey-1');
+    expect(mockExtractCrops).not.toHaveBeenCalled();
   });
 });
 
@@ -372,13 +401,6 @@ describe('Criterio 6 — los borradores S1a y S1b siguen como antes', () => {
 describe('Colisión de documento con el orquestador esperando la encuesta (auditoría 41, mayor 2)', () => {
   const sessionStoreGetState = useCampaignSessionStore.getState as jest.Mock;
   const defaultSessionState = sessionStoreGetState();
-
-  const collision = () =>
-    new DocumentIdCollisionError({
-      documentId: '1084084084',
-      submittedName: 'Productora Registro',
-      existingFarmer: { farmerId: 'real-farmer-otro', name: 'Otra Persona' },
-    });
 
   function givenOrchestratorAwaiting(phase: 'registro' | 's1', surveyId: string, isOnline: boolean) {
     sessionStoreGetState.mockReturnValue({
@@ -402,13 +424,12 @@ describe('Colisión de documento con el orquestador esperando la encuesta (audit
   it('Registro en processAll(): no resuelve la colisión ni extrae cultivos, y cierra la entrada sin fallo', async () => {
     givenQueuedDraftOf('S_REG');
     givenOrchestratorAwaiting('registro', 'survey-1', true);
-    mockExtractFarmer.mockRejectedValueOnce(collision());
+    mockGetExtraction.mockResolvedValue(extractionView(COLLISION_VIEW));
 
     await SyncQueueService.processAll();
 
-    expect(mockExtractFarmer).toHaveBeenCalledTimes(1);
-    expect(mockExtractFarmer).toHaveBeenCalledWith('survey-1');
-    expect(mockExtractFarmer).not.toHaveBeenCalledWith('survey-1', { resolution: 'separate_person' });
+    expect(mockGetExtraction).not.toHaveBeenCalled();
+    expect(mockExtractFarmer).not.toHaveBeenCalled();
     expect(mockExtractCrops).not.toHaveBeenCalled();
     expect(mockMarkFailedValidation).not.toHaveBeenCalled();
     expect(mockMarkSynced).toHaveBeenCalledWith('entry-1');
@@ -427,11 +448,12 @@ describe('Colisión de documento con el orquestador esperando la encuesta (audit
     // `processSurveyNow()` reclama con `claimPendingBySurveyId()` en vez de
     // `getPendingBySurveyId()` + `processEntry()`.
     (syncQueueStorage.claimPendingBySurveyId as jest.Mock).mockResolvedValueOnce(makeEntry());
-    mockExtractFarmer.mockRejectedValueOnce(collision());
+    mockGetExtraction.mockResolvedValue(extractionView(COLLISION_VIEW));
 
     await SyncQueueService.processSurveyNow('survey-1');
 
-    expect(mockExtractFarmer).toHaveBeenCalledTimes(1);
+    expect(mockGetExtraction).not.toHaveBeenCalled();
+    expect(mockExtractFarmer).not.toHaveBeenCalled();
     expect(mockExtractCrops).not.toHaveBeenCalled();
     expect(mockMarkFailedValidation).not.toHaveBeenCalled();
     expect(mockMarkSynced).toHaveBeenCalledWith('entry-1');
@@ -440,11 +462,12 @@ describe('Colisión de documento con el orquestador esperando la encuesta (audit
   it('S1a heredado: tampoco la resuelve cuando el orquestador espera la fase s1', async () => {
     givenQueuedDraftOf('S1a');
     givenOrchestratorAwaiting('s1', 'survey-1', true);
-    mockExtractFarmer.mockRejectedValueOnce(collision());
+    mockGetExtraction.mockResolvedValue(extractionView(COLLISION_VIEW));
 
     await SyncQueueService.processAll();
 
-    expect(mockExtractFarmer).toHaveBeenCalledTimes(1);
+    expect(mockGetExtraction).not.toHaveBeenCalled();
+    expect(mockExtractFarmer).not.toHaveBeenCalled();
     expect(mockMarkFailedValidation).not.toHaveBeenCalled();
     expect(mockMarkSynced).toHaveBeenCalledWith('entry-1');
   });
@@ -452,28 +475,32 @@ describe('Colisión de documento con el orquestador esperando la encuesta (audit
   it('sin conexión según el estado de red, mantiene la resolución diferida como separate_person', async () => {
     givenQueuedDraftOf('S_REG');
     givenOrchestratorAwaiting('registro', 'survey-1', false);
-    mockExtractFarmer.mockRejectedValueOnce(collision()).mockResolvedValueOnce({
+    mockGetExtraction.mockResolvedValue(extractionView(COLLISION_VIEW));
+    mockExtractFarmer.mockResolvedValueOnce({
+      crops: [CAFE],
       farmer: { farmerId: 'real-farmer-2', name: 'Productora Registro', documentId: '1084084084' },
       existed: false,
     });
 
     await SyncQueueService.processAll();
 
-    expect(mockExtractFarmer).toHaveBeenNthCalledWith(2, 'survey-1', { resolution: 'separate_person' });
-    expect(mockExtractCrops).toHaveBeenCalledWith('survey-1');
+    expect(mockExtractFarmer).toHaveBeenCalledWith('survey-1', { resolution: 'separate_person' });
+    expect(mockExtractCrops).not.toHaveBeenCalled();
   });
 
   it('si el orquestador espera otra encuesta, mantiene la resolución diferida como separate_person', async () => {
     givenQueuedDraftOf('S_REG');
     givenOrchestratorAwaiting('registro', 'local_survey_otra', true);
-    mockExtractFarmer.mockRejectedValueOnce(collision()).mockResolvedValueOnce({
+    mockGetExtraction.mockResolvedValue(extractionView(COLLISION_VIEW));
+    mockExtractFarmer.mockResolvedValueOnce({
+      crops: [CAFE],
       farmer: { farmerId: 'real-farmer-2', name: 'Productora Registro', documentId: '1084084084' },
       existed: false,
     });
 
     await SyncQueueService.processAll();
 
-    expect(mockExtractFarmer).toHaveBeenNthCalledWith(2, 'survey-1', { resolution: 'separate_person' });
-    expect(mockExtractCrops).toHaveBeenCalledWith('survey-1');
+    expect(mockExtractFarmer).toHaveBeenCalledWith('survey-1', { resolution: 'separate_person' });
+    expect(mockExtractCrops).not.toHaveBeenCalled();
   });
 });

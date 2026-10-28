@@ -160,6 +160,8 @@ export const farmerCache = sqliteTable('farmer_cache', {
   documentId: text('document_id'),
   phone: text('phone'),
   farmName: text('farm_name'),
+  // Spec 96 (m0014) — finca anclada por el backend; sin backfill, nullable.
+  farmId: text('farm_id'),
   crops: text('crops'), // JSON array of CropSummary: { cropId, name }[]
   cachedAt: integer('cached_at', { mode: 'timestamp' }).notNull(),
   // Spec 78 — última versión de consentimiento aceptada por este agricultor,
