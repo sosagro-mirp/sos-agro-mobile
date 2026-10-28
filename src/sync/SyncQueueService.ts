@@ -7,10 +7,11 @@ import { pendingSessionStorage } from '../storage/pendingSessions';
 import { farmerCacheStorage } from '../storage/farmerCache';
 import { instrumentCacheStorage } from '../storage/instrumentCache';
 import { submitResponsesBatch } from '../api/responses';
-import { createSurvey, markSurveyAsSynced, skipStepApi } from '../api/surveys';
+import { createSurvey, getSurveyExtraction, markSurveyAsSynced, skipStepApi } from '../api/surveys';
 import { markSessionAsSynced, createCampaignSession } from '../api/campaignSessions';
-import { extractFarmer, extractCrops, DocumentIdCollisionError } from '../api/farmers';
-import { cacheFarmerIdentity } from '../lib/cacheFarmerIdentity';
+import { extractFarmer } from '../api/farmers';
+import { interpretExtraction } from '../lib/interpretExtraction';
+import { cacheFarmerIdentity, type FarmerIdentity } from '../lib/cacheFarmerIdentity';
 import { buildResponsesPayload } from '../lib/buildResponsesPayload';
 import { flattenSections } from '../lib/flattenSections';
 import { findIncompleteNumericUnitAnswers } from '../lib/findIncompleteNumericUnitAnswers';
@@ -760,8 +761,8 @@ class SyncQueueServiceClass {
       await submitResponsesBatch(payload, ...this.authArgs(entry));
       await markSurveyAsSynced(realSurveyId, ...this.authArgs(entry));
 
-      // After responses are on the backend, run deferred extraction for S1/S2.
-      await this.maybeExtractFarmerAndCrops(entry, realSurveyId);
+      // Spec 96 — el backend extrae dentro del batch; aquí solo se lee el resultado.
+      await this.syncExtractionResult(entry, realSurveyId);
 
       if (entry.campaignSessionId) {
         await markSessionAsSynced(entry.campaignSessionId, ...this.authArgs(entry));
@@ -881,12 +882,18 @@ class SyncQueueServiceClass {
       idRealDe: async (doc) => (await farmerCacheStorage.getByDocumentId(doc))?.farmerId ?? null,
     });
 
+    // Spec 96 (D-96-10) — con un productor provisional se envía además
+    // `clientFarmerId`: el backend lo ancla al real al extraer. Un productor
+    // real nunca lo lleva.
+    const clientFarmerId = draft.farmerId && isLocalId(draft.farmerId) ? draft.farmerId : null;
+
     const { surveyId: realSurveyId } = await createSurvey(
       {
         instrumentIds: [draft.instrumentId],
         campaignSessionId: entry.campaignSessionId,
         clientSurveyId: entry.surveyId,
         ...(farmerIdParaBackend ? { farmerId: farmerIdParaBackend } : {}),
+        ...(clientFarmerId ? { clientFarmerId } : {}),
         ...(entry.stepOrder != null ? { stepOrder: entry.stepOrder } : {}),
       },
       ...this.authArgs(entry),
@@ -896,104 +903,123 @@ class SyncQueueServiceClass {
     return realSurveyId;
   }
 
-  private async maybeExtractFarmerAndCrops(entry: SyncQueueEntry, realSurveyId: string): Promise<void> {
-    const draft = await surveyDraftStore.loadDraft(entry.surveyId);
-    if (!draft) return;
+  // Spec 96 — lee el resultado de la extracción que el backend hizo dentro del
+  // batch (spec 95) para los borradores de Registro / S1 / S2. Un fallo aquí no
+  // condena la entrada (D-96-6): las respuestas ya están en el backend y el
+  // replay del backend cubre la extracción; solo un error de red se propaga para
+  // que la entrada vuelva a `pending` (el batch es idempotente).
+  private async syncExtractionResult(entry: SyncQueueEntry, realSurveyId: string): Promise<void> {
+    try {
+      const draft = await surveyDraftStore.loadDraft(entry.surveyId);
+      if (!draft) return;
 
-    const instrument = await instrumentCacheStorage.get(draft.instrumentId);
-    if (!instrument) {
-      logger.warn(`[Sync] instrument not in cache for survey ${entry.surveyId}, skipping extraction`);
-      return;
-    }
-
-    // Spec 84 — el Registro (`REG`) reemplaza a S1+S2: dispara las dos
-    // extracciones en secuencia sobre la misma encuesta, en vez de que cada
-    // una llegue por un borrador de instrumento distinto. `S1`/`S2` siguen
-    // igual que antes (respaldo mientras S_REG no exista en el backend, o
-    // borradores viejos ya en la cola de tabletas con esos instrumentos).
-    const code = resolveRegistrationFlowCode(instrument.code);
-    if (code === 'REG') {
-      // Si la colisión quedó para el orquestador, los cultivos también: los
-      // extrae `resolveDocumentCollision` después de la decisión del
-      // encuestador, sobre la misma encuesta.
-      const farmerExtracted = await this.extractFarmerForEntry(entry, realSurveyId);
-      if (farmerExtracted) {
-        await this.extractCropsForEntry(entry, realSurveyId);
+      const instrument = await instrumentCacheStorage.get(draft.instrumentId);
+      if (!instrument) {
+        logger.warn(`[Sync] instrument not in cache for survey ${entry.surveyId}, skipping extraction`);
+        return;
       }
-    } else if (code === 'S1') {
-      await this.extractFarmerForEntry(entry, realSurveyId);
-    } else if (code === 'S2') {
-      await this.extractCropsForEntry(entry, realSurveyId);
+
+      // Spec 84 — `REG` reemplaza a S1+S2; `S1`/`S2` siguen por borradores viejos.
+      const code = resolveRegistrationFlowCode(instrument.code);
+      if (code !== 'REG' && code !== 'S1' && code !== 'S2') return;
+
+      // D-96-7 / auditoría 41 — si el orquestador en línea espera esta encuesta,
+      // él lee la extracción y, ante una colisión, le pregunta al encuestador.
+      if (this.isAwaitedByOnlineOrchestrator(entry.surveyId)) return;
+
+      let outcome = interpretExtraction(
+        await getSurveyExtraction(realSurveyId, ...this.authArgs(entry)),
+      );
+
+      if (outcome.kind === 'retry_alias') {
+        // D-96-1 (c) — un único reintento por el alias (extracción en error o sin estado).
+        const result = await extractFarmer(realSurveyId, undefined, ...this.authArgs(entry));
+        await this.applyAliasResult(entry, result);
+        return;
+      }
+
+      if (outcome.kind === 'collision') {
+        // Spec 68, Fase 5 / D-H3-1 — sin nadie frente al agricultor, el default es
+        // «registrar aparte»: la única opción reversible por un administrador.
+        logger.warn(
+          `[Sync] documentId collision for survey ${realSurveyId} (document ${outcome.documentId}: ` +
+            `submitted "${outcome.submittedName}" vs existing "${outcome.existingFarmerName}") — ` +
+            'resolving as separate_person, pending admin review',
+        );
+        const result = await extractFarmer(
+          realSurveyId,
+          { resolution: 'separate_person' },
+          ...this.authArgs(entry),
+        );
+        await this.applyAliasResult(entry, result);
+        return;
+      }
+
+      if (outcome.kind === 'blocked') {
+        logger.warn(`[Sync] extraction for survey ${realSurveyId} has no farmer yet — left to the backend`);
+        return;
+      }
+
+      await this.applyResolvedExtraction(entry, outcome);
+    } catch (error) {
+      if (error instanceof NetworkError) throw error;
+      logger.error(`[Sync] extraction read failed for survey ${realSurveyId}`, error);
+      captureError(error, { surveyId: entry.surveyId, entryId: entry.id, step: 'extraction' });
     }
   }
 
-  // Devuelve `false` si la colisión de documento se dejó sin resolver para
-  // el orquestador (ver `isAwaitedByOnlineOrchestrator`); `true` si el
-  // productor quedó extraído.
-  private async extractFarmerForEntry(entry: SyncQueueEntry, realSurveyId: string): Promise<boolean> {
-    let farmer: Awaited<ReturnType<typeof extractFarmer>>['farmer'];
-    try {
-      ({ farmer } = entry.authToken
-        ? await extractFarmer(realSurveyId, undefined, { authToken: entry.authToken })
-        : await extractFarmer(realSurveyId));
-    } catch (err) {
-      if (!(err instanceof DocumentIdCollisionError)) throw err;
+  private async applyAliasResult(
+    entry: SyncQueueEntry,
+    result: Awaited<ReturnType<typeof extractFarmer>>,
+  ): Promise<void> {
+    const farm = result.farmer.farm;
+    await this.applyResolvedExtraction(entry, {
+      farmerId: result.farmer.farmerId,
+      farmerName: result.farmer.name,
+      farmId: result.extraction?.farmId ?? farm?.farmId ?? null,
+      farmName: farm?.name ?? null,
+      clientFarmerId: null,
+      crops: result.crops ?? farm?.crops ?? [],
+      documentId: result.farmer.documentId,
+      phone: result.farmer.phone,
+    });
+  }
 
-      // Auditoría 41 (hallazgo mayor 2) / spec 68, Fase 9 — el encuestador
-      // SÍ está frente al agricultor: el orquestador en línea espera esta
-      // misma encuesta para llamar a `extractFarmer()` y mostrar el aviso.
-      // Resolverla aquí dejaba al backend (idempotente por encuesta,
-      // `10affd1`) devolviéndole el productor ya creado, sin 409 ni aviso.
-      // No se resuelve nada: el backend ya registró la colisión pendiente al
-      // responder el 409, y la entrada se cierra igual (las respuestas ya
-      // están en el backend). Da igual si la extracción llega por
-      // `processAll()` (disparado por `enqueueSubmission()`) o por
-      // `processSurveyNow()`: ambos corren sobre la misma encuesta.
-      if (this.isAwaitedByOnlineOrchestrator(entry.surveyId)) {
-        logger.warn(
-          `[Sync] documentId collision for survey ${realSurveyId} (document ${err.documentId}) — ` +
-            'left unresolved for the online orchestrator to ask the pollster',
-        );
-        return false;
-      }
-
-      // Spec 68, Fase 5 — colisión de documentId descubierta solo al
-      // sincronizar: el encuestador ya no está frente al agricultor, no
-      // hay a quién preguntarle (ver § "Resolución diferida" del spec).
-      // El default es siempre "registrar aparte" — nunca fusionar en
-      // silencio — porque es la única opción reversible sin backend: un
-      // administrador puede revisar y corregir después vía
-      // GET /api/farmers/document-collisions. No bloquear ni marcar la
-      // entrada de la cola como fallida por esto.
-      logger.warn(
-        `[Sync] documentId collision for survey ${realSurveyId} (document ${err.documentId}: ` +
-          `submitted "${err.submittedName}" vs existing "${err.existingFarmerName}") — ` +
-          'resolving as separate_person, pending admin review',
-      );
-      ({ farmer } = await extractFarmer(
-        realSurveyId,
-        { resolution: 'separate_person' },
-        ...this.authArgs(entry),
-      ));
+  // Guarda cultivos de la sesión, remapea el id provisional por alias (D: sin
+  // `listRecent` ni búsqueda por documento) y cachea la identidad real.
+  private async applyResolvedExtraction(
+    entry: SyncQueueEntry,
+    r: {
+      farmerId: string;
+      farmerName: string;
+      farmId: string | null;
+      farmName: string | null;
+      clientFarmerId: string | null;
+      crops: FarmerIdentity['crops'];
+      documentId?: string | null;
+      phone?: string | null;
+    },
+  ): Promise<void> {
+    if (entry.campaignSessionId) {
+      await sessionCropsStorage.save(entry.campaignSessionId, r.crops ?? []);
     }
 
-    // Remap provisional farmerId if one exists in farmerCache.
-    const allRecent = await farmerCacheStorage.listRecent(100);
-    const provisionalEntry = allRecent.find(
-      (f) => isLocalId(f.farmerId) && f.documentId && f.documentId === farmer.documentId
-    );
+    // Fila provisional: el alias del backend, o el id que viajó en el borrador.
+    const draft = await surveyDraftStore.loadDraft(entry.surveyId);
+    const localFarmerId =
+      r.clientFarmerId && isLocalId(r.clientFarmerId)
+        ? r.clientFarmerId
+        : draft?.farmerId && isLocalId(draft.farmerId)
+          ? draft.farmerId
+          : null;
+    const provisional = localFarmerId ? await farmerCacheStorage.get(localFarmerId) : null;
 
-    if (provisionalEntry) {
-      const localFarmerId = provisionalEntry.farmerId;
-
-      await db
-        .update(surveys)
-        .set({ farmerId: farmer.farmerId })
-        .where(eq(surveys.farmerId, localFarmerId));
+    if (localFarmerId) {
+      await db.update(surveys).set({ farmerId: r.farmerId }).where(eq(surveys.farmerId, localFarmerId));
 
       const storeState = useCampaignSessionStore.getState();
       if (storeState.localFarmerId === localFarmerId) {
-        storeState.resolveFarmer(farmer.farmerId);
+        storeState.resolveFarmer(r.farmerId);
       }
 
       try {
@@ -1007,40 +1033,31 @@ class SyncQueueServiceClass {
       }
     }
 
+    // D-96-4 — la vista no trae documento ni teléfono: salen de la fila provisional.
     await cacheFarmerIdentity({
-      farmerId: farmer.farmerId,
-      name: farmer.name,
-      documentId: farmer.documentId ?? undefined,
-      phone: farmer.phone ?? undefined,
-      farmName: farmer.farm?.name ?? undefined,
-      crops: farmer.farm?.crops ?? undefined,
+      farmerId: r.farmerId,
+      name: r.farmerName,
+      documentId: r.documentId ?? provisional?.documentId,
+      phone: r.phone ?? provisional?.phone,
+      farmName: r.farmName ?? undefined,
+      farmId: r.farmId ?? undefined,
+      crops: r.crops,
     });
 
-    // Hallazgo TC-078-013 (spec 78): `cacheFarmerIdentity` crea una fila
-    // nueva para el `farmerId` real sin `consentVersion`/`consentedAt` — la
-    // constancia se registró antes, contra el `localFarmerId` provisional,
-    // cuya fila se borró arriba. Sin este carry-over, `hasValidConsent()`
-    // ve un agricultor sin consentimiento conocido offline aunque sí lo
-    // tenga (constancia ya sincronizada), y vuelve a mostrar el aviso de
-    // "consentimiento pendiente".
-    if (provisionalEntry?.consentVersion && provisionalEntry.consentedAt) {
+    // Hallazgo TC-078-013 (spec 78): llevar el consentimiento de la fila provisional.
+    if (provisional?.consentVersion && provisional.consentedAt) {
       try {
-        await farmerCacheStorage.recordConsent(
-          farmer.farmerId,
-          provisionalEntry.consentVersion,
-          provisionalEntry.consentedAt,
-        );
+        await farmerCacheStorage.recordConsent(r.farmerId, provisional.consentVersion, provisional.consentedAt);
       } catch (err) {
         logger.warn(
-          `[Sync] failed to carry over cached consent to ${farmer.farmerId}: ${
+          `[Sync] failed to carry over cached consent to ${r.farmerId}: ${
             err instanceof Error ? err.message : String(err)
           }`,
         );
       }
     }
 
-    logger.info(`[Sync] extractFarmer completed for survey ${realSurveyId}`);
-    return true;
+    logger.info(`[Sync] extraction applied for survey ${entry.surveyId}`);
   }
 
   // ¿Hay una sesión en primer plano, con conexión, cuya fase de inyección
@@ -1056,14 +1073,6 @@ class SyncQueueServiceClass {
       (injectionPhase === 'registro' && registroSurveyId === localSurveyId) ||
       (injectionPhase === 's1' && s1SurveyId === localSurveyId);
     return awaited && useSyncStatusStore.getState().isOnline === true;
-  }
-
-  private async extractCropsForEntry(entry: SyncQueueEntry, realSurveyId: string): Promise<void> {
-    const cropsResult = await extractCrops(realSurveyId, ...this.authArgs(entry));
-    logger.info(`[Sync] extractCrops completed for survey ${realSurveyId}`);
-    if (entry.campaignSessionId) {
-      await sessionCropsStorage.save(entry.campaignSessionId, cropsResult.crops);
-    }
   }
 
   private async buildPayload(entry: SyncQueueEntry, realSurveyId: string) {

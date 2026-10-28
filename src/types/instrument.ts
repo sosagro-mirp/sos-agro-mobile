@@ -137,6 +137,42 @@ export interface FarmerSearchResult {
 export interface ExtractFarmerResult {
   farmer: FarmerSearchResult;
   existed: boolean;
+  // Spec 95 (aditivos) — el alias ya devuelve cultivos y estado de extracción.
+  crops?: CropSummary[];
+  extraction?: {
+    status: SurveyExtractionStatus;
+    farmId: string | null;
+    farmCropId: string | null;
+  } | null;
+}
+
+// Spec 96 — vista de `GET /surveys/:id/extraction` (spec 95, D-95-1).
+export type SurveyExtractionStatus =
+  | 'done'
+  | 'collision'
+  | 'no_identity'
+  | 'pending_alias'
+  | 'not_applicable'
+  | 'awaiting_review'
+  | 'error'
+  | 'backfilled';
+
+export interface SurveyExtractionView {
+  status: SurveyExtractionStatus | null;
+  farmerId: string | null;
+  farmerName: string | null;
+  existed: boolean;
+  clientFarmerId: string | null;
+  farm: { farmId: string; name: string } | null;
+  farmCropId: string | null;
+  crops: CropSummary[];
+  collision?: {
+    documentId: string;
+    submittedName: string;
+    existingFarmer: { farmerId?: string; id?: string; name?: string };
+  } | null;
+  openDiscrepancies: number;
+  extractedAt: string | null;
 }
 
 export interface ExtractCropsResult {

@@ -27,6 +27,8 @@ export const endpoints = {
   // Farmers
   farmers: '/api/farmers',
   farmersSearch: '/api/farmers/search',
+  // Spec 96 — resultado de la extracción que el backend hace dentro del batch (spec 95).
+  surveyExtraction: (id: string) => `/api/surveys/${id}/extraction`,
   surveyExtractFarmer: (id: string) => `/api/surveys/${id}/extract-farmer`,
   surveyExtractCrops: (id: string) => `/api/surveys/${id}/extract-crops`,
 

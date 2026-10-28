@@ -1,6 +1,12 @@
 import { httpClient, type RequestOptions } from "./httpClient";
 import { endpoints } from "./endpoints";
-import type { MySurveysPage, RemoteSurveyResponseRow, SurveyResponse, SurveyResponsesBody } from "../types";
+import type {
+  MySurveysPage,
+  RemoteSurveyResponseRow,
+  SurveyExtractionView,
+  SurveyResponse,
+  SurveyResponsesBody,
+} from "../types";
 
 export interface CreateSurveyPayload {
   instrumentIds: string[];
@@ -16,10 +22,17 @@ export interface CreateSurveyPayload {
   // generateLocalId.ts). Reenviarlo en un reintento hace que el backend
   // devuelva la encuesta ya creada en vez de duplicarla.
   clientSurveyId?: string;
+  // Spec 96 — id provisional del productor (`local_farmer_<uuid>`): el backend
+  // lo ancla al productor real al extraer (`farmer_client_aliases`, spec 95).
+  clientFarmerId?: string;
 }
 
 export const createSurvey = (payload: CreateSurveyPayload, opts?: RequestOptions) =>
   httpClient.post<SurveyResponse>(endpoints.surveys, payload, ...(opts ? [opts] : []));
+
+// Spec 96 — resultado de la extracción hecha por el backend dentro del batch.
+export const getSurveyExtraction = (surveyId: string, opts?: RequestOptions) =>
+  httpClient.get<SurveyExtractionView>(endpoints.surveyExtraction(surveyId), ...(opts ? [opts] : []));
 
 export const markSurveyAsSynced = (surveyId: string, opts?: RequestOptions) =>
   httpClient.patch<void>(endpoints.surveySync(surveyId), ...(opts ? [undefined, opts] as const : []));

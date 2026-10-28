@@ -17,9 +17,15 @@ const migrations = {
       { idx: 11, when: 11, tag: 'm0011', breakpoints: true },
       { idx: 12, when: 12, tag: 'm0012', breakpoints: true },
       { idx: 13, when: 13, tag: 'm0013', breakpoints: true },
+      { idx: 14, when: 14, tag: 'm0014', breakpoints: true },
     ],
   },
   migrations: {
+    m0014: [
+      // Spec 96 — finca del productor, para la caché de identidad (sin backfill).
+      'ALTER TABLE `farmer_cache` ADD COLUMN `farm_id` text',
+    ].join('\n'),
+
     m0013: [
       // Spec 86 — dueño por registro para sincronizar con el token de quien lo creó.
       'ALTER TABLE `sync_queue` ADD COLUMN `owner_user_id` text',

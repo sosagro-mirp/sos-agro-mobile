@@ -355,6 +355,15 @@ export const surveyDraftStore = {
       .where(eq(surveys.id, localSurveyId));
   },
 
+  // Spec 96 — persiste el id provisional del productor en el borrador (Registro/S1
+  // capturado sin conexión) para enviarlo luego como `clientFarmerId`.
+  async setFarmerId(localSurveyId: string, farmerId: string): Promise<void> {
+    await db
+      .update(surveys)
+      .set({ farmerId })
+      .where(eq(surveys.id, localSurveyId));
+  },
+
   async getBackendSurveyId(localSurveyId: string): Promise<string | null> {
     const row = await db
       .select({ backendSurveyId: surveys.backendSurveyId })

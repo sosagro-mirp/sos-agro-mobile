@@ -8,6 +8,7 @@ export interface FarmerIdentity {
   documentId?: string | null;
   phone?: string | null;
   farmName?: string | null;
+  farmId?: string | null;
   crops?: CropSummary[];
 }
 
@@ -31,6 +32,7 @@ export async function cacheFarmerIdentity(identity: FarmerIdentity): Promise<voi
       documentId: identity.documentId ?? undefined,
       phone: identity.phone ?? undefined,
       farmName: identity.farmName ?? undefined,
+      farmId: identity.farmId ?? undefined,
       crops: identity.crops,
       cachedAt: new Date(),
     });
