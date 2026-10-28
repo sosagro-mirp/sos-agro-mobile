@@ -9,7 +9,7 @@ import { instrumentCacheStorage } from '../storage/instrumentCache';
 import { submitResponsesBatch } from '../api/responses';
 import { createSurvey, getSurveyExtraction, markSurveyAsSynced, skipStepApi } from '../api/surveys';
 import { markSessionAsSynced, createCampaignSession } from '../api/campaignSessions';
-import { extractFarmer } from '../api/farmers';
+import { extractFarmer, DocumentIdCollisionError } from '../api/farmers';
 import { interpretExtraction } from '../lib/interpretExtraction';
 import { cacheFarmerIdentity, type FarmerIdentity } from '../lib/cacheFarmerIdentity';
 import { buildResponsesPayload } from '../lib/buildResponsesPayload';
@@ -927,15 +927,27 @@ class SyncQueueServiceClass {
       // él lee la extracción y, ante una colisión, le pregunta al encuestador.
       if (this.isAwaitedByOnlineOrchestrator(entry.surveyId)) return;
 
-      let outcome = interpretExtraction(
+      let outcome: ReturnType<typeof interpretExtraction> = interpretExtraction(
         await getSurveyExtraction(realSurveyId, ...this.authArgs(entry)),
       );
 
       if (outcome.kind === 'retry_alias') {
-        // D-96-1 (c) — un único reintento por el alias (extracción en error o sin estado).
-        const result = await extractFarmer(realSurveyId, undefined, ...this.authArgs(entry));
-        await this.applyAliasResult(entry, result);
-        return;
+        // D-96-1 (c) — un único reintento por el alias (extracción en error o sin
+        // estado). Si el alias devuelve 409, la colisión se trata igual que si la
+        // vista la hubiera informado.
+        try {
+          const result = await extractFarmer(realSurveyId, undefined, ...this.authArgs(entry));
+          await this.applyAliasResult(entry, result);
+          return;
+        } catch (err) {
+          if (!(err instanceof DocumentIdCollisionError)) throw err;
+          outcome = {
+            kind: 'collision',
+            documentId: err.documentId,
+            submittedName: err.submittedName,
+            existingFarmerName: err.existingFarmerName,
+          };
+        }
       }
 
       if (outcome.kind === 'collision') {
@@ -962,7 +974,10 @@ class SyncQueueServiceClass {
 
       await this.applyResolvedExtraction(entry, outcome);
     } catch (error) {
+      // Red, 401 y 429 siguen su camino normal (la entrada vuelve a `pending`).
       if (error instanceof NetworkError) throw error;
+      const action = resolveSyncErrorAction(error);
+      if (action === 'retry_auth' || action === 'retry_transient') throw error;
       logger.error(`[Sync] extraction read failed for survey ${realSurveyId}`, error);
       captureError(error, { surveyId: entry.surveyId, entryId: entry.id, step: 'extraction' });
     }
@@ -1013,6 +1028,9 @@ class SyncQueueServiceClass {
           ? draft.farmerId
           : null;
     const provisional = localFarmerId ? await farmerCacheStorage.get(localFarmerId) : null;
+    // Sin fila provisional, la vista no trae documento ni teléfono: se conservan los
+    // de la fila real existente para no pisarlos con NULL (D-96-4).
+    const existingReal = provisional ? null : await farmerCacheStorage.get(r.farmerId);
 
     if (localFarmerId) {
       await db.update(surveys).set({ farmerId: r.farmerId }).where(eq(surveys.farmerId, localFarmerId));
@@ -1036,10 +1054,10 @@ class SyncQueueServiceClass {
     // D-96-4 — la vista no trae documento ni teléfono: salen de la fila provisional.
     await cacheFarmerIdentity({
       farmerId: r.farmerId,
-      name: r.farmerName,
-      documentId: r.documentId ?? provisional?.documentId,
-      phone: r.phone ?? provisional?.phone,
-      farmName: r.farmName ?? undefined,
+      name: r.farmerName || existingReal?.name || provisional?.name || '',
+      documentId: r.documentId ?? provisional?.documentId ?? existingReal?.documentId,
+      phone: r.phone ?? provisional?.phone ?? existingReal?.phone,
+      farmName: r.farmName ?? existingReal?.farmName ?? undefined,
       farmId: r.farmId ?? undefined,
       crops: r.crops,
     });

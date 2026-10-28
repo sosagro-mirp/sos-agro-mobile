@@ -212,7 +212,7 @@ import { useSyncStatusStore } from '../store/useSyncStatusStore';
 import { useCampaignSessionStore } from '../store/useCampaignSessionStore';
 import { flattenSections } from '../lib/flattenSections';
 import { buildResponsesPayload } from '../lib/buildResponsesPayload';
-import { httpClient, ServerError } from '../api/httpClient';
+import { httpClient, NetworkError, ServerError } from '../api/httpClient';
 import { endpoints } from '../api/endpoints';
 import { farmerCache } from '../storage/db/schema';
 import migrations from '../storage/db/migrations';
@@ -579,6 +579,48 @@ describe('Fase 2 — una falla al leer la extracción no condena la encuesta (C9
     expect(mockGetExtraction).toHaveBeenCalled();
     expect(mockMarkFailedValidation).not.toHaveBeenCalled();
     expect(mockMarkSynced).toHaveBeenCalledWith('entry-1');
+  });
+});
+
+describe('Fase 2 — correcciones de la auditoría 63', () => {
+  it('C9: un error de red al leer la extracción deja la entrada pendiente, sin fallo ni cierre', async () => {
+    givenQueuedDraftOf('S_REG');
+    mockGetExtraction.mockRejectedValue(new NetworkError('offline'));
+
+    await SyncQueueService.processAll();
+
+    expect(mockMarkFailedValidation).not.toHaveBeenCalled();
+    expect(mockMarkSynced).not.toHaveBeenCalled();
+  });
+
+  it('C7: si el reintento por el alias devuelve 409, resuelve como separate_person', async () => {
+    givenQueuedDraftOf('S_REG');
+    mockGetExtraction.mockResolvedValue(extractionView({ status: 'error', farmerId: null, farmerName: null }));
+    mockExtractFarmer
+      .mockRejectedValueOnce(new DocumentIdCollisionError(COLLISION))
+      .mockResolvedValueOnce(ALIAS_RESPONSE);
+
+    await SyncQueueService.processAll();
+
+    expect(mockExtractFarmer).toHaveBeenCalledTimes(2);
+    expect(mockExtractFarmer.mock.calls[1][1]).toEqual({ resolution: 'separate_person' });
+    expect(mockMarkFailedValidation).not.toHaveBeenCalled();
+    expect(mockMarkSynced).toHaveBeenCalledWith('entry-1');
+  });
+
+  it('D-96-4: sin fila provisional conserva documento y teléfono de la fila real en caché', async () => {
+    givenQueuedDraftOf('S2');
+    mockFarmerCacheGet.mockImplementation(async (id: string) =>
+      id === REAL
+        ? { farmerId: REAL, name: NOMBRE, documentId: DOCUMENTO, phone: '3009600001', farmName: 'La Finca', cachedAt: new Date() }
+        : null,
+    );
+
+    await SyncQueueService.processAll();
+
+    expect(mockCacheFarmerIdentity).toHaveBeenCalledWith(
+      expect.objectContaining({ farmerId: REAL, documentId: DOCUMENTO, phone: '3009600001' }),
+    );
   });
 });
 
