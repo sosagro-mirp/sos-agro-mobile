@@ -1,7 +1,18 @@
-import { extractCrops, extractFarmer, type ExtractFarmerResolution } from '../api/farmers';
+import { DocumentIdCollisionError, extractFarmer, type ExtractFarmerResolution } from '../api/farmers';
+import { getSurveyExtraction } from '../api/surveys';
+import { cacheFarmerIdentity } from './cacheFarmerIdentity';
 import { extractCropsOffline } from './extractCropsOffline';
-import { extractFarmerLocally, type LocalFarmerDraft } from './extractFarmerLocally';
-import type { ExtractCropsResult, ExtractFarmerResult } from '../types';
+import {
+  extractFarmerLocally,
+  readFarmerIdentityFromDraft,
+  type LocalFarmerDraft,
+} from './extractFarmerLocally';
+import {
+  EXTRACTION_BLOCKED_MESSAGE,
+  interpretExtraction,
+  type ExtractionOutcome,
+} from './interpretExtraction';
+import type { CropSummary, ExtractFarmerResult } from '../types';
 
 export type RegistrationFlowKind = 'registro' | 'legacy';
 
@@ -29,19 +40,94 @@ export function chooseRegistrationFlow(params: {
   return 'legacy';
 }
 
+export type OnlineExtractionOutcome = Exclude<ExtractionOutcome, { kind: 'retry_alias' }>;
+
+type ResolvedOutcome = Extract<ExtractionOutcome, { kind: 'resolved' }>;
+
+function outcomeFromAlias(result: ExtractFarmerResult): ResolvedOutcome {
+  const { farmer } = result;
+  return {
+    kind: 'resolved',
+    farmerId: farmer.farmerId,
+    farmerName: farmer.name,
+    farmId: result.extraction?.farmId ?? farmer.farm?.farmId ?? null,
+    farmName: farmer.farm?.name ?? null,
+    clientFarmerId: null,
+    crops: result.crops ?? farmer.farm?.crops ?? [],
+  };
+}
+
 /**
- * Extracción del Registro en línea: productor y luego cultivos, sobre la
- * misma encuesta — a diferencia del flujo legado (S1 luego S2, dos
- * encuestas distintas). Ver `SyncQueueService.maybeExtractFarmerAndCrops`
- * para el mismo orden aplicado en la cola de sincronización.
+ * Spec 96 (D-96-1) — extracción en línea del Registro, S1 y S2: el backend ya
+ * extrajo dentro del batch, así que la fuente es una sola
+ * `GET /surveys/:id/extraction`. `extract-farmer` queda para (a) la decisión
+ * del encuestador ante una colisión, (b) el documento corregido y (c) un único
+ * reintento si la extracción quedó en `error` o sin estado.
  */
-export async function extractRegistrationOnline(
+export async function resolveExtractionOnline(
   surveyId: string,
-  resolution?: ExtractFarmerResolution,
-): Promise<{ farmer: ExtractFarmerResult; crops: ExtractCropsResult }> {
-  const farmer = await extractFarmer(surveyId, resolution ? { resolution } : undefined);
-  const crops = await extractCrops(surveyId);
-  return { farmer, crops };
+  opts?: { resolution?: ExtractFarmerResolution; correctedDocumentId?: string },
+): Promise<OnlineExtractionOutcome> {
+  const viaAlias = async (
+    options?: Parameters<typeof extractFarmer>[1],
+  ): Promise<OnlineExtractionOutcome> => {
+    try {
+      return outcomeFromAlias(await extractFarmer(surveyId, options));
+    } catch (err) {
+      if (err instanceof DocumentIdCollisionError) {
+        return {
+          kind: 'collision',
+          documentId: err.documentId,
+          submittedName: err.submittedName,
+          existingFarmerName: err.existingFarmerName,
+        };
+      }
+      throw err;
+    }
+  };
+
+  if (opts?.correctedDocumentId) return viaAlias({ correctedDocumentId: opts.correctedDocumentId });
+  if (opts?.resolution) return viaAlias({ resolution: opts.resolution });
+
+  const outcome = interpretExtraction(await getSurveyExtraction(surveyId));
+  if (outcome.kind === 'retry_alias') return viaAlias();
+  return outcome;
+}
+
+/**
+ * Spec 96 — cultivos de la sesión para el S2 heredado: salen de la misma vista
+ * de extracción (ya no se llama a `extract-crops`).
+ */
+export async function resolveCropsOnline(surveyId: string): Promise<CropSummary[]> {
+  const view = await getSurveyExtraction(surveyId);
+  const status = view?.status ?? null;
+  if (status === 'done' || status === 'backfilled' || status === 'not_applicable') {
+    return view.crops ?? [];
+  }
+  if (status === null || status === 'error') {
+    return (await extractFarmer(surveyId)).crops ?? [];
+  }
+  throw new Error(EXTRACTION_BLOCKED_MESSAGE);
+}
+
+/**
+ * Cachea la identidad resuelta por la extracción. La vista no trae documento ni
+ * teléfono (D-96-4): se toman de lo que el encuestador digitó en el borrador.
+ */
+export async function cacheResolvedFarmer(
+  localSurveyId: string,
+  outcome: ResolvedOutcome,
+): Promise<void> {
+  const typed = await readFarmerIdentityFromDraft(localSurveyId);
+  await cacheFarmerIdentity({
+    farmerId: outcome.farmerId,
+    name: outcome.farmerName,
+    documentId: typed?.documentId,
+    phone: typed?.phone,
+    farmName: outcome.farmName ?? typed?.farmName,
+    farmId: outcome.farmId,
+    crops: outcome.crops,
+  });
 }
 
 /**

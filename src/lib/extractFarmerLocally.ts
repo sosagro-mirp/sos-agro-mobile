@@ -26,8 +26,22 @@ export interface LocalFarmerDraft {
   };
 }
 
-export async function extractFarmerLocally(s1SurveyId: string): Promise<LocalFarmerDraft | null> {
-  const draft = await surveyDraftStore.loadDraft(s1SurveyId);
+// Spec 96 — identidad que el encuestador digitó en el borrador de Registro/S1,
+// sin consultar la caché. La usa `extractFarmerLocally` (sin conexión) y el
+// camino en línea, que necesita documento y teléfono para la caché porque
+// `GET /surveys/:id/extraction` no los trae (D-96-4).
+export interface DraftFarmerIdentity {
+  name: string;
+  documentId: string | null;
+  phone: string | null;
+  farmName: string | null;
+  corregimiento: string | null;
+}
+
+export async function readFarmerIdentityFromDraft(
+  surveyId: string,
+): Promise<DraftFarmerIdentity | null> {
+  const draft = await surveyDraftStore.loadDraft(surveyId);
   if (!draft) return null;
 
   const instrument = await instrumentCacheStorage.get(draft.instrumentId);
@@ -102,6 +116,27 @@ export async function extractFarmerLocally(s1SurveyId: string): Promise<LocalFar
   }
 
   if (!farmerName) return null;
+
+  return {
+    name: farmerName,
+    documentId: farmerDocumentId,
+    phone: farmerPhone,
+    farmName,
+    corregimiento,
+  };
+}
+
+export async function extractFarmerLocally(s1SurveyId: string): Promise<LocalFarmerDraft | null> {
+  const identity = await readFarmerIdentityFromDraft(s1SurveyId);
+  if (!identity) return null;
+
+  const {
+    name: farmerName,
+    documentId: farmerDocumentId,
+    phone: farmerPhone,
+    farmName,
+    corregimiento,
+  } = identity;
 
   if (farmerDocumentId) {
     const cached = await farmerCacheStorage.getByDocumentId(farmerDocumentId);
