@@ -888,6 +888,10 @@ class SyncQueueServiceClass {
     // el real de otra persona con el mismo documento, y el backend, al ver la
     // encuesta ya anclada, saltaba la detección de colisión.
     const instrument = clientFarmerId ? await instrumentCacheStorage.get(draft.instrumentId) : null;
+    if (clientFarmerId && !instrument) {
+      // Sin el instrumento en caché no se sabe si es de registro: se cae a resolver por documento.
+      logger.warn(`[Sync] instrument not in cache for survey ${entry.surveyId}, resolving farmerId by document`);
+    }
     const flowCode = instrument ? resolveRegistrationFlowCode(instrument.code) : null;
     const backendResuelveIdentidad = flowCode === 'REG' || flowCode === 'S1' || flowCode === 'S2';
 

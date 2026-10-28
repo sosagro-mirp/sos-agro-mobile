@@ -661,6 +661,18 @@ describe('Fase 2 — clientFarmerId al materializar (C10)', () => {
     expect(payload).not.toHaveProperty('farmerId');
   });
 
+  it.each(['S1', 'S2'])('C10: un %s con productor provisional tampoco envía el farmerId resuelto por documento', async (code) => {
+    mockFarmerCacheGet.mockResolvedValue({ farmerId: LOCAL, documentId: DOCUMENTO });
+    (farmerCacheStorage.getByDocumentId as jest.Mock).mockResolvedValue({ farmerId: REAL });
+    givenQueuedDraftOf(code, { surveyId: `local_survey_${code}`, farmerId: LOCAL });
+
+    await SyncQueueService.processAll();
+
+    const payload = mockCreateSurvey.mock.calls[0][0];
+    expect(payload.clientFarmerId).toBe(LOCAL);
+    expect(payload).not.toHaveProperty('farmerId');
+  });
+
   it('C10: un instrumento que no es de registro sigue resolviendo el id real por documento', async () => {
     mockFarmerCacheGet.mockResolvedValue({ farmerId: LOCAL, documentId: DOCUMENTO });
     (farmerCacheStorage.getByDocumentId as jest.Mock).mockResolvedValue({ farmerId: REAL });

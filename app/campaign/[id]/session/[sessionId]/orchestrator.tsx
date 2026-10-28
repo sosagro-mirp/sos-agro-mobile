@@ -975,11 +975,9 @@ export default function OrchestratorScreen() {
           farmName: draft.farmName,
         });
         store.applyLocalFarmer(draft);
-        {
-          const { registroSurveyId: regId, s1SurveyId: s1Id } = useCampaignSessionStore.getState();
-          const localId = isRegistro ? regId : s1Id;
-          if (localId && draft.isProvisional) await surveyDraftStore.setFarmerId(localId, draft.farmerId);
-        }
+        const { registroSurveyId: regId, s1SurveyId: s1Id } = useCampaignSessionStore.getState();
+        const localId = isRegistro ? regId : s1Id;
+        if (localId && draft.isProvisional) await surveyDraftStore.setFarmerId(localId, draft.farmerId);
         resolvedFarmerId = draft.farmerId;
         resolvedFarmerName = draft.name;
 
