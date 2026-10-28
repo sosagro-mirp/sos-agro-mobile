@@ -877,15 +877,26 @@ class SyncQueueServiceClass {
     // pasó por `extractFarmer`. Enviarlo tal cual lo rechaza el backend con un
     // 400 (`@IsUUID`) y condena la encuesta entera. Se resuelve al id real por
     // documento, y si no hay forma se omite el campo.
-    const farmerIdParaBackend = await resolveDraftFarmerId(draft.farmerId, {
-      documentoDe: async (id) => (await farmerCacheStorage.get(id))?.documentId ?? null,
-      idRealDe: async (doc) => (await farmerCacheStorage.getByDocumentId(doc))?.farmerId ?? null,
-    });
-
     // Spec 96 (D-96-10) — con un productor provisional se envía además
     // `clientFarmerId`: el backend lo ancla al real al extraer. Un productor
     // real nunca lo lleva.
     const clientFarmerId = draft.farmerId && isLocalId(draft.farmerId) ? draft.farmerId : null;
+
+    // Spec 96 (test-096 TC-07) — en un Registro/S1/S2 con productor provisional
+    // la identidad la resuelve el backend al extraer (por documento, con
+    // colisión incluida). Resolver aquí el id provisional por documento enviaba
+    // el real de otra persona con el mismo documento, y el backend, al ver la
+    // encuesta ya anclada, saltaba la detección de colisión.
+    const instrument = clientFarmerId ? await instrumentCacheStorage.get(draft.instrumentId) : null;
+    const flowCode = instrument ? resolveRegistrationFlowCode(instrument.code) : null;
+    const backendResuelveIdentidad = flowCode === 'REG' || flowCode === 'S1' || flowCode === 'S2';
+
+    const farmerIdParaBackend = backendResuelveIdentidad
+      ? undefined
+      : await resolveDraftFarmerId(draft.farmerId, {
+          documentoDe: async (id) => (await farmerCacheStorage.get(id))?.documentId ?? null,
+          idRealDe: async (doc) => (await farmerCacheStorage.getByDocumentId(doc))?.farmerId ?? null,
+        });
 
     const { surveyId: realSurveyId } = await createSurvey(
       {

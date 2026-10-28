@@ -646,6 +646,33 @@ describe('Fase 2 — clientFarmerId al materializar (C10)', () => {
     );
   });
 
+  // test-096 TC-07: la caché ya tenía a otra persona con el mismo documento; el
+  // id real de esa persona no debe viajar, o el backend omite la colisión.
+  it('C10: el Registro con productor provisional no envía el farmerId resuelto por documento', async () => {
+    const OTRA_PERSONA = 'e1e1e1e1-0000-4000-8000-000000000096';
+    mockFarmerCacheGet.mockResolvedValue({ farmerId: LOCAL, documentId: DOCUMENTO });
+    (farmerCacheStorage.getByDocumentId as jest.Mock).mockResolvedValue({ farmerId: OTRA_PERSONA });
+    givenQueuedDraftOf('S_REG', { surveyId: 'local_survey_reg', farmerId: LOCAL });
+
+    await SyncQueueService.processAll();
+
+    const payload = mockCreateSurvey.mock.calls[0][0];
+    expect(payload.clientFarmerId).toBe(LOCAL);
+    expect(payload).not.toHaveProperty('farmerId');
+  });
+
+  it('C10: un instrumento que no es de registro sigue resolviendo el id real por documento', async () => {
+    mockFarmerCacheGet.mockResolvedValue({ farmerId: LOCAL, documentId: DOCUMENTO });
+    (farmerCacheStorage.getByDocumentId as jest.Mock).mockResolvedValue({ farmerId: REAL });
+    givenQueuedDraftOf('S3', { surveyId: 'local_survey_s3', farmerId: LOCAL });
+
+    await SyncQueueService.processAll();
+
+    const payload = mockCreateSurvey.mock.calls[0][0];
+    expect(payload.clientFarmerId).toBe(LOCAL);
+    expect(payload.farmerId).toBe(REAL);
+  });
+
   it('C10: con un productor real no envía clientFarmerId', async () => {
     givenQueuedDraftOf('S3', { surveyId: 'local_survey_s3', farmerId: REAL });
 
