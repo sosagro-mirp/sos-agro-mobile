@@ -4,6 +4,7 @@ import { AuthRequiredError, NetworkError, ServerError } from "../api/httpClient"
 import { secureStorage } from "../storage/secureStorage";
 import { userStorage } from "../storage/userStorage";
 import { offlineCredentialStorage } from "../storage/offlineCredentialStorage";
+import { pendingCollisionStorage } from "../storage/pendingCollisionStorage";
 import {
   createOfflineCredential,
   evaluateOfflineLogin,
@@ -376,6 +377,8 @@ export const useAuthStore = create<AuthState>((set, get) => {
         await secureStorage.deleteTokenFor(userId);
         await offlineCredentialStorage.deleteCredential(userId);
         await offlineCredentialStorage.removeKnownUser(userId);
+        // Spec 68, Fase 10 — nombres y documentos de agricultores pendientes.
+        await pendingCollisionStorage.clearFor(userId);
       }
       await clearActiveSession();
       set({ token: null, user: null, error: null, serverState: "unknown" });

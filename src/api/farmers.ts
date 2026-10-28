@@ -1,6 +1,6 @@
 import { httpClient, ServerError, type RequestOptions } from './httpClient';
 import { endpoints } from './endpoints';
-import type { FarmerSearchResult, ExtractFarmerResult, ExtractCropsResult } from '../types';
+import type { CropSummary, FarmerSearchResult, ExtractFarmerResult, ExtractCropsResult } from '../types';
 
 // Spec 68 — el documentId digitado en S1a ya pertenece a otro agricultor con
 // un nombre que no corresponde (ver `farmers/name-matching.ts` en backend/).
@@ -45,7 +45,7 @@ export const searchFarmers = async (query: string): Promise<FarmerSearchResult[]
 
 export const extractFarmer = async (
   surveyId: string,
-  options?: { resolution?: ExtractFarmerResolution },
+  options?: { resolution?: ExtractFarmerResolution; correctedDocumentId?: string },
   opts?: RequestOptions,
 ): Promise<ExtractFarmerResult> => {
   try {
@@ -54,14 +54,26 @@ export const extractFarmer = async (
     const raw = await httpClient.post<{
       farmer: Omit<FarmerSearchResult, 'farmerId'> & { id?: string; farmerId?: string };
       existed: boolean;
+      crops?: CropSummary[];
+      extraction?: ExtractFarmerResult['extraction'];
     }>(
       endpoints.surveyExtractFarmer(surveyId),
-      options?.resolution ? { resolution: options.resolution } : {},
+      {
+        ...(options?.resolution ? { resolution: options.resolution } : {}),
+        // Spec 68, Fase 8 — el documento corregido viaja aquí porque reenviar
+        // la encuesta no lo propaga: ya está sincronizada y el batch de
+        // respuestas es idempotente por diseño en el backend.
+        ...(options?.correctedDocumentId
+          ? { correctedDocumentId: options.correctedDocumentId }
+          : {}),
+      },
       ...(opts ? [opts] : []),
     );
     return {
       farmer: { ...raw.farmer, farmerId: raw.farmer.farmerId ?? raw.farmer.id ?? '' },
       existed: raw.existed,
+      crops: raw.crops,
+      extraction: raw.extraction,
     };
   } catch (err) {
     // Spec 68 — nunca dejar que un 409 sin resolución se confunda con

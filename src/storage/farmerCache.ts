@@ -10,6 +10,8 @@ export interface FarmerCacheEntry {
   documentId?: string;
   phone?: string;
   farmName?: string;
+  /** Spec 96 — finca anclada por el backend. */
+  farmId?: string;
   crops?: CropSummary[];
   cachedAt: Date;
   /** Spec 78 — última versión de consentimiento aceptada conocida localmente. */
@@ -32,6 +34,7 @@ function mapRow(row: typeof farmerCache.$inferSelect): FarmerCacheEntry {
     documentId: row.documentId ?? undefined,
     phone: row.phone ?? undefined,
     farmName: row.farmName ?? undefined,
+    farmId: row.farmId ?? undefined,
     crops,
     cachedAt: row.cachedAt,
     consentVersion: row.consentVersion ?? undefined,
@@ -50,6 +53,7 @@ export const farmerCacheStorage = {
         documentId: entry.documentId ?? null,
         phone: entry.phone ?? null,
         farmName: entry.farmName ?? null,
+        farmId: entry.farmId ?? null,
         crops,
         cachedAt: new Date(),
       })
@@ -60,6 +64,7 @@ export const farmerCacheStorage = {
           documentId: entry.documentId ?? null,
           phone: entry.phone ?? null,
           farmName: entry.farmName ?? null,
+          farmId: entry.farmId ?? null,
           crops,
           cachedAt: new Date(),
         },
