@@ -4,12 +4,13 @@ import { surveys, responses } from '../storage/db/schema';
 import { instrumentCacheStorage } from '../storage/instrumentCache';
 import { campaignCacheStorage } from '../storage/campaignCache';
 import { normalizeSearchText } from './optionSearch';
+import { cropFlagName, isCropListField } from './systemFieldKeys';
 import type { CropSummary } from '../types';
 
 /**
  * Replicates the backend's extractCrops logic locally for offline use.
  *
- * S2 questions about crops have systemField = 'crop.<name>' and are yes/no type.
+ * S2 questions about crops have systemField = 'farm.hasCrop.<name>' (before spec 97: 'crop.<name>') and are yes/no type.
  * A booleanValue = true means the farmer works that crop.
  * The name is resolved to a cropId using availableCrops from the campaign cache.
  */
@@ -53,10 +54,10 @@ export async function extractCropsOffline(
 
   const cropNames = affirmativeResponses
     .map((r) => systemFieldByQuestionId.get(r.questionId))
-    .filter((sf): sf is string => !!sf && sf.startsWith('crop.'))
-    .map((sf) => sf.split('.')[1]);
+    .map((sf) => cropFlagName(sf))
+    .filter((name): name is string => !!name);
 
-  // Spec 84 — segunda consulta, separada de la anterior: `farm.mainCrop` es
+  // Spec 84 — segunda consulta, separada de la anterior: `farm.crops` (antes `farm.mainCrop`) es
   // una respuesta de opción (optionId), no un booleano, así que no encaja en
   // el filtro `booleanValue = true` de arriba.
   const optionResponses = await db
@@ -66,7 +67,7 @@ export async function extractCropsOffline(
     .all();
 
   const mainCropIds = optionResponses
-    .filter((r) => r.optionId && systemFieldByQuestionId.get(r.questionId) === 'farm.mainCrop')
+    .filter((r) => r.optionId && isCropListField(systemFieldByQuestionId.get(r.questionId)))
     .map((r) => optionMetadataById.get(r.optionId as string))
     .filter((id): id is string => !!id);
 
