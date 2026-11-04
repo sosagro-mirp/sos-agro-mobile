@@ -3,6 +3,7 @@ import { instrumentCacheStorage } from '../storage/instrumentCache';
 import { farmerCacheStorage } from '../storage/farmerCache';
 import { flattenSections } from './flattenSections';
 import { generateLocalId } from './generateLocalId';
+import { canonicalSystemField } from './systemFieldKeys';
 import { isSameFarmerName } from './nameMatching';
 
 export interface LocalFarmerDraft {
@@ -68,7 +69,7 @@ export async function readFarmerIdentityFromDraft(
     const textOrNumeric =
       answer.textValue ?? (answer.numericValue != null ? String(answer.numericValue) : null);
 
-    switch (question.systemField) {
+    switch (canonicalSystemField(question.systemField)) {
       case 'farmer.name':
         respondentName = answer.textValue ?? null;
         break;
