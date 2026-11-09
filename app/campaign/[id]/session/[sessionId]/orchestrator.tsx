@@ -18,6 +18,8 @@ import { NetworkMonitor } from "../../../../../src/sync/NetworkMonitor";
 import { logger } from "../../../../../src/lib/logger";
 import { checkDuplicate } from "../../../../../src/storage/duplicateDetection";
 import { getNextStepOffline } from "../../../../../src/lib/getNextStepOffline";
+import { coverageCacheStorage } from "../../../../../src/storage/coverageCache";
+import { completeRegistrationOffline } from "../../../../../src/lib/registrationCompletion";
 import { extractCropsOffline } from "../../../../../src/lib/extractCropsOffline";
 import { generateLocalId } from "../../../../../src/lib/generateLocalId";
 import { extractFarmerLocally } from "../../../../../src/lib/extractFarmerLocally";
@@ -415,42 +417,29 @@ export default function OrchestratorScreen() {
         } else {
           // Offline: extraer productor y luego cultivos localmente, sobre la
           // misma encuesta.
-          const draft = await extractFarmerLocally(registroSurveyId);
-          if (draft) {
-            if (draft.collision) {
-              setDocumentCollisionPending({
-                documentId: draft.collision.documentId,
-                submittedName: draft.collision.submittedName,
-                existingFarmerName: draft.collision.existingName,
-                offline: true,
-                localDraft: draft,
-                phase: 'registro',
-              });
-              setScreenState('document_collision_pending');
-              return;
-            }
-
-            await cacheFarmerIdentity({
-              farmerId: draft.farmerId,
-              name: draft.name,
-              documentId: draft.documentId,
-              phone: draft.phone,
-              farmName: draft.farmName,
+          // Spec 103 — la lógica de cierre del Registro vive en
+          // `registrationCompletion.ts` (compartida con «Productores → Nuevo»).
+          const { campaign } = useCampaignSessionStore.getState();
+          const outcome = await completeRegistrationOffline({
+            registroSurveyId,
+            campaignId: campaign?.campaignId,
+            sessionId: resolvedSessionId ?? undefined,
+          });
+          if (outcome.kind === 'collision') {
+            setDocumentCollisionPending({
+              documentId: outcome.documentId,
+              submittedName: outcome.submittedName,
+              existingFarmerName: outcome.existingFarmerName,
+              offline: true,
+              localDraft: outcome.localDraft,
+              phase: 'registro',
             });
-            if (resolvedSessionId) {
-              await applyPendingConsentToFarmer(resolvedSessionId, draft.farmerId);
-            }
+            setScreenState('document_collision_pending');
+            return;
+          }
+          if (outcome.kind === 'resolved') {
+            const draft = outcome.draft;
             store.applyLocalFarmer(draft);
-            // Spec 96 — el borrador guarda su id provisional para enviarlo como `clientFarmerId`.
-            if (draft.isProvisional) await surveyDraftStore.setFarmerId(registroSurveyId, draft.farmerId);
-
-            const { campaign } = useCampaignSessionStore.getState();
-            if (campaign?.campaignId && resolvedSessionId) {
-              const offlineCrops = await extractCropsOffline(registroSurveyId, campaign.campaignId);
-              if (offlineCrops.length > 0) {
-                await sessionCropsStorage.save(resolvedSessionId, offlineCrops);
-              }
-            }
             store.completeRegistroInjection(draft.farmerId, draft.name);
 
             if (!campaign?.campaignId) {
@@ -977,7 +966,15 @@ export default function OrchestratorScreen() {
         store.applyLocalFarmer(draft);
         const { registroSurveyId: regId, s1SurveyId: s1Id } = useCampaignSessionStore.getState();
         const localId = isRegistro ? regId : s1Id;
-        if (localId && draft.isProvisional) await surveyDraftStore.setFarmerId(localId, draft.farmerId);
+        if (localId && draft.isProvisional) {
+          await surveyDraftStore.setFarmerId(localId, draft.farmerId);
+          // Spec 103 — también aparece como provisional en «Productores» (como en el cierre normal).
+          await coverageCacheStorage.addProvisional({
+            farmerId: draft.farmerId,
+            name: draft.name,
+            documentId: draft.documentId,
+          });
+        }
         resolvedFarmerId = draft.farmerId;
         resolvedFarmerName = draft.name;
 

@@ -12,6 +12,9 @@ export interface SurveyDraft {
   instrumentId: string;
   campaignSessionId?: string;
   farmerId?: string;
+  // Spec 103 — anclas del flujo por productor.
+  farmId?: string;
+  farmCropId?: string;
   stepOrder?: number;
   // Spec 86 — dueño del borrador (userId de quien lo creó).
   ownerUserId?: string;
@@ -35,6 +38,8 @@ export const surveyDraftStore = {
     instrumentId: string;
     campaignSessionId?: string;
     farmerId?: string;
+    farmId?: string;
+    farmCropId?: string;
     stepOrder?: number;
     ownerUserId?: string;
   }): Promise<void> {
@@ -49,6 +54,8 @@ export const surveyDraftStore = {
       // Only include farmerId when present — omitting it entirely avoids
       // referencing the column on devices where m0001 hasn't applied yet.
       ...(params.farmerId != null ? { farmerId: params.farmerId } : {}),
+      ...(params.farmId != null ? { farmId: params.farmId } : {}),
+      ...(params.farmCropId != null ? { farmCropId: params.farmCropId } : {}),
       // `stepOrder` has to survive in the draft until sync: with creation
       // deferred (phase 2), a draft resumed from the Drafts tab has no
       // campaign context left in memory, and materializeSurvey() would create
@@ -182,6 +189,8 @@ export const surveyDraftStore = {
       instrumentId: survey.instrumentId,
       campaignSessionId: survey.campaignSessionId ?? undefined,
       farmerId: survey.farmerId ?? undefined,
+      farmId: survey.farmId ?? undefined,
+      farmCropId: survey.farmCropId ?? undefined,
       stepOrder: survey.stepOrder ?? undefined,
       ownerUserId: survey.ownerUserId ?? undefined,
       answers,
@@ -329,6 +338,38 @@ export const surveyDraftStore = {
       .where(eq(surveys.status, 'draft'))
       .all();
     return all.filter((r) => r.owner !== null && r.owner !== ownerUserId).length;
+  },
+
+  /**
+   * Spec 103 — encuestas locales del flujo por productor (sin sesión de campaña)
+   * que la superposición de cobertura debe contar. Las de otro dueño también
+   * cuentan: la tablet es compartida y la foto es la misma para todos.
+   */
+  async listForCoverage(): Promise<
+    {
+      localSurveyId: string;
+      backendSurveyId: string | null;
+      instrumentId: string;
+      farmerId: string | null;
+      farmId: string | null;
+      farmCropId: string | null;
+      status: 'draft' | 'completed' | 'synced';
+      updatedAt: string;
+    }[]
+  > {
+    const rows = await db.select().from(surveys).where(isNull(surveys.campaignSessionId)).all();
+    return rows
+      .filter((r) => r.farmerId != null)
+      .map((r) => ({
+        localSurveyId: r.id,
+        backendSurveyId: r.backendSurveyId ?? null,
+        instrumentId: r.instrumentId,
+        farmerId: r.farmerId ?? null,
+        farmId: r.farmId ?? null,
+        farmCropId: r.farmCropId ?? null,
+        status: r.status,
+        updatedAt: r.updatedAt.toISOString(),
+      }));
   },
 
   async markCompleted(surveyId: string): Promise<void> {

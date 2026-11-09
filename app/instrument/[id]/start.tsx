@@ -15,6 +15,7 @@ import { useCampaignSessionStore } from "../../../src/store/useCampaignSessionSt
 import { useSyncStatusStore } from "../../../src/store/useSyncStatusStore";
 import { useAuthStore } from "../../../src/store/useAuthStore";
 import { beginSurvey } from "../../../src/lib/beginSurvey";
+import { parseApplyContext } from "../../../src/lib/surveyAnchor";
 import { OfflineBanner } from "../../../src/components/network/OfflineBanner";
 import { AppText } from "../../../src/components/common/AppText";
 import { Fonts } from "../../../src/theme/fonts";
@@ -25,7 +26,10 @@ export default function InstrumentStartScreen() {
   // `existingSurveyId` se retiró en spec 70, Fase 4: el flujo de
   // sobrescritura ya no crea la encuesta de reemplazo por adelantado, así
   // que este screen tiene un único camino de inicio (ver `beginSurvey()`).
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const params = useLocalSearchParams();
+  const id = Array.isArray(params.id) ? params.id[0] : (params.id as string | undefined);
+  // Spec 103 — contexto del flujo por productor (sin sesión de campaña).
+  const applyContext = useMemo(() => parseApplyContext(params), [params]);
   const router = useRouter();
 
   const instrument = useCachedInstrumentsStore((s) =>
@@ -76,11 +80,19 @@ export default function InstrumentStartScreen() {
       // difiere hasta que exista al menos una respuesta. `beginSurvey()`
       // siempre genera un id local y crea el borrador; el backend recibe la
       // fila real recién al sincronizar.
+      // Spec 103 — con contexto de productor la encuesta no pertenece a ninguna
+      // campaña: se ancla a la unidad. La sesión de campaña en memoria NO se
+      // resetea (auditoría 79): podría haber un orquestador abierto debajo.
+      const sessionForSurvey = applyContext ? undefined : (campaignSessionId ?? undefined);
+      const stepForSurvey = applyContext ? undefined : currentStep?.order;
+
       const surveyId = await beginSurvey({
         instrumentId: instrument.instrumentId,
-        campaignSessionId: campaignSessionId ?? undefined,
-        farmerId: farmerId ?? undefined,
-        stepOrder: currentStep?.order,
+        campaignSessionId: sessionForSurvey,
+        farmerId: applyContext ? applyContext.farmerId : (farmerId ?? undefined),
+        farmId: applyContext?.farmId,
+        farmCropId: applyContext?.farmCropId,
+        stepOrder: stepForSurvey,
       });
 
       initializeSurvey({
@@ -88,8 +100,11 @@ export default function InstrumentStartScreen() {
         instrumentId: instrument.instrumentId,
         instrumentName: instrument.name,
         sections: instrument.sections,
-        campaignSessionId: campaignSessionId ?? undefined,
-        stepOrder: currentStep?.order,
+        campaignSessionId: sessionForSurvey,
+        farmerId: applyContext?.farmerId,
+        farmId: applyContext?.farmId,
+        farmCropId: applyContext?.farmCropId,
+        stepOrder: stepForSurvey,
       });
 
       router.push(`/instrument/${id}/question/0`);

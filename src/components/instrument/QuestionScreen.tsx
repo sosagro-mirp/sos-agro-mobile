@@ -13,6 +13,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Check, ChevronLeft, ArrowRight, List, X } from "lucide-react-native";
 import { useInstrumentSurveyStore } from "../../store/useInstrumentSurveyStore";
+import { leaveToFarmer } from "../../lib/productorNavigation";
 import { useCampaignSessionStore } from "../../store/useCampaignSessionStore";
 import { surveyDraftStore } from "../../storage/surveyDraftStore";
 import { advanceWithinCampaign } from "../../lib/campaignNavigation";
@@ -46,6 +47,14 @@ export const QuestionScreen: React.FC<QuestionScreenProps> = ({
   onFinished,
 }) => {
   const router = useRouter();
+  // Spec 103 (C6) — en el flujo por productor, salir vuelve a su ficha.
+  const productorFarmerId = useInstrumentSurveyStore((s) => (s.campaignSessionId ? null : s.farmerId));
+  const isRegistro = useInstrumentSurveyStore((s) => !!s.registro);
+  const exitInstrument = () => {
+    if (isRegistro) router.replace("/(tabs)/productores");
+    else if (productorFarmerId) leaveToFarmer(router, productorFarmerId);
+    else router.replace("/(tabs)/campaign");
+  };
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -181,8 +190,8 @@ export const QuestionScreen: React.FC<QuestionScreenProps> = ({
         <View style={styles.emptyState}>
           <Text style={styles.emptyText}>No hay preguntas disponibles.</Text>
           <SecondaryButton
-            label="Volver a campañas"
-            onPress={() => router.replace("/(tabs)/campaign")}
+            label={productorFarmerId ? "Volver al productor" : "Volver a campañas"}
+            onPress={exitInstrument}
           />
         </View>
       </SafeAreaView>
@@ -402,7 +411,7 @@ export const QuestionScreen: React.FC<QuestionScreenProps> = ({
           icon: X,
           onPress: () => {
             setShowExitConfirm(false);
-            router.replace("/(tabs)/campaign");
+            exitInstrument();
           },
         }}
         onRequestClose={() => setShowExitConfirm(false)}

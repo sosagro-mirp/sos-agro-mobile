@@ -141,6 +141,8 @@ Módulos de API (`src/api/`):
 | `surveys.ts` | `POST /api/surveys`, `PATCH /api/surveys/:id` |
 | `responses.ts` | `POST /api/responses/batch` |
 | `farmers.ts` | `GET /api/farmers?search=`, `POST /api/farmers/extract`, `POST /api/farmers/extract-crops` |
+| `coverage.ts` | `GET /api/coverage/farmers/snapshot` (foto de cobertura de todos los productores, spec 103) |
+| `consents.ts` | `POST /api/consents` con exactamente un ancla: `sessionId`, `farmerId` o `surveyId` (spec 103) |
 | `endpoints.ts` | Definiciones centralizadas de todas las rutas |
 
 **Manejo de errores:**
@@ -162,11 +164,13 @@ mobile/
 ├── app/                          # Rutas Expo Router (file-based)
 │   ├── _layout.tsx               # Root: auth check + inicialización DB
 │   ├── login.tsx
-│   ├── (tabs)/                   # Tab navigator con 4 pestañas
+│   ├── (tabs)/                   # Tab navigator con 6 pestañas (entrada: Productores, spec 103)
+│   │   ├── productores/index.tsx # Lista offline de productores (búsqueda y filtros) — spec 103
 │   │   ├── campaign/index.tsx    # Lista de campañas activas
 │   │   ├── drafts/index.tsx      # Encuestas guardadas sin enviar
 │   │   ├── sync/index.tsx        # Estado de cola de sincronización
 │   │   └── requests/index.tsx    # Solicitudes de cambio
+│   ├── productores/              # Flujo por productor (spec 103): [farmerId].tsx (ficha) y nuevo.tsx (alta offline)
 │   └── campaign/[id]/
 │       ├── pre-survey.tsx        # Identificación del agricultor (S1/S2 flow)
 │       └── session/[sessionId]/
@@ -304,6 +308,17 @@ Resultado: `farmerId` guardado en `useCampaignSessionStore`.
 `drafts/` tab muestra encuestas con `status = draft`. Al seleccionar una, `orchestrator.tsx` reanuda desde la última pregunta respondida.
 
 ---
+
+### 6. Flujo por productor (spec 103, H6)
+
+Pestaña **Productores** (entrada por defecto, `DEFAULT_ENTRY_ROUTE`); «Campañas» convive hasta H8.
+- **Foto de cobertura:** `refresh()` («Actualizar») descarga campañas, `GET /api/coverage/farmers/snapshot`, la unión de instrumentos (campañas + `memberIds` de las columnas) y reemplaza todo al final; un instrumento de cobertura que falla se omite. Tras un sync que sacó entradas de la cola se refresca sola (`refreshCoverageSnapshot`). Guardada en SQLite: `coverage_snapshot` y `farmer_coverage_cache` (m0015) vía `storage/coverageCache.ts`.
+- **Superposición local (DM5):** `lib/coverageOverlay.ts` suma lo aplicado en el dispositivo sobre la foto («aplicado en este dispositivo»), sin doble conteo; `lib/applyTargets.ts` decide «Aplicar» / «Aplicar de nuevo» / sin acción (DM8: productor sin finca o provisional no tiene acción en finca ni cultivo).
+- **Encuesta anclada:** `start.tsx` recibe `farmerId`/`farmId`/`farmCropId` por parámetros (`lib/surveyAnchor.ts`), sin `campaignSessionId`; al terminar o salir vuelve a la ficha (`lib/productorNavigation.ts`). La sesión de campaña en memoria no se resetea.
+- **Alta de productor nuevo:** `productores/nuevo.tsx` → consentimiento (se guarda ya, anclado al S_REG, sin encolar) → S_REG → `lib/registrationCompletion.ts` (id `local_farmer_*`, colisión de documento) → ficha. Al cerrar se encola la constancia. Un S_REG sin sesión ni productor reanudado desde Borradores se cierra igual. `useInstrumentSurveyStore.registro` marca este modo y `initializeSurvey` lo limpia.
+- **Consentimiento sin sesión:** `lib/consentAnchor.ts` y `lib/saveAnchoredConsent.ts`; `SyncQueueService.processConsentEntry` envía `farmerId` o `surveyId` (traducido a `backendSurveyId`) y **difiere sin contar intento** mientras la encuesta ancla no exista en el backend.
+- **Sync:** `materializeSurvey` envía `farmId`/`farmCropId` (un cultivo sin finca no se envía); `applyResolvedExtraction` remapea el productor provisional en la foto y en las constancias.
+- Sale por OTA (sin módulos nativos). Pruebas: `src/__tests__/e2e-103-*.test.ts` y `docs/testing/test-103-encuestador-movil-productor.md`.
 
 ## Tipos de pregunta y componentes
 

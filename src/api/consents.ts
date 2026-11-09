@@ -22,8 +22,11 @@ export interface ConsentVigency {
   acceptedVersion: string | null;
 }
 
+// Spec 103 — exactamente un ancla: sesión de campaña, productor o encuesta.
 export interface CreateConsentPayload {
-  sessionId: string;
+  sessionId?: string;
+  farmerId?: string;
+  surveyId?: string;
   consentDocumentId: string;
   respondentName?: string;
   acceptedDataProcessing: boolean;

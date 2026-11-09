@@ -25,6 +25,13 @@ jest.mock('../api/consents', () => ({
   fetchActiveConsentDocument: jest.fn().mockRejectedValue(new Error('none')),
 }));
 jest.mock('../api/farmers', () => ({ listAllFarmers: jest.fn().mockResolvedValue([]) }));
+// Spec 103 — refresh() también descarga la foto de cobertura.
+jest.mock('../api/coverage', () => ({
+  fetchCoverageSnapshot: jest.fn().mockResolvedValue({ computedAt: '2026-11-08T15:00:00.000Z', instruments: [], farmers: [] }),
+}));
+jest.mock('../storage/coverageCache', () => ({
+  coverageCacheStorage: { replaceAll: jest.fn(), getSnapshotMeta: jest.fn().mockResolvedValue(null) },
+}));
 jest.mock('../store/useCachedInstrumentsStore', () => ({
   useCachedInstrumentsStore: { getState: () => ({ loadFromCache: jest.fn() }) },
 }));

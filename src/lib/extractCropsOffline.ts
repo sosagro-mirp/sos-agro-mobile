@@ -16,7 +16,10 @@ import type { CropSummary } from '../types';
  */
 export async function extractCropsOffline(
   s2SurveyId: string,
-  campaignId: string,
+  // Spec 103 — sin campaña (flujo por productor) el cultivo de `farm.crops` se
+  // resuelve con la propia opción del S_REG; los Sí/No `farm.hasCrop.*` exigen la
+  // lista de cultivos de la campaña y se omiten.
+  campaignId?: string,
 ): Promise<CropSummary[]> {
   const surveyRow = await db
     .select({ instrumentId: surveys.instrumentId })
@@ -35,6 +38,7 @@ export async function extractCropsOffline(
   // backend en `surveys.service.ts`). Convive con las preguntas `crop.*`
   // (Sí/No) que ya usa S2/el taller.
   const optionMetadataById = new Map<string, string | null | undefined>();
+  const optionTextById = new Map<string, string>();
   for (const section of instrument.sections) {
     for (const question of section.questions) {
       if (question.systemField) {
@@ -42,6 +46,7 @@ export async function extractCropsOffline(
       }
       for (const option of question.options ?? []) {
         optionMetadataById.set(option.optionId, option.metadataId);
+        optionTextById.set(option.optionId, option.text);
       }
     }
   }
@@ -66,10 +71,22 @@ export async function extractCropsOffline(
     .where(eq(responses.surveyId, s2SurveyId))
     .all();
 
-  const mainCropIds = optionResponses
-    .filter((r) => r.optionId && isCropListField(systemFieldByQuestionId.get(r.questionId)))
+  const mainCropResponses = optionResponses.filter(
+    (r) => r.optionId && isCropListField(systemFieldByQuestionId.get(r.questionId)),
+  );
+  const mainCropIds = mainCropResponses
     .map((r) => optionMetadataById.get(r.optionId as string))
     .filter((id): id is string => !!id);
+
+  if (!campaignId) {
+    const own = new Map<string, CropSummary>();
+    for (const r of mainCropResponses) {
+      const cropId = optionMetadataById.get(r.optionId as string);
+      const name = optionTextById.get(r.optionId as string);
+      if (cropId && name) own.set(cropId, { cropId, name });
+    }
+    return Array.from(own.values());
+  }
 
   if (cropNames.length === 0 && mainCropIds.length === 0) return [];
 
