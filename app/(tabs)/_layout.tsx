@@ -3,6 +3,7 @@ import {
   ClipboardCheck,
   Clock,
   Map,
+  Users,
   FileText,
   MessageSquare,
   RefreshCw,
@@ -158,6 +159,7 @@ const tabButtonStyles = StyleSheet.create({
 // Etiquetas visibles del tab bar, en orden. Su longitud fija el tamaño de letra
 // común (ver `resolveTabLabelFontSize`).
 const TAB_LABELS = {
+  productores: "Productores",
   campaign: "Campañas",
   drafts: "Borradores",
   // «Sincronizar» y no «Sincronización»: con 14 caracteres obligaba a bajar las
@@ -218,6 +220,15 @@ export default function TabsLayout() {
           tabBarButton: TabBarButton,
         }}
       >
+        {/* Spec 103 (DM11): «Productores» es la primera pestaña y la de entrada. */}
+        <Tabs.Screen
+          name="productores/index"
+          options={{
+            title: TAB_LABELS.productores,
+            tabBarLabel: renderTabLabel(TAB_LABELS.productores, styles.tabLabel, labelFontSize),
+            tabBarIcon: ({ color, size }) => <Users size={size} color={color} />,
+          }}
+        />
         <Tabs.Screen
           name="campaign/index"
           options={{

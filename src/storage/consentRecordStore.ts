@@ -4,7 +4,10 @@ import { consentRecords } from './db/schema';
 
 export interface ConsentRecordDraft {
   id: string;
-  sessionId: string;
+  // Spec 103 — exactamente un ancla: sesión (campaña), productor o encuesta.
+  sessionId?: string;
+  farmerId?: string;
+  surveyId?: string;
   consentDocumentId: string;
   respondentName?: string;
   acceptedDataProcessing: boolean;
@@ -20,7 +23,9 @@ export interface ConsentRecordDraft {
 function mapRow(row: typeof consentRecords.$inferSelect): ConsentRecordDraft {
   return {
     id: row.id,
-    sessionId: row.sessionId,
+    sessionId: row.sessionId ?? undefined,
+    farmerId: row.farmerId ?? undefined,
+    surveyId: row.surveyId ?? undefined,
     consentDocumentId: row.consentDocumentId,
     respondentName: row.respondentName ?? undefined,
     acceptedDataProcessing: row.acceptedDataProcessing,
@@ -36,7 +41,12 @@ function mapRow(row: typeof consentRecords.$inferSelect): ConsentRecordDraft {
 
 export const consentRecordStore = {
   async save(draft: ConsentRecordDraft): Promise<void> {
-    await db.insert(consentRecords).values(draft);
+    await db.insert(consentRecords).values({
+      ...draft,
+      sessionId: draft.sessionId ?? null,
+      farmerId: draft.farmerId ?? null,
+      surveyId: draft.surveyId ?? null,
+    });
   },
 
   async get(id: string): Promise<ConsentRecordDraft | null> {
@@ -60,6 +70,36 @@ export const consentRecordStore = {
       .orderBy(desc(consentRecords.createdAt))
       .get();
     return row ? mapRow(row) : null;
+  },
+
+  /** Spec 103 — constancia más reciente anclada a un productor. */
+  async getByFarmerId(farmerId: string): Promise<ConsentRecordDraft | null> {
+    const row = await db
+      .select()
+      .from(consentRecords)
+      .where(eq(consentRecords.farmerId, farmerId))
+      .orderBy(desc(consentRecords.createdAt))
+      .get();
+    return row ? mapRow(row) : null;
+  },
+
+  /** Spec 103 — constancia más reciente anclada a una encuesta (S_REG de un productor nuevo). */
+  async getBySurveyId(surveyId: string): Promise<ConsentRecordDraft | null> {
+    const row = await db
+      .select()
+      .from(consentRecords)
+      .where(eq(consentRecords.surveyId, surveyId))
+      .orderBy(desc(consentRecords.createdAt))
+      .get();
+    return row ? mapRow(row) : null;
+  },
+
+  /** Spec 103 — remapea el productor provisional al real en las constancias. */
+  async remapFarmer(localFarmerId: string, realFarmerId: string): Promise<void> {
+    await db
+      .update(consentRecords)
+      .set({ farmerId: realFarmerId })
+      .where(eq(consentRecords.farmerId, localFarmerId));
   },
 
   async markSynced(id: string): Promise<void> {

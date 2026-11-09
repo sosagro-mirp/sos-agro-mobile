@@ -1,3 +1,4 @@
+import { applyContextFromDraft } from "../../../src/lib/surveyAnchor";
 import { useState, useCallback, useMemo } from "react";
 import {
   ActivityIndicator,
@@ -154,6 +155,9 @@ export default function DraftsScreen() {
         instrumentName: instrument.name,
         sections: instrument.sections,
         campaignSessionId: draft.campaignSessionId,
+        // Spec 103 — un borrador del flujo por productor conserva su contexto
+        // para volver a la ficha al terminar o salir.
+        ...(applyContextFromDraft(draft) ?? {}),
         // Sin esto la encuesta se materializa con `stepOrder: null` y
         // `getNextStep()` no cuenta el paso como completado, así que la
         // campaña vuelve a ofrecer un instrumento ya respondido (hallazgo de

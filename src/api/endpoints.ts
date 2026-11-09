@@ -58,5 +58,7 @@ export const endpoints = {
   // Consent (spec 78)
   consentDocumentActive: '/api/consent-documents/active',
   consents: '/api/consents',
+  // Spec 103 — foto de cobertura de todos los productores (caché offline).
+  coverageSnapshot: '/api/coverage/farmers/snapshot',
   farmerConsentStatus: (farmerId: string) => `/api/farmers/${farmerId}/consent`,
 } as const;

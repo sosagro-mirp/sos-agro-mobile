@@ -41,6 +41,9 @@ import { consentRecordStore } from '../storage/consentRecordStore';
 import { submitConsent } from '../api/consents';
 import { buildConsentSyncPayload, remapConsentSessionId } from './consentSync';
 import { resolveRegistrationFlowCode } from '../lib/instrumentCodeAliases';
+import { isAnchorComplete } from '../lib/surveyAnchor';
+import { resolveConsentAnchorForSync, buildAnchoredConsentPayload } from '../lib/consentAnchor';
+import { coverageCacheStorage } from '../storage/coverageCache';
 
 const MAX_CONSECUTIVE_NETWORK_FAILURES = 5;
 const BACKOFF_BASE_MS = 1000;
@@ -218,6 +221,21 @@ class SyncQueueServiceClass {
         }
       } catch (err) {
         logger.error('[Sync] pullResolvedChangeRequests failed, continuing anyway', err);
+      }
+
+      // Spec 103 (DM4) — tras una corrida con envíos, se refresca la foto de
+      // cobertura para que lo aplicado figure «aplicado» desde el servidor.
+      // Mejor esfuerzo: un fallo conserva la foto anterior y no afecta la sync.
+      if (yaAtendidas.length > 0 && !this.stopRun && this.consecutiveNetworkFailures === 0) {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { useCachedCampaignsStore } = require('../store/useCachedCampaignsStore') as typeof import('../store/useCachedCampaignsStore');
+          await useCachedCampaignsStore.getState().refreshCoverageSnapshot();
+        } catch (err) {
+          logger.warn(
+            `[Sync] no se pudo refrescar la foto de cobertura: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
       }
     } finally {
       // isProcessing must clear even if the cleanup below throws, or every
@@ -509,6 +527,28 @@ class SyncQueueServiceClass {
 
       if (draft.status === 'synced') {
         await syncQueueStorage.markSynced(entry.id);
+        return;
+      }
+
+      // Spec 103 (DM9) — constancia sin sesión: ancla farmerId o surveyId.
+      if (!draft.sessionId && (draft.farmerId || draft.surveyId)) {
+        const outcome = await resolveConsentAnchorForSync(draft, {
+          backendSurveyIdOf: (localId) => surveyDraftStore.getBackendSurveyId(localId),
+        });
+        if (outcome.kind === 'defer') {
+          // Vuelve a pending sin contar intento; no es un fallo.
+          await syncQueueStorage.resetInFlightToRetryById(entry.id);
+          logger.info(`[Sync] consent entry ${entry.id} deferred: ${outcome.reason}`);
+          return;
+        }
+        const response = await submitConsent(
+          buildAnchoredConsentPayload(draft, outcome.anchor),
+          ...this.authArgs(entry),
+        );
+        await consentRecordStore.markSynced(draft.id);
+        await syncQueueStorage.markSynced(entry.id);
+        logger.info(`[Sync] processed anchored consent entry ${entry.id} → ${response.consentRecordId}`);
+        this.consecutiveNetworkFailures = 0;
         return;
       }
 
@@ -902,10 +942,18 @@ class SyncQueueServiceClass {
           idRealDe: async (doc) => (await farmerCacheStorage.getByDocumentId(doc))?.farmerId ?? null,
         });
 
+    // Spec 103 — anclas de finca y cultivo del flujo por productor. Un contexto
+    // incompleto (cultivo sin finca) no se envía: queda en failed_validation.
+    if (!isAnchorComplete(draft)) {
+      throw new Error(`Contexto de encuesta incompleto (cultivo sin finca) — survey ${entry.surveyId}`);
+    }
+
     const { surveyId: realSurveyId } = await createSurvey(
       {
         instrumentIds: [draft.instrumentId],
         campaignSessionId: entry.campaignSessionId,
+        ...(draft.farmId ? { farmId: draft.farmId } : {}),
+        ...(draft.farmCropId ? { farmCropId: draft.farmCropId } : {}),
         clientSurveyId: entry.surveyId,
         ...(farmerIdParaBackend ? { farmerId: farmerIdParaBackend } : {}),
         ...(clientFarmerId ? { clientFarmerId } : {}),
@@ -1049,6 +1097,17 @@ class SyncQueueServiceClass {
 
     if (localFarmerId) {
       await db.update(surveys).set({ farmerId: r.farmerId }).where(eq(surveys.farmerId, localFarmerId));
+      // Spec 103 — constancias y foto de cobertura siguen al productor real.
+      try {
+        await consentRecordStore.remapFarmer(localFarmerId, r.farmerId);
+        await coverageCacheStorage.remapFarmer(localFarmerId, r.farmerId);
+      } catch (err) {
+        logger.warn(
+          `[Sync] failed to remap provisional farmer ${localFarmerId} in consents/coverage: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
 
       const storeState = useCampaignSessionStore.getState();
       if (storeState.localFarmerId === localFarmerId) {
