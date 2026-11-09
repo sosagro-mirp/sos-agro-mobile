@@ -44,8 +44,10 @@ export default function InstrumentCompletedScreen() {
         const record = await consentRecordStore.getBySurveyId(surveyId);
         if (record && record.status === "pending") {
           await enqueueConsent(record.id);
+          // La vigencia offline se marca solo con la versión del documento que se
+          // aceptó; si la caché ya trae otro documento, la ficha vuelve a ofrecerlo.
           const document = await consentDocumentCacheStorage.get();
-          if (document) {
+          if (document && document.consentDocumentId === record.consentDocumentId) {
             await farmerCacheStorage.recordConsent(farmerId, document.version, record.acceptedAt).catch(() => 0);
           }
         }

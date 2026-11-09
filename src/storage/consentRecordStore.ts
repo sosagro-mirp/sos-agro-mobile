@@ -1,4 +1,4 @@
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq, isNotNull, isNull } from 'drizzle-orm';
 import { db } from './db/db';
 import { consentRecords } from './db/schema';
 
@@ -92,6 +92,26 @@ export const consentRecordStore = {
       .orderBy(desc(consentRecords.createdAt))
       .get();
     return row ? mapRow(row) : null;
+  },
+
+  /**
+   * Spec 103 — constancias pendientes ancladas a una encuesta (alta de productor
+   * nuevo). Las usa `sweepRegistrationConsents` para encolar las que se quedaron
+   * sin entrar a la cola.
+   */
+  async listPendingSurveyAnchored(): Promise<ConsentRecordDraft[]> {
+    const rows = await db
+      .select()
+      .from(consentRecords)
+      .where(
+        and(
+          eq(consentRecords.status, 'pending'),
+          isNotNull(consentRecords.surveyId),
+          isNull(consentRecords.sessionId),
+        ),
+      )
+      .all();
+    return rows.map(mapRow);
   },
 
   /** Spec 103 — remapea el productor provisional al real en las constancias. */

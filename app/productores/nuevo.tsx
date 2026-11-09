@@ -5,12 +5,12 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { ChevronLeft } from "lucide-react-native";
 import { ConsentForm, type ConsentFormValues } from "../../src/components/campaign/ConsentForm";
 import { AppText } from "../../src/components/common/AppText";
-import { PrimaryButton } from "../../src/components/common/PrimaryButton";
 import { OfflineBanner } from "../../src/components/network/OfflineBanner";
 import { useCachedInstrumentsStore } from "../../src/store/useCachedInstrumentsStore";
 import { useInstrumentSurveyStore } from "../../src/store/useInstrumentSurveyStore";
 import { useSyncStatusStore } from "../../src/store/useSyncStatusStore";
 import { consentDocumentCacheStorage } from "../../src/storage/consentDocumentCache";
+import { surveyDraftStore } from "../../src/storage/surveyDraftStore";
 import { fetchActiveConsentDocument, type ConsentDocument } from "../../src/api/consents";
 import { saveAnchoredConsent } from "../../src/lib/saveAnchoredConsent";
 import { beginSurvey } from "../../src/lib/beginSurvey";
@@ -74,7 +74,14 @@ export default function NuevoProductorScreen() {
       // La constancia se guarda ya (anclada al S_REG) para no perderla si la app se
       // cierra a mitad del registro; se encola al cerrar el registro (completed.tsx).
       if (document) {
-        await saveAnchoredConsent({ values: consent, document, surveyId, enqueue: false });
+        try {
+          await saveAnchoredConsent({ values: consent, document, surveyId, enqueue: false });
+        } catch (err) {
+          // Sin constancia no se abre el registro: se descarta el S_REG recién creado
+          // para no dejar un alta sin consentimiento (auditoría 80).
+          await surveyDraftStore.deleteDraft(surveyId).catch(() => {});
+          throw err;
+        }
       }
       const store = useInstrumentSurveyStore.getState();
       store.initializeSurvey({

@@ -57,11 +57,19 @@ export async function saveAnchoredConsent(params: {
   return localId;
 }
 
-/** Encola una constancia ya guardada (cierre del registro de un productor nuevo). */
-export async function enqueueConsent(localConsentId: string): Promise<void> {
+/**
+ * Encola una constancia ya guardada (cierre del registro de un productor nuevo).
+ * Es idempotente: si la constancia ya tiene una entrada activa en la cola (la
+ * encoló el barrido de `sweepRegistrationConsents`), no se duplica.
+ * `ownerUserId` fija el dueño de la entrada (el del S_REG, en el barrido); sin
+ * él, la cola usa al usuario activo.
+ */
+export async function enqueueConsent(localConsentId: string, ownerUserId?: string): Promise<void> {
+  if (await syncQueueStorage.getActiveBySurveyId(localConsentId)) return;
   await syncQueueStorage.enqueue({
     id: generateLocalId('consent'),
     surveyId: localConsentId,
     itemType: 'consent',
+    ...(ownerUserId ? { ownerUserId } : {}),
   });
 }

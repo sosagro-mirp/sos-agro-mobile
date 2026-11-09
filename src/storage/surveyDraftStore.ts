@@ -320,6 +320,16 @@ export const surveyDraftStore = {
     });
   },
 
+  /** Estado local de una encuesta (`null` si ya no existe, p. ej. se descartó desde Borradores). */
+  async getStatus(surveyId: string): Promise<'draft' | 'completed' | 'synced' | null> {
+    const row = await db
+      .select({ status: surveys.status })
+      .from(surveys)
+      .where(eq(surveys.id, surveyId))
+      .get();
+    return row?.status ?? null;
+  },
+
   /** Spec 86 — dueño de una encuesta local (`null` si es anterior a m0013). */
   async getOwnerUserId(surveyId: string): Promise<string | null> {
     const row = await db
