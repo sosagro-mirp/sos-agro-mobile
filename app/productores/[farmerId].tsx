@@ -9,7 +9,7 @@ import { consentDocumentCacheStorage } from "../../src/storage/consentDocumentCa
 import { useCachedInstrumentsStore } from "../../src/store/useCachedInstrumentsStore";
 import { useCachedCampaignsStore } from "../../src/store/useCachedCampaignsStore";
 import type { FarmerCoverageDetail } from "../../src/lib/coverageOverlay";
-import { listApplyTargets, reapplyConfirmationText, type ApplyTarget } from "../../src/lib/applyTargets";
+import { blockedNotice, listApplyTargets, reapplyConfirmationText, type ApplyTarget } from "../../src/lib/applyTargets";
 import { applyContextParams } from "../../src/lib/surveyAnchor";
 import { consentNoticeOffline } from "../../src/lib/consentAnchor";
 import { summarizeProductorCoverage } from "../../src/lib/productorFilters";
@@ -157,6 +157,16 @@ export default function ProductorFichaScreen() {
             )}
 
             <AppText style={styles.section}>COBERTURA</AppText>
+            {/* DM8 / C4: sin finca (o productor aún provisional) la foto no trae los
+                instrumentos de finca ni de cultivo; se avisa por qué no hay acción. */}
+            {detail.farms.length === 0 ? (
+              <View style={styles.notice}>
+                <TriangleAlert size={16} color={colors.warningFg} />
+                <AppText style={styles.noticeText}>
+                  {blockedNotice(detail.farmerId.startsWith("local_farmer_") ? "pendiente_sincronizar" : "sin_finca")}
+                </AppText>
+              </View>
+            ) : null}
             {error ? <AppText style={styles.error}>{error}</AppText> : null}
             <CoverageUnitList targets={targets} onApply={start} onReapply={setReapply} />
           </>
