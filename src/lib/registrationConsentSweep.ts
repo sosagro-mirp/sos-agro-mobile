@@ -21,7 +21,9 @@ export interface RegistrationConsentSweepDeps {
   listPending(): Promise<ConsentRecordDraft[]>;
   hasActiveQueueEntry(localConsentId: string): Promise<boolean>;
   surveyStatusOf(localSurveyId: string): Promise<SurveyLocalStatus>;
-  enqueue(localConsentId: string): Promise<void>;
+  /** Dueño (encuestador) del S_REG: la constancia se envía con su token (auditoría 81). */
+  ownerOf(localSurveyId: string): Promise<string | null>;
+  enqueue(localConsentId: string, ownerUserId?: string): Promise<void>;
   markFailed(localConsentId: string): Promise<void>;
 }
 
@@ -34,7 +36,8 @@ const defaultDeps: RegistrationConsentSweepDeps = {
   listPending: () => consentRecordStore.listPendingSurveyAnchored(),
   hasActiveQueueEntry: async (id) => (await syncQueueStorage.getActiveBySurveyId(id)) !== null,
   surveyStatusOf: (surveyId) => surveyDraftStore.getStatus(surveyId),
-  enqueue: (id) => enqueueConsent(id),
+  ownerOf: (surveyId) => surveyDraftStore.getOwnerUserId(surveyId),
+  enqueue: (id, ownerUserId) => enqueueConsent(id, ownerUserId),
   markFailed: (id) => consentRecordStore.markFailed(id),
 };
 
@@ -53,7 +56,8 @@ export async function sweepRegistrationConsents(
       result.discarded.push(record.id);
       continue;
     }
-    await deps.enqueue(record.id);
+    const owner = await deps.ownerOf(record.surveyId);
+    await deps.enqueue(record.id, owner ?? undefined);
     result.enqueued.push(record.id);
   }
   return result;

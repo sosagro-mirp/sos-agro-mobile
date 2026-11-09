@@ -67,6 +67,7 @@ jest.mock('../storage/surveyDraftStore', () => ({
     setBackendSurveyId: jest.fn(),
     setFarmerId: jest.fn(),
     getStatus: jest.fn(),
+    getOwnerUserId: jest.fn().mockResolvedValue(null),
   },
 }));
 jest.mock('../storage/consentRecordStore', () => ({
@@ -215,6 +216,7 @@ beforeEach(() => {
   (consentRecordStore.listPendingSurveyAnchored as jest.Mock).mockResolvedValue([]);
   (surveyDraftStore.getBackendSurveyId as jest.Mock).mockResolvedValue(null);
   (surveyDraftStore.getStatus as jest.Mock).mockResolvedValue(null);
+  (surveyDraftStore.getOwnerUserId as jest.Mock).mockResolvedValue(null);
   (pendingSessionStorage.listPending as jest.Mock).mockResolvedValue([]);
   (submitConsent as jest.Mock).mockResolvedValue({ consentRecordId: 'srv-consent-103' });
 });
@@ -274,6 +276,7 @@ function deps(overrides: Partial<RegistrationConsentSweepDeps> = {}) {
     listPending: jest.fn().mockResolvedValue([]),
     hasActiveQueueEntry: jest.fn().mockResolvedValue(false),
     surveyStatusOf: jest.fn().mockResolvedValue(null),
+    ownerOf: jest.fn().mockResolvedValue(null),
     enqueue: jest.fn().mockResolvedValue(undefined),
     markFailed: jest.fn().mockResolvedValue(undefined),
   };
@@ -289,9 +292,22 @@ describe('sweepRegistrationConsents', () => {
 
     const result = await sweepRegistrationConsents(d);
 
-    expect(d.enqueue).toHaveBeenCalledWith('c-completed');
+    expect(d.enqueue).toHaveBeenCalledWith('c-completed', undefined);
     expect(d.markFailed).not.toHaveBeenCalled();
     expect(result).toEqual({ enqueued: ['c-completed'], discarded: [] });
+  });
+
+  it('encola la constancia a nombre del dueño del S_REG, no del usuario activo (auditoría 81)', async () => {
+    const d = deps({
+      listPending: jest.fn().mockResolvedValue([consent('c-owned', LOCAL_SREG)]),
+      surveyStatusOf: jest.fn().mockResolvedValue('completed'),
+      ownerOf: jest.fn().mockResolvedValue('user-pollster-1'),
+    });
+
+    await sweepRegistrationConsents(d);
+
+    expect(d.ownerOf).toHaveBeenCalledWith(LOCAL_SREG);
+    expect(d.enqueue).toHaveBeenCalledWith('c-owned', 'user-pollster-1');
   });
 
   it('S_REG ya sincronizado → también la encola', async () => {
@@ -302,7 +318,7 @@ describe('sweepRegistrationConsents', () => {
 
     await sweepRegistrationConsents(d);
 
-    expect(d.enqueue).toHaveBeenCalledWith('c-synced');
+    expect(d.enqueue).toHaveBeenCalledWith('c-synced', undefined);
   });
 
   it('S_REG todavía en borrador → espera (el registro sigue en curso)', async () => {
