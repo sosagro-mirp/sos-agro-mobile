@@ -169,8 +169,16 @@ export const useCachedCampaignsStore = create<CachedCampaignsState>((set, get) =
       // Unión de instrumentos (DM6): los de las columnas de la foto que no
       // están ya en alguna campaña (incluye las versiones agrupadas).
       const extraIds = getSnapshotInstrumentIds(snapshot).filter((id) => !toDownload.includes(id));
+      // Un instrumento de cobertura que falla se omite: no debe impedir actualizar
+      // las campañas (auditoría 79). Esa unidad queda sin «Aplicar» hasta el próximo refresh.
+      const skippedCoverageInstruments: string[] = [];
       for (const instrumentId of extraIds) {
-        instruments.push(await fetchInstrumentRender(instrumentId));
+        try {
+          instruments.push(await fetchInstrumentRender(instrumentId));
+        } catch (err) {
+          skippedCoverageInstruments.push(instrumentId);
+          captureError(err, { store: 'useCachedCampaignsStore', action: 'refresh', instrumentId });
+        }
       }
 
       // ── Phase 3: pre-cache S_REG, S1 and S2 (always refresh) ─────────────
@@ -268,7 +276,13 @@ export const useCachedCampaignsStore = create<CachedCampaignsState>((set, get) =
     const cached = new Set(await instrumentCacheStorage.listCachedIds());
     const missing = getSnapshotInstrumentIds(snapshot).filter((id) => !cached.has(id));
     const instruments: Awaited<ReturnType<typeof fetchInstrumentRender>>[] = [];
-    for (const id of missing) instruments.push(await fetchInstrumentRender(id));
+    for (const id of missing) {
+      try {
+        instruments.push(await fetchInstrumentRender(id));
+      } catch (err) {
+        captureError(err, { store: 'useCachedCampaignsStore', action: 'refreshCoverageSnapshot', instrumentId: id });
+      }
+    }
     for (const instrument of instruments) await instrumentCacheStorage.save(instrument);
     await coverageCacheStorage.replaceAll(snapshot);
     const finalCachedIds = await instrumentCacheStorage.listCachedIds();

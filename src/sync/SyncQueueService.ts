@@ -176,6 +176,8 @@ class SyncQueueServiceClass {
       // congelando la app en la ronda manual del test-088 (y de nuevo en la del
       // test-086, al combinarse con el bucle por dueño).
       const yaAtendidas: string[] = [];
+      // Spec 103 (DM4) — la foto de cobertura solo se refresca si la corrida sacó algo de la cola.
+      const pendingBefore = useSyncStatusStore.getState().pendingCount;
       for (const { ownerUserId, token } of plan.toProcess) {
         if (this.stopRun) break;
         this.stopOwnerGroup = false;
@@ -226,7 +228,15 @@ class SyncQueueServiceClass {
       // Spec 103 (DM4) — tras una corrida con envíos, se refresca la foto de
       // cobertura para que lo aplicado figure «aplicado» desde el servidor.
       // Mejor esfuerzo: un fallo conserva la foto anterior y no afecta la sync.
-      if (yaAtendidas.length > 0 && !this.stopRun && this.consecutiveNetworkFailures === 0) {
+      const pendingAfter = useSyncStatusStore.getState().pendingCount;
+      if (
+        yaAtendidas.length > 0 &&
+        typeof pendingBefore === 'number' &&
+        typeof pendingAfter === 'number' &&
+        pendingAfter < pendingBefore &&
+        !this.stopRun &&
+        this.consecutiveNetworkFailures === 0
+      ) {
         try {
           // eslint-disable-next-line @typescript-eslint/no-require-imports
           const { useCachedCampaignsStore } = require('../store/useCachedCampaignsStore') as typeof import('../store/useCachedCampaignsStore');

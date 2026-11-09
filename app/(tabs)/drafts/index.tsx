@@ -1,3 +1,4 @@
+import { resolveRegistrationFlowCode } from "../../../src/lib/instrumentCodeAliases";
 import { applyContextFromDraft } from "../../../src/lib/surveyAnchor";
 import { useState, useCallback, useMemo } from "react";
 import {
@@ -165,6 +166,17 @@ export default function DraftsScreen() {
         stepOrder: draft.stepOrder,
         restoredAnswers: draft.answers,
       });
+
+      // Spec 103 — un S_REG sin sesión ni productor es el alta de un productor
+      // nuevo: se reanuda en modo registro para cerrarlo (alta provisional y
+      // constancia) al terminar.
+      if (
+        !draft.campaignSessionId &&
+        !applyContextFromDraft(draft) &&
+        resolveRegistrationFlowCode(instrument.code) === "REG"
+      ) {
+        useInstrumentSurveyStore.setState({ registro: { consent: null } });
+      }
 
       const resumeIndex = useInstrumentSurveyStore.getState().resumeIndex();
 

@@ -81,8 +81,8 @@ export default function InstrumentStartScreen() {
       // siempre genera un id local y crea el borrador; el backend recibe la
       // fila real recién al sincronizar.
       // Spec 103 — con contexto de productor la encuesta no pertenece a ninguna
-      // campaña: se limpia la sesión en memoria y se ancla a la unidad.
-      if (applyContext) useCampaignSessionStore.getState().reset();
+      // campaña: se ancla a la unidad. La sesión de campaña en memoria NO se
+      // resetea (auditoría 79): podría haber un orquestador abierto debajo.
       const sessionForSurvey = applyContext ? undefined : (campaignSessionId ?? undefined);
       const stepForSurvey = applyContext ? undefined : currentStep?.order;
 

@@ -18,6 +18,7 @@ import { NetworkMonitor } from "../../../../../src/sync/NetworkMonitor";
 import { logger } from "../../../../../src/lib/logger";
 import { checkDuplicate } from "../../../../../src/storage/duplicateDetection";
 import { getNextStepOffline } from "../../../../../src/lib/getNextStepOffline";
+import { coverageCacheStorage } from "../../../../../src/storage/coverageCache";
 import { completeRegistrationOffline } from "../../../../../src/lib/registrationCompletion";
 import { extractCropsOffline } from "../../../../../src/lib/extractCropsOffline";
 import { generateLocalId } from "../../../../../src/lib/generateLocalId";
@@ -965,7 +966,15 @@ export default function OrchestratorScreen() {
         store.applyLocalFarmer(draft);
         const { registroSurveyId: regId, s1SurveyId: s1Id } = useCampaignSessionStore.getState();
         const localId = isRegistro ? regId : s1Id;
-        if (localId && draft.isProvisional) await surveyDraftStore.setFarmerId(localId, draft.farmerId);
+        if (localId && draft.isProvisional) {
+          await surveyDraftStore.setFarmerId(localId, draft.farmerId);
+          // Spec 103 — también aparece como provisional en «Productores» (como en el cierre normal).
+          await coverageCacheStorage.addProvisional({
+            farmerId: draft.farmerId,
+            name: draft.name,
+            documentId: draft.documentId,
+          });
+        }
         resolvedFarmerId = draft.farmerId;
         resolvedFarmerName = draft.name;
 

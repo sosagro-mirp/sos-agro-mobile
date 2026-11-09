@@ -6,7 +6,9 @@ import { Check, ArrowRight, TriangleAlert } from "lucide-react-native";
 import { useInstrumentSurveyStore } from "../../../src/store/useInstrumentSurveyStore";
 import { useCampaignSessionStore } from "../../../src/store/useCampaignSessionStore";
 import { completeRegistrationOffline, confirmLocalFarmer, type RegistrationCompletionOutcome } from "../../../src/lib/registrationCompletion";
-import { saveAnchoredConsent } from "../../../src/lib/saveAnchoredConsent";
+import { enqueueConsent } from "../../../src/lib/saveAnchoredConsent";
+import { consentRecordStore } from "../../../src/storage/consentRecordStore";
+import { farmerCacheStorage } from "../../../src/storage/farmerCache";
 import { consentDocumentCacheStorage } from "../../../src/storage/consentDocumentCache";
 import { surveyDraftStore } from "../../../src/storage/surveyDraftStore";
 import { DocumentCollisionModal } from "../../../src/components/campaign/DocumentCollisionModal";
@@ -35,18 +37,17 @@ export default function InstrumentCompletedScreen() {
     ? `${Math.round((completedSteps / currentStep.totalSteps) * 100)}%`
     : "0%";
 
-  // Guarda la constancia (anclada al S_REG o al productor) y abre su ficha.
+  // Encola la constancia ya guardada al aceptar (anclada al S_REG) y abre la ficha.
   const goToFarmer = async (farmerId: string) => {
-    if (registro?.consent && surveyId) {
+    if (surveyId) {
       try {
-        const document = await consentDocumentCacheStorage.get();
-        if (document) {
-          await saveAnchoredConsent({
-            values: registro.consent,
-            document,
-            farmerId,
-            registrationSurveyId: surveyId,
-          });
+        const record = await consentRecordStore.getBySurveyId(surveyId);
+        if (record && record.status === "pending") {
+          await enqueueConsent(record.id);
+          const document = await consentDocumentCacheStorage.get();
+          if (document) {
+            await farmerCacheStorage.recordConsent(farmerId, document.version, record.acceptedAt).catch(() => 0);
+          }
         }
       } catch {
         // El consentimiento no bloquea el registro: la ficha lo vuelve a ofrecer.

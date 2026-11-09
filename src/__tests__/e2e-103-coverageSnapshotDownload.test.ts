@@ -324,17 +324,23 @@ describe('refresh() — C13: reemplazo atómico', () => {
     expect(state().error).toBeTruthy();
   });
 
-  it('si falla un instrumento de cobertura, tampoco se reemplaza nada', async () => {
+  it('si falla un instrumento de cobertura se omite y el resto se actualiza (decisión 2026-11-09, auditoría 79)', async () => {
     givenHappyDownload();
     (fetchInstrumentRender as jest.Mock).mockImplementation(async (id: string) => {
       if (id === 'i-prod-v2') throw new Error('Unauthorized');
       return { instrumentId: id };
     });
 
-    await state().refresh().catch(() => undefined);
+    await state().refresh();
 
     expect(downloadedInstrumentIds()).toContain('i-prod-v2');
-    expectNothingReplaced();
+    // Las campañas, los demás instrumentos y la foto sí se reemplazan.
+    expect(mockReplaceAll).toHaveBeenCalledTimes(1);
+    expect(campaignCacheStorage.save).toHaveBeenCalledWith(campaign);
+    const saved = (instrumentCacheStorage.save as jest.Mock).mock.calls.map((c) => c[0].instrumentId);
+    expect(saved).toEqual(expect.arrayContaining(['i-camp', 'i-prod']));
+    expect(saved).not.toContain('i-prod-v2');
+    expect(state().error).toBeNull();
   });
 });
 

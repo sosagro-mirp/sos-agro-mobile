@@ -9,10 +9,10 @@ import { PrimaryButton } from "../../src/components/common/PrimaryButton";
 import { OfflineBanner } from "../../src/components/network/OfflineBanner";
 import { useCachedInstrumentsStore } from "../../src/store/useCachedInstrumentsStore";
 import { useInstrumentSurveyStore } from "../../src/store/useInstrumentSurveyStore";
-import { useCampaignSessionStore } from "../../src/store/useCampaignSessionStore";
 import { useSyncStatusStore } from "../../src/store/useSyncStatusStore";
 import { consentDocumentCacheStorage } from "../../src/storage/consentDocumentCache";
 import { fetchActiveConsentDocument, type ConsentDocument } from "../../src/api/consents";
+import { saveAnchoredConsent } from "../../src/lib/saveAnchoredConsent";
 import { beginSurvey } from "../../src/lib/beginSurvey";
 import { resolveRegistrationFlowCode } from "../../src/lib/instrumentCodeAliases";
 import { Fonts } from "../../src/theme/fonts";
@@ -70,8 +70,12 @@ export default function NuevoProductorScreen() {
         return;
       }
       // Sin sesión de campaña ni productor: la identidad sale del propio S_REG.
-      useCampaignSessionStore.getState().reset();
       const surveyId = await beginSurvey({ instrumentId: instrument.instrumentId });
+      // La constancia se guarda ya (anclada al S_REG) para no perderla si la app se
+      // cierra a mitad del registro; se encola al cerrar el registro (completed.tsx).
+      if (document) {
+        await saveAnchoredConsent({ values: consent, document, surveyId, enqueue: false });
+      }
       const store = useInstrumentSurveyStore.getState();
       store.initializeSurvey({
         surveyId,
@@ -79,7 +83,7 @@ export default function NuevoProductorScreen() {
         instrumentName: instrument.name,
         sections: instrument.sections,
       });
-      useInstrumentSurveyStore.setState({ registro: { consent } });
+      useInstrumentSurveyStore.setState({ registro: { consent: null } });
       router.push(`/instrument/${instrument.instrumentId}/question/0`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al iniciar el registro");

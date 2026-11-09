@@ -18,12 +18,18 @@ export async function saveAnchoredConsent(params: {
   farmerId?: string | null;
   /** Id local del S_REG de un productor nuevo. */
   registrationSurveyId?: string | null;
+  /** Ancla directa a una encuesta local (alta de productor nuevo, antes de cerrar el registro). */
+  surveyId?: string | null;
+  /** false: guarda la constancia sin encolarla (se encola al cerrar el registro). */
+  enqueue?: boolean;
   acceptedAt?: Date;
-}): Promise<void> {
+}): Promise<string> {
   const acceptedAt = params.acceptedAt ?? new Date();
-  const anchor = resolveConsentAnchor(
-    chooseConsentAnchor({ farmerId: params.farmerId, registrationSurveyId: params.registrationSurveyId }),
-  );
+  const anchor = params.surveyId
+    ? resolveConsentAnchor({ surveyId: params.surveyId })
+    : resolveConsentAnchor(
+        chooseConsentAnchor({ farmerId: params.farmerId, registrationSurveyId: params.registrationSurveyId }),
+      );
   const localId = generateLocalId('consent');
   await consentRecordStore.save({
     id: localId,
@@ -39,17 +45,23 @@ export async function saveAnchoredConsent(params: {
     status: 'pending',
     createdAt: acceptedAt,
   });
-  await syncQueueStorage.enqueue({
-    id: generateLocalId('consent'),
-    surveyId: localId,
-    itemType: 'consent',
-  });
+  if (params.enqueue !== false) await enqueueConsent(localId);
 
   const farmerId = params.farmerId;
-  if (farmerId) {
+  if (farmerId && params.enqueue !== false) {
     // Vigencia offline: la ficha deja de mostrar el aviso. Best-effort.
     farmerCacheStorage.recordConsent(farmerId, params.document.version, acceptedAt).catch((err) => {
       logger.warn(`[consent] failed to record consent on farmerCache: ${String(err)}`);
     });
   }
+  return localId;
+}
+
+/** Encola una constancia ya guardada (cierre del registro de un productor nuevo). */
+export async function enqueueConsent(localConsentId: string): Promise<void> {
+  await syncQueueStorage.enqueue({
+    id: generateLocalId('consent'),
+    surveyId: localConsentId,
+    itemType: 'consent',
+  });
 }
