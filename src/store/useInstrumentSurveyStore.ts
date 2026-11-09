@@ -105,6 +105,9 @@ export const useInstrumentSurveyStore = create<InstrumentSurveyState>((set, get)
       farmerId: campaignSessionId ? null : (farmerId ?? null),
       farmId: campaignSessionId ? null : (farmId ?? null),
       farmCropId: campaignSessionId ? null : (farmCropId ?? null),
+      // Spec 103 — el modo registro lo fija nuevo.tsx DESPUÉS de inicializar; una
+      // encuesta nueva nunca hereda el de un registro abandonado.
+      registro: null,
       stepOrder: stepOrder ?? null,
       flattenedQuestions,
       answers: restoredAnswers ?? {},
