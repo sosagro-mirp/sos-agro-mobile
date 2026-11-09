@@ -18,7 +18,7 @@ import { useCampaignSessionStore } from "../../store/useCampaignSessionStore";
 import { surveyDraftStore } from "../../storage/surveyDraftStore";
 import { advanceWithinCampaign } from "../../lib/campaignNavigation";
 import { OfflineBanner } from "../network/OfflineBanner";
-import { ConsentModal } from "../campaign/ConsentModal";
+import { ConsentModal } from "../consents/ConsentModal";
 import { QuestionContainer } from "./QuestionContainer";
 import { QuestionRenderer } from "./QuestionRenderer";
 import { SectionNavPanel } from "./SectionNavPanel";
@@ -48,7 +48,9 @@ export const QuestionScreen: React.FC<QuestionScreenProps> = ({
 }) => {
   const router = useRouter();
   // Spec 103 (C6) — en el flujo por productor, salir vuelve a su ficha.
-  const productorFarmerId = useInstrumentSurveyStore((s) => (s.campaignSessionId ? null : s.farmerId));
+  const productorFarmerId = useInstrumentSurveyStore((s) =>
+    s.campaignSessionId ? s.legacyReturnFarmerId : s.farmerId,
+  );
   const isRegistro = useInstrumentSurveyStore((s) => !!s.registro);
   const exitInstrument = () => {
     if (isRegistro) router.replace("/(tabs)/productores");

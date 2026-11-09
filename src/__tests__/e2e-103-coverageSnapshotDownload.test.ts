@@ -228,13 +228,15 @@ describe('refresh() — C1: foto de cobertura e instrumentos por unión (DM2, DM
     expect(mockReplaceAll.mock.calls[0][0]).toEqual(snapshot);
   });
 
-  it('descarga la unión de instrumentos de campañas y de las columnas (memberIds), sin repetir', async () => {
+  // Spec 104 (etapa A): refresh() ya no descarga campañas; los instrumentos salen de la foto.
+  it('descarga los instrumentos de las columnas (memberIds), sin repetir', async () => {
     givenHappyDownload();
 
     await state().refresh();
 
     const ids = downloadedInstrumentIds();
-    expect(ids).toEqual(expect.arrayContaining(['i-camp', 'i-shared', 'i-prod', 'i-prod-v2']));
+    expect(ids).toEqual(expect.arrayContaining(['i-shared', 'i-prod', 'i-prod-v2']));
+    expect(ids).not.toContain('i-camp');
     expect(ids.filter((id) => id === 'i-shared')).toHaveLength(1);
   });
 
@@ -244,7 +246,7 @@ describe('refresh() — C1: foto de cobertura e instrumentos por unión (DM2, DM
     await state().refresh();
 
     const saved = (instrumentCacheStorage.save as jest.Mock).mock.calls.map((c) => c[0].instrumentId);
-    expect(saved).toEqual(expect.arrayContaining(['i-camp', 'i-prod', 'i-prod-v2']));
+    expect(saved).toEqual(expect.arrayContaining(['i-prod', 'i-prod-v2']));
   });
 
   it('expone la fecha de la foto para «Cobertura al {fecha}»', async () => {
@@ -255,12 +257,15 @@ describe('refresh() — C1: foto de cobertura e instrumentos por unión (DM2, DM
     expect(state().snapshotComputedAt).toBe(COMPUTED_AT);
   });
 
-  it('las campañas siguen descargándose y guardándose (convivencia hasta H8)', async () => {
+  it('las campañas ya no se descargan y la caché de campañas queda intacta (spec 104, etapa A)', async () => {
     givenHappyDownload();
 
     await state().refresh();
 
-    expect(campaignCacheStorage.save).toHaveBeenCalledWith(campaign);
+    expect(fetchActiveCampaigns).not.toHaveBeenCalled();
+    expect(fetchCampaignRender).not.toHaveBeenCalled();
+    expect(campaignCacheStorage.save).not.toHaveBeenCalled();
+    expect(campaignCacheStorage.clear).not.toHaveBeenCalled();
     expect(state().campaigns).toHaveLength(1);
   });
 });
@@ -334,11 +339,10 @@ describe('refresh() — C13: reemplazo atómico', () => {
     await state().refresh();
 
     expect(downloadedInstrumentIds()).toContain('i-prod-v2');
-    // Las campañas, los demás instrumentos y la foto sí se reemplazan.
+    // Los demás instrumentos y la foto sí se reemplazan.
     expect(mockReplaceAll).toHaveBeenCalledTimes(1);
-    expect(campaignCacheStorage.save).toHaveBeenCalledWith(campaign);
     const saved = (instrumentCacheStorage.save as jest.Mock).mock.calls.map((c) => c[0].instrumentId);
-    expect(saved).toEqual(expect.arrayContaining(['i-camp', 'i-prod']));
+    expect(saved).toEqual(expect.arrayContaining(['i-shared', 'i-prod']));
     expect(saved).not.toContain('i-prod-v2');
     expect(state().error).toBeNull();
   });

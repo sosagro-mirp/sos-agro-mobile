@@ -11,7 +11,7 @@ import { consentRecordStore } from "../../../src/storage/consentRecordStore";
 import { farmerCacheStorage } from "../../../src/storage/farmerCache";
 import { consentDocumentCacheStorage } from "../../../src/storage/consentDocumentCache";
 import { surveyDraftStore } from "../../../src/storage/surveyDraftStore";
-import { DocumentCollisionModal } from "../../../src/components/campaign/DocumentCollisionModal";
+import { DocumentCollisionModal } from "../../../src/components/farmers/DocumentCollisionModal";
 import { leaveToFarmer } from "../../../src/lib/productorNavigation";
 import { advanceWithinCampaign } from "../../../src/lib/campaignNavigation";
 import { Fonts } from "../../../src/theme/fonts";
@@ -20,8 +20,10 @@ import type { ThemeColors } from "../../../src/theme/colors";
 
 export default function InstrumentCompletedScreen() {
   const router = useRouter();
-  const { instrumentName, campaignSessionId, surveyId, farmerId: productorFarmerId, registro, reset } =
+  const { instrumentName, campaignSessionId, surveyId, farmerId: ownFarmerId, legacyReturnFarmerId, registro, reset } =
     useInstrumentSurveyStore();
+  // Spec 104: un borrador de campaña heredado reanudado por productor también vuelve a la ficha.
+  const productorFarmerId = campaignSessionId ? legacyReturnFarmerId : ownFarmerId;
   // Spec 103 (DM7) — cierre del registro de un productor nuevo desde «Productores».
   const [collision, setCollision] = useState<Extract<RegistrationCompletionOutcome, { kind: 'collision' }> | null>(null);
   const [registroError, setRegistroError] = useState<string | null>(null);
@@ -31,7 +33,7 @@ export default function InstrumentCompletedScreen() {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
-  const isInsideCampaign = Boolean(campaignSessionId && campaign);
+  const isInsideCampaign = Boolean(campaignSessionId && campaign && !legacyReturnFarmerId);
   const completedSteps = currentStep ? currentStep.completedCount + 1 : 0;
   const progressPercent = currentStep
     ? `${Math.round((completedSteps / currentStep.totalSteps) * 100)}%`
@@ -112,7 +114,7 @@ export default function InstrumentCompletedScreen() {
     }
     reset();
     // Spec 103 (C6) — el flujo por productor vuelve a la ficha, no a Campañas.
-    if (!campaignSessionId && productorFarmerId) {
+    if (productorFarmerId) {
       leaveToFarmer(router, productorFarmerId);
       return;
     }

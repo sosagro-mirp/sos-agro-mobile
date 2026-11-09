@@ -25,9 +25,12 @@ interface InstrumentSurveyState {
   farmerId: string | null;
   farmId: string | null;
   farmCropId: string | null;
+  // Spec 104 — borrador de campaña heredado reanudado por el flujo anclado: la
+  // sesión se conserva para la ingesta, pero al salir se vuelve a la ficha.
+  legacyReturnFarmerId: string | null;
   // Spec 103 (DM7) — registro de productor nuevo desde «Productores»: guarda el
   // consentimiento digitado antes del S_REG hasta poder anclarlo.
-  registro: { consent: import('../components/campaign/ConsentForm').ConsentFormValues | null } | null;
+  registro: { consent: import('../components/consents/ConsentForm').ConsentFormValues | null } | null;
   stepOrder: number | null;
   flattenedQuestions: FlattenedQuestionItem[];
   answers: Record<string, InstrumentDraftAnswer>;
@@ -86,6 +89,7 @@ export const useInstrumentSurveyStore = create<InstrumentSurveyState>((set, get)
   farmerId: null,
   farmId: null,
   farmCropId: null,
+  legacyReturnFarmerId: null,
   registro: null,
   stepOrder: null,
   flattenedQuestions: [],
@@ -105,6 +109,7 @@ export const useInstrumentSurveyStore = create<InstrumentSurveyState>((set, get)
       farmerId: campaignSessionId ? null : (farmerId ?? null),
       farmId: campaignSessionId ? null : (farmId ?? null),
       farmCropId: campaignSessionId ? null : (farmCropId ?? null),
+      legacyReturnFarmerId: null,
       // Spec 103 — el modo registro lo fija nuevo.tsx DESPUÉS de inicializar; una
       // encuesta nueva nunca hereda el de un registro abandonado.
       registro: null,
@@ -243,6 +248,7 @@ export const useInstrumentSurveyStore = create<InstrumentSurveyState>((set, get)
       farmerId: null,
       farmId: null,
       farmCropId: null,
+      legacyReturnFarmerId: null,
       registro: null,
       stepOrder: null,
       flattenedQuestions: [],

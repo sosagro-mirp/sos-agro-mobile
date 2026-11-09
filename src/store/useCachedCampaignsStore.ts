@@ -4,7 +4,6 @@ import { campaignCacheStorage } from '../storage/campaignCache';
 import { instrumentCacheStorage } from '../storage/instrumentCache';
 import { farmerCacheStorage } from '../storage/farmerCache';
 import { consentDocumentCacheStorage } from '../storage/consentDocumentCache';
-import { fetchActiveCampaigns, fetchCampaignRender } from '../api/campaigns';
 import { fetchInstrumentRender, fetchInstrumentByCode } from '../api/instruments';
 import { fetchActiveConsentDocument } from '../api/consents';
 import { listAllFarmers } from '../api/farmers';
@@ -82,78 +81,10 @@ export const useCachedCampaignsStore = create<CachedCampaignsState>((set, get) =
       // la red o el token fallan a mitad, las campañas ya descargadas siguen
       // disponibles para trabajar sin conexión.
 
-      // ── Phase 1: fetch campaign list and full renders ──────────────────────
-      const summaries = await fetchActiveCampaigns();
-
-      set({
-        downloadProgress: {
-          phase: 'campaigns',
-          currentName: 'Obteniendo campañas…',
-          done: 0,
-          total: summaries.length,
-        },
-      });
-
-      const rendered: CampaignRender[] = [];
-      for (const summary of summaries) {
-        set((s) => ({
-          downloadProgress: s.downloadProgress
-            ? {
-                ...s.downloadProgress,
-                currentName: summary.name,
-              }
-            : null,
-        }));
-
-        const campaign = await fetchCampaignRender(summary.campaignId);
-        rendered.push(campaign);
-
-        set((s) => ({
-          downloadProgress: s.downloadProgress
-            ? {
-                ...s.downloadProgress,
-                done: s.downloadProgress.done + 1,
-              }
-            : null,
-        }));
-      }
-
-      // ── Phase 2: instrumentos de las campañas ────────────────────────────────
-      const toDownload = [
-        ...new Set(rendered.flatMap(getInstrumentIds)),
-      ];
-
-      set({
-        downloadProgress: {
-          phase: 'instruments',
-          currentName: toDownload.length === 0 ? 'Sin instrumentos' : 'Descargando instrumentos…',
-          done: 0,
-          total: toDownload.length,
-        },
-      });
-
+      // Spec 104 (etapa A) — «Actualizar» ya no descarga campañas: los
+      // instrumentos salen de la foto de cobertura y de S_REG/S1/S2. La caché de
+      // campañas se conserva (solo lectura) para reanudar borradores heredados.
       const instruments: Awaited<ReturnType<typeof fetchInstrumentRender>>[] = [];
-      for (const instrumentId of toDownload) {
-        set((s) => ({
-          downloadProgress: s.downloadProgress
-            ? {
-                ...s.downloadProgress,
-                currentName: `Instrumento ${s.downloadProgress.done + 1} de ${toDownload.length}`,
-              }
-            : null,
-        }));
-
-        instruments.push(await fetchInstrumentRender(instrumentId));
-
-        set((s) => ({
-          downloadProgress: s.downloadProgress
-            ? {
-                ...s.downloadProgress,
-                done: s.downloadProgress.done + 1,
-              }
-            : null,
-        }));
-      }
 
       // ── Spec 103 — foto de cobertura de todos los productores ───────────────
       set({
@@ -166,11 +97,10 @@ export const useCachedCampaignsStore = create<CachedCampaignsState>((set, get) =
       });
       const snapshot = await fetchCoverageSnapshot();
 
-      // Unión de instrumentos (DM6): los de las columnas de la foto que no
-      // están ya en alguna campaña (incluye las versiones agrupadas).
-      const extraIds = getSnapshotInstrumentIds(snapshot).filter((id) => !toDownload.includes(id));
+      // Instrumentos de las columnas de la foto (incluye las versiones agrupadas).
+      const extraIds = getSnapshotInstrumentIds(snapshot);
       // Un instrumento de cobertura que falla se omite: no debe impedir actualizar
-      // las campañas (auditoría 79). Esa unidad queda sin «Aplicar» hasta el próximo refresh.
+      // (auditoría 79). Esa unidad queda sin «Aplicar» hasta el próximo refresh.
       const skippedCoverageInstruments: string[] = [];
       for (const instrumentId of extraIds) {
         try {
@@ -195,9 +125,8 @@ export const useCachedCampaignsStore = create<CachedCampaignsState>((set, get) =
       }
 
       // ── Descarga completa: recién ahora se reemplaza la caché ──────────────
-      await campaignCacheStorage.clear();
-      await instrumentCacheStorage.clear();
-      for (const campaign of rendered) await campaignCacheStorage.save(campaign);
+      // Spec 104: ya no se vacía la caché de instrumentos; `save` actualiza y los
+      // borradores de campaña heredados conservan el instrumento que reanudan.
       for (const instrument of instruments) await instrumentCacheStorage.save(instrument);
       await coverageCacheStorage.replaceAll(snapshot);
 
@@ -253,7 +182,6 @@ export const useCachedCampaignsStore = create<CachedCampaignsState>((set, get) =
       // ── Final state refresh ────────────────────────────────────────────────
       const finalCachedIds = await instrumentCacheStorage.listCachedIds();
       set({
-        campaigns: rendered,
         cachedInstrumentIds: new Set(finalCachedIds),
         snapshotComputedAt: snapshot.computedAt,
       });
@@ -261,7 +189,7 @@ export const useCachedCampaignsStore = create<CachedCampaignsState>((set, get) =
       await useCachedInstrumentsStore.getState().loadFromCache();
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : 'Error actualizando campañas';
+        error instanceof Error ? error.message : 'Error actualizando';
       set({ error: message });
       throw error;
     } finally {
