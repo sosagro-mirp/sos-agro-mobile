@@ -351,9 +351,11 @@ export const surveyDraftStore = {
   },
 
   /**
-   * Spec 103 — encuestas locales del flujo por productor (sin sesión de campaña)
-   * que la superposición de cobertura debe contar. Las de otro dueño también
-   * cuentan: la tablet es compartida y la foto es la misma para todos.
+   * Spec 103 — encuestas locales con productor que la superposición de cobertura
+   * debe contar. Las de otro dueño también cuentan: la tablet es compartida y la
+   * foto es la misma para todos.
+   * Spec 104 — también cuentan las de una sesión de campaña heredada: terminado un
+   * borrador viejo, la ficha ya no ofrece «Aplicar» otra vez sin conexión.
    */
   async listForCoverage(): Promise<
     {
@@ -367,7 +369,7 @@ export const surveyDraftStore = {
       updatedAt: string;
     }[]
   > {
-    const rows = await db.select().from(surveys).where(isNull(surveys.campaignSessionId)).all();
+    const rows = await db.select().from(surveys).all();
     return rows
       .filter((r) => r.farmerId != null)
       .map((r) => ({

@@ -9,6 +9,7 @@ import { fetchActiveConsentDocument } from '../api/consents';
 import { listAllFarmers } from '../api/farmers';
 import { fetchCoverageSnapshot, type CoverageSnapshot } from '../api/coverage';
 import { coverageCacheStorage } from '../storage/coverageCache';
+import { surveyDraftStore } from '../storage/surveyDraftStore';
 import { useCachedInstrumentsStore } from './useCachedInstrumentsStore';
 import type { CampaignRender } from '../types';
 
@@ -125,9 +126,25 @@ export const useCachedCampaignsStore = create<CachedCampaignsState>((set, get) =
       }
 
       // ── Descarga completa: recién ahora se reemplaza la caché ──────────────
-      // Spec 104: ya no se vacía la caché de instrumentos; `save` actualiza y los
-      // borradores de campaña heredados conservan el instrumento que reanudan.
-      for (const instrument of instruments) await instrumentCacheStorage.save(instrument);
+      // Spec 104: la caché de instrumentos se vacía como siempre, pero se conservan
+      // los de borradores pendientes (p. ej. de campañas heredadas), que ya no
+      // vienen en la descarga y se quedarían sin instrumento para reanudarse.
+      const downloadedIds = new Set(instruments.map((i) => i.instrumentId));
+      const preserved: Awaited<ReturnType<typeof fetchInstrumentRender>>[] = [];
+      try {
+        const draftInstrumentIds = new Set(
+          (await surveyDraftStore.listDrafts()).map((d) => d.instrumentId),
+        );
+        for (const id of draftInstrumentIds) {
+          if (downloadedIds.has(id)) continue;
+          const cached = await instrumentCacheStorage.get(id);
+          if (cached) preserved.push(cached);
+        }
+      } catch (err) {
+        captureError(err, { store: 'useCachedCampaignsStore', action: 'preserveDraftInstruments' });
+      }
+      await instrumentCacheStorage.clear();
+      for (const instrument of [...instruments, ...preserved]) await instrumentCacheStorage.save(instrument);
       await coverageCacheStorage.replaceAll(snapshot);
 
       // ── Spec 78 — pre-cache the active consent document, alongside S1/S2 ──

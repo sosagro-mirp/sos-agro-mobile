@@ -55,7 +55,7 @@ export const QuestionScreen: React.FC<QuestionScreenProps> = ({
   const exitInstrument = () => {
     if (isRegistro) router.replace("/(tabs)/productores");
     else if (productorFarmerId) leaveToFarmer(router, productorFarmerId);
-    else router.replace("/(tabs)/campaign");
+    else router.replace("/(tabs)/productores");
   };
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const { colors } = useTheme();
@@ -134,7 +134,7 @@ export const QuestionScreen: React.FC<QuestionScreenProps> = ({
         `/campaign/${campaignId}/session/${sessionId}/orchestrator`,
       );
     } else {
-      router.replace("/(tabs)/campaign");
+      router.replace("/(tabs)/productores");
     }
   };
 
