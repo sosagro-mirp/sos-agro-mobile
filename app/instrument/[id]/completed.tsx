@@ -185,7 +185,13 @@ export default function InstrumentCompletedScreen() {
       <View style={styles.footer}>
         <TouchableOpacity style={styles.button} onPress={handleContinue} accessibilityRole="button">
           <Text style={styles.buttonText}>
-            {registro ? "Ver productor" : isInsideCampaign ? "Siguiente paso" : "Volver al inicio"}
+            {registro
+              ? "Ver productor"
+              : isInsideCampaign
+                ? "Siguiente paso"
+                : productorFarmerId
+                  ? "Volver al productor"
+                  : "Volver al inicio"}
           </Text>
           {isInsideCampaign && (
             <ArrowRight size={19} color={colors.brandForeground} strokeWidth={2.6} />

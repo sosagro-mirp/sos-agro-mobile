@@ -91,3 +91,14 @@ describe('M2 — la cobertura local cuenta las encuestas de sesión heredada', (
     expect(body).not.toMatch(/campaignSessionId/);
   });
 });
+
+describe('Cierre del flujo por productor (borradores heredados incluidos)', () => {
+  it('el botón final dice «Volver al productor» cuando se vuelve a la ficha', () => {
+    const src = fs.readFileSync(
+      path.resolve(__dirname, '../../app/instrument/[id]/completed.tsx'),
+      'utf8',
+    );
+    expect(src).toContain('"Volver al productor"');
+    expect(src).toMatch(/productorFarmerId\s*\n?\s*\?\s*"Volver al productor"/);
+  });
+});
