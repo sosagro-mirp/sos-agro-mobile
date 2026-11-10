@@ -1,4 +1,4 @@
-import { and, eq, inArray, lt, isNull, or } from 'drizzle-orm';
+import { and, eq, inArray, lt, isNull, ne, or } from 'drizzle-orm';
 import { db } from './db/db';
 import { surveys, responses, farmerCache, pendingSessions, instrumentCache, syncQueue } from './db/schema';
 import type { InstrumentDraftAnswer, InstrumentResponse } from '../types';
@@ -236,6 +236,20 @@ export const surveyDraftStore = {
       .all();
 
     return Promise.all(rows.map((r) => this.loadDraft(r.id) as Promise<SurveyDraft>));
+  },
+
+  /**
+   * Spec 104 — instrumentos que aún usan encuestas locales sin sincronizar
+   * (borradores y completadas pendientes). Una sola columna: no carga las
+   * respuestas. `refresh()` los conserva al vaciar la caché de instrumentos.
+   */
+  async listUnsyncedInstrumentIds(): Promise<string[]> {
+    const rows = await db
+      .selectDistinct({ instrumentId: surveys.instrumentId })
+      .from(surveys)
+      .where(ne(surveys.status, 'synced'))
+      .all();
+    return rows.map((r) => r.instrumentId);
   },
 
   /**

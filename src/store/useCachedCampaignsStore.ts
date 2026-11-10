@@ -129,21 +129,22 @@ export const useCachedCampaignsStore = create<CachedCampaignsState>((set, get) =
       // Spec 104: la caché de instrumentos se vacía como siempre, pero se conservan
       // los de borradores pendientes (p. ej. de campañas heredadas), que ya no
       // vienen en la descarga y se quedarían sin instrumento para reanudarse.
+      // Si no se pueden leer los borradores, NO se vacía la caché: se actualiza
+      // por encima y no se pierde ningún instrumento que un borrador necesite.
       const downloadedIds = new Set(instruments.map((i) => i.instrumentId));
       const preserved: Awaited<ReturnType<typeof fetchInstrumentRender>>[] = [];
+      let canClear = true;
       try {
-        const draftInstrumentIds = new Set(
-          (await surveyDraftStore.listDrafts()).map((d) => d.instrumentId),
-        );
-        for (const id of draftInstrumentIds) {
+        for (const id of await surveyDraftStore.listUnsyncedInstrumentIds()) {
           if (downloadedIds.has(id)) continue;
           const cached = await instrumentCacheStorage.get(id);
           if (cached) preserved.push(cached);
         }
       } catch (err) {
+        canClear = false;
         captureError(err, { store: 'useCachedCampaignsStore', action: 'preserveDraftInstruments' });
       }
-      await instrumentCacheStorage.clear();
+      if (canClear) await instrumentCacheStorage.clear();
       for (const instrument of [...instruments, ...preserved]) await instrumentCacheStorage.save(instrument);
       await coverageCacheStorage.replaceAll(snapshot);
 

@@ -29,7 +29,7 @@ jest.mock('../api/coverage', () => ({ fetchCoverageSnapshot: jest.fn() }));
 jest.mock('../storage/coverageCache', () => ({
   coverageCacheStorage: { replaceAll: jest.fn(), getSnapshotMeta: jest.fn().mockResolvedValue(null) },
 }));
-jest.mock('../storage/surveyDraftStore', () => ({ surveyDraftStore: { listDrafts: jest.fn() } }));
+jest.mock('../storage/surveyDraftStore', () => ({ surveyDraftStore: { listUnsyncedInstrumentIds: jest.fn() } }));
 jest.mock('../store/useCachedInstrumentsStore', () => ({
   useCachedInstrumentsStore: { getState: () => ({ loadFromCache: jest.fn() }) },
 }));
@@ -58,10 +58,7 @@ beforeEach(() => {
 
 describe('M1 — instrumentos de borradores pendientes', () => {
   it('vacía la caché y conserva el instrumento de un borrador que ya no viene en la descarga', async () => {
-    (surveyDraftStore.listDrafts as jest.Mock).mockResolvedValue([
-      { instrumentId: 'i-legacy' },
-      { instrumentId: 'i-new' },
-    ]);
+    (surveyDraftStore.listUnsyncedInstrumentIds as jest.Mock).mockResolvedValue(['i-legacy', 'i-new']);
     (instrumentCacheStorage.get as jest.Mock).mockResolvedValue({ instrumentId: 'i-legacy', name: 'Viejo' });
 
     await useCachedCampaignsStore.getState().refresh();
@@ -73,8 +70,18 @@ describe('M1 — instrumentos de borradores pendientes', () => {
     expect(instrumentCacheStorage.get).not.toHaveBeenCalledWith('i-new');
   });
 
+  it('si falla la lectura de borradores, no se vacía la caché y se actualiza por encima', async () => {
+    (surveyDraftStore.listUnsyncedInstrumentIds as jest.Mock).mockRejectedValue(new Error('JSON corrupto'));
+
+    await useCachedCampaignsStore.getState().refresh();
+
+    expect(instrumentCacheStorage.clear).not.toHaveBeenCalled();
+    const saved = (instrumentCacheStorage.save as jest.Mock).mock.calls.map((c) => c[0].instrumentId);
+    expect(saved).toEqual(['i-new']);
+  });
+
   it('sin borradores, solo queda lo descargado', async () => {
-    (surveyDraftStore.listDrafts as jest.Mock).mockResolvedValue([]);
+    (surveyDraftStore.listUnsyncedInstrumentIds as jest.Mock).mockResolvedValue([]);
 
     await useCachedCampaignsStore.getState().refresh();
 
