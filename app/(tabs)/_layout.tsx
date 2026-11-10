@@ -232,6 +232,8 @@ export default function TabsLayout() {
         <Tabs.Screen
           name="campaign/index"
           options={{
+            // Spec 104 (etapa A): las campañas se retiraron; la pestaña queda oculta.
+            href: null,
             title: TAB_LABELS.campaign,
             tabBarLabel: renderTabLabel(TAB_LABELS.campaign, styles.tabLabel, labelFontSize),
             tabBarIcon: ({ color, size }) => (

@@ -39,8 +39,10 @@ jest.mock('../store/useCachedInstrumentsStore', () => ({
 import { useCachedCampaignsStore } from '../store/useCachedCampaignsStore';
 import { campaignCacheStorage } from '../storage/campaignCache';
 import { instrumentCacheStorage } from '../storage/instrumentCache';
-import { fetchActiveCampaigns, fetchCampaignRender } from '../api/campaigns';
+import { fetchActiveCampaigns } from '../api/campaigns';
 import { fetchInstrumentRender } from '../api/instruments';
+import { fetchCoverageSnapshot } from '../api/coverage';
+import { coverageCacheStorage } from '../storage/coverageCache';
 
 const campaign = {
   campaignId: 'c1',
@@ -54,27 +56,34 @@ describe('useCachedCampaignsStore.refresh', () => {
     useCachedCampaignsStore.setState({ campaigns: [campaign as never], error: null });
   });
 
+  // Spec 104 (etapa A): refresh() ya no descarga campañas; la caché de campañas no
+  // se toca, y la falla a mitad de camino ahora es la de la foto de cobertura.
   it('keeps the cache when the download fails midway', async () => {
-    (fetchActiveCampaigns as jest.Mock).mockResolvedValue([{ campaignId: 'c1', name: 'Campaña' }]);
-    (fetchCampaignRender as jest.Mock).mockResolvedValue(campaign);
-    (fetchInstrumentRender as jest.Mock).mockRejectedValue(new Error('Unauthorized'));
+    (fetchCoverageSnapshot as jest.Mock).mockRejectedValueOnce(new Error('Unauthorized'));
 
     await expect(useCachedCampaignsStore.getState().refresh()).rejects.toThrow('Unauthorized');
 
     expect(campaignCacheStorage.clear).not.toHaveBeenCalled();
     expect(instrumentCacheStorage.clear).not.toHaveBeenCalled();
+    expect(coverageCacheStorage.replaceAll).not.toHaveBeenCalled();
     expect(useCachedCampaignsStore.getState().campaigns).toHaveLength(1);
   });
 
   it('replaces the cache only after everything downloaded', async () => {
-    (fetchActiveCampaigns as jest.Mock).mockResolvedValue([{ campaignId: 'c1', name: 'Campaña' }]);
-    (fetchCampaignRender as jest.Mock).mockResolvedValue(campaign);
+    (fetchCoverageSnapshot as jest.Mock).mockResolvedValueOnce({
+      computedAt: '2026-11-08T15:00:00.000Z',
+      instruments: [
+        { instrumentId: 'i1', name: 'I', code: null, scopeLevel: 'farmer', cropIds: [], coverageGroup: null, memberIds: ['i1'] },
+      ],
+      farmers: [],
+    });
     (fetchInstrumentRender as jest.Mock).mockResolvedValue({ instrumentId: 'i1' });
 
     await useCachedCampaignsStore.getState().refresh();
 
-    expect(campaignCacheStorage.clear).toHaveBeenCalledTimes(1);
-    expect(campaignCacheStorage.save).toHaveBeenCalledWith(campaign);
+    expect(fetchActiveCampaigns).not.toHaveBeenCalled();
+    expect(campaignCacheStorage.clear).not.toHaveBeenCalled();
     expect(instrumentCacheStorage.save).toHaveBeenCalledWith({ instrumentId: 'i1' });
+    expect(coverageCacheStorage.replaceAll).toHaveBeenCalledTimes(1);
   });
 });

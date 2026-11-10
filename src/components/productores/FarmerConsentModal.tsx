@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Modal, Platform, Pressable, StyleSheet, View } from "react-native";
 import { ChevronLeft } from "lucide-react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { ConsentForm, type ConsentFormValues } from "../campaign/ConsentForm";
+import { ConsentForm, type ConsentFormValues } from "../consents/ConsentForm";
 import { AppText } from "../common/AppText";
 import { OfflineBanner } from "../network/OfflineBanner";
 import { useSyncStatusStore } from "../../store/useSyncStatusStore";

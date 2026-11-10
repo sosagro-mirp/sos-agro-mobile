@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, View } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { ChevronLeft } from "lucide-react-native";
-import { ConsentForm, type ConsentFormValues } from "../../src/components/campaign/ConsentForm";
+import { ConsentForm, type ConsentFormValues } from "../../src/components/consents/ConsentForm";
 import { AppText } from "../../src/components/common/AppText";
 import { OfflineBanner } from "../../src/components/network/OfflineBanner";
 import { useCachedInstrumentsStore } from "../../src/store/useCachedInstrumentsStore";

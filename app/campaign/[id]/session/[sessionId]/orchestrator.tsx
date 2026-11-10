@@ -38,7 +38,7 @@ import { sessionCropsStorage } from "../../../../../src/storage/sessionCropsStor
 import { pendingCollisionStorage } from "../../../../../src/storage/pendingCollisionStorage";
 import { useAuthStore } from "../../../../../src/store/useAuthStore";
 import { DuplicateAlertModal } from "../../../../../src/components/campaign/DuplicateAlertModal";
-import { DocumentCollisionModal } from "../../../../../src/components/campaign/DocumentCollisionModal";
+import { DocumentCollisionModal } from "../../../../../src/components/farmers/DocumentCollisionModal";
 import { NetworkError } from "../../../../../src/api/httpClient";
 import { withNetworkRetry } from "../../../../../src/lib/withNetworkRetry";
 import { advanceWithinCampaign, returnToPreSurvey } from "../../../../../src/lib/campaignNavigation";

@@ -27,7 +27,7 @@ import { consentDocumentCacheStorage } from "../../../src/storage/consentDocumen
 import { hasValidConsent } from "../../../src/lib/hasValidConsent";
 import { isLocalId } from "../../../src/lib/isLocalId";
 import { resolveResumeSessionId } from "../../../src/lib/resolveResumeSessionId";
-import { PendingCollisionCard } from "../../../src/components/campaign/PendingCollisionCard";
+import { PendingCollisionCard } from "../../../src/components/farmers/PendingCollisionCard";
 import {
   pendingCollisionStorage,
   type PendingCollisionEntry,

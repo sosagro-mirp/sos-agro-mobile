@@ -1,4 +1,4 @@
-import { and, eq, inArray, lt, isNull, or } from 'drizzle-orm';
+import { and, eq, inArray, lt, isNull, ne, or } from 'drizzle-orm';
 import { db } from './db/db';
 import { surveys, responses, farmerCache, pendingSessions, instrumentCache, syncQueue } from './db/schema';
 import type { InstrumentDraftAnswer, InstrumentResponse } from '../types';
@@ -239,6 +239,20 @@ export const surveyDraftStore = {
   },
 
   /**
+   * Spec 104 — instrumentos que aún usan encuestas locales sin sincronizar
+   * (borradores y completadas pendientes). Una sola columna: no carga las
+   * respuestas. `refresh()` los conserva al vaciar la caché de instrumentos.
+   */
+  async listUnsyncedInstrumentIds(): Promise<string[]> {
+    const rows = await db
+      .selectDistinct({ instrumentId: surveys.instrumentId })
+      .from(surveys)
+      .where(ne(surveys.status, 'synced'))
+      .all();
+    return rows.map((r) => r.instrumentId);
+  },
+
+  /**
    * Spec 92 (Fase 3b) — encuestas locales `completed`/`synced` del encuestador
    * para la pestaña «Realizadas». Regla de dueño «del usuario o sin dueño»
    * (spec 86); excluye las que no tienen respuestas. Hace un número fijo de
@@ -351,9 +365,11 @@ export const surveyDraftStore = {
   },
 
   /**
-   * Spec 103 — encuestas locales del flujo por productor (sin sesión de campaña)
-   * que la superposición de cobertura debe contar. Las de otro dueño también
-   * cuentan: la tablet es compartida y la foto es la misma para todos.
+   * Spec 103 — encuestas locales con productor que la superposición de cobertura
+   * debe contar. Las de otro dueño también cuentan: la tablet es compartida y la
+   * foto es la misma para todos.
+   * Spec 104 — también cuentan las de una sesión de campaña heredada: terminado un
+   * borrador viejo, la ficha ya no ofrece «Aplicar» otra vez sin conexión.
    */
   async listForCoverage(): Promise<
     {
@@ -367,7 +383,7 @@ export const surveyDraftStore = {
       updatedAt: string;
     }[]
   > {
-    const rows = await db.select().from(surveys).where(isNull(surveys.campaignSessionId)).all();
+    const rows = await db.select().from(surveys).all();
     return rows
       .filter((r) => r.farmerId != null)
       .map((r) => ({

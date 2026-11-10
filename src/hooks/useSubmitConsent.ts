@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { ConsentFormValues } from "../components/campaign/ConsentForm";
+import type { ConsentFormValues } from "../components/consents/ConsentForm";
 import type { ConsentDocument } from "../api/consents";
 import { submitConsent } from "../api/consents";
 import { consentRecordStore } from "../storage/consentRecordStore";
