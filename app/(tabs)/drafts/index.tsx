@@ -1,3 +1,7 @@
+import { resolveRegistrationFlowCode } from "../../../src/lib/instrumentCodeAliases";
+import { applyContextFromDraft } from "../../../src/lib/surveyAnchor";
+import { resolveLegacyDraftResume } from "../../../src/lib/legacyCampaignDraft";
+import { useCampaignSessionStore } from "../../../src/store/useCampaignSessionStore";
 import { useState, useCallback, useMemo } from "react";
 import {
   ActivityIndicator,
@@ -139,7 +143,7 @@ export default function DraftsScreen() {
       const instrument = await instrumentCacheStorage.get(draft.instrumentId);
       if (!instrument) {
         setError(
-          "El instrumento de este borrador ya no está en caché. Descárgalo de nuevo desde Campañas."
+          "El instrumento de este borrador ya no está en caché. Toca «Actualizar» en Productores para descargarlo de nuevo."
         );
         return;
       }
@@ -148,12 +152,25 @@ export default function DraftsScreen() {
       // inicializarlo, en vez de calcularse acá por su cuenta: es la misma
       // fuente (`resolveResumeIndex` sobre `visibleQuestions()` + `answers`)
       // que usa la pantalla de pregunta, así que no puede divergir.
+      // Spec 104 (DH8-4) — un borrador de campaña iniciado antes del retiro se
+      // reanuda anclado al productor de su sesión y vuelve a su ficha al terminar.
+      const campaignSession = useCampaignSessionStore.getState();
+      const legacy = resolveLegacyDraftResume(
+        draft,
+        campaignSession.sessionId === draft.campaignSessionId
+          ? { farmerId: campaignSession.farmerId }
+          : null,
+      );
+
       useInstrumentSurveyStore.getState().initializeSurvey({
         surveyId: draft.surveyId,
         instrumentId: instrument.instrumentId,
         instrumentName: instrument.name,
         sections: instrument.sections,
         campaignSessionId: draft.campaignSessionId,
+        // Spec 103 — un borrador del flujo por productor conserva su contexto
+        // para volver a la ficha al terminar o salir.
+        ...(applyContextFromDraft(draft) ?? {}),
         // Sin esto la encuesta se materializa con `stepOrder: null` y
         // `getNextStep()` no cuenta el paso como completado, así que la
         // campaña vuelve a ofrecer un instrumento ya respondido (hallazgo de
@@ -161,6 +178,21 @@ export default function DraftsScreen() {
         stepOrder: draft.stepOrder,
         restoredAnswers: draft.answers,
       });
+
+      if (legacy?.kind === "anchored") {
+        useInstrumentSurveyStore.setState({ legacyReturnFarmerId: legacy.context.farmerId });
+      }
+
+      // Spec 103 — un S_REG sin sesión ni productor es el alta de un productor
+      // nuevo: se reanuda en modo registro para cerrarlo (alta provisional y
+      // constancia) al terminar.
+      if (
+        !draft.campaignSessionId &&
+        !applyContextFromDraft(draft) &&
+        resolveRegistrationFlowCode(instrument.code) === "REG"
+      ) {
+        useInstrumentSurveyStore.setState({ registro: { consent: null } });
+      }
 
       const resumeIndex = useInstrumentSurveyStore.getState().resumeIndex();
 

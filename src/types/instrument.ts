@@ -127,6 +127,8 @@ export interface FarmerSearchResult {
   name: string;
   documentId: string | null;
   phone?: string | null;
+  // Spec 103 — viene de GET /api/farmers (spec 102): false = consentimiento vigente.
+  hasPendingConsent?: boolean;
   farm?: {
     farmId?: string;
     name: string;

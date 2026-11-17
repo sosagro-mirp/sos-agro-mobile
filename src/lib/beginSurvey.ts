@@ -1,5 +1,6 @@
 import { surveyDraftStore } from '../storage/surveyDraftStore';
 import { generateLocalId } from './generateLocalId';
+import { isAnchorComplete } from './surveyAnchor';
 
 /**
  * Spec 70, Fase 1-2 — punto único de inicio de un instrumento.
@@ -14,6 +15,9 @@ export interface BeginSurveyParams {
   instrumentId: string;
   campaignSessionId?: string;
   farmerId?: string;
+  // Spec 103 — anclas del flujo por productor (sin sesión de campaña).
+  farmId?: string;
+  farmCropId?: string;
   stepOrder?: number;
 }
 
@@ -27,12 +31,17 @@ export interface BeginSurveyParams {
 const pendingBegins = new Map<string, Promise<string>>();
 
 function keyFor(params: BeginSurveyParams): string {
+  // Spec 103 — sin sesión la unidad (productor, finca, cultivo) distingue los
+  // inicios: dos productores distintos no comparten promesa en vuelo.
   return `${params.campaignSessionId ?? 'no-session'}:${params.instrumentId}:${
     params.stepOrder ?? 'no-step'
-  }`;
+  }:${params.farmerId ?? '-'}:${params.farmId ?? '-'}:${params.farmCropId ?? '-'}`;
 }
 
 export function beginSurvey(params: BeginSurveyParams): Promise<string> {
+  if (!isAnchorComplete(params)) {
+    return Promise.reject(new Error('Contexto de encuesta incompleto: cultivo sin finca'));
+  }
   const key = keyFor(params);
   const inFlight = pendingBegins.get(key);
   if (inFlight) return inFlight;
@@ -44,6 +53,8 @@ export function beginSurvey(params: BeginSurveyParams): Promise<string> {
       instrumentId: params.instrumentId,
       campaignSessionId: params.campaignSessionId,
       farmerId: params.farmerId,
+      farmId: params.farmId,
+      farmCropId: params.farmCropId,
       stepOrder: params.stepOrder,
     });
     return surveyId;

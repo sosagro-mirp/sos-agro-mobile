@@ -25,6 +25,9 @@ export interface CreateSurveyPayload {
   // Spec 96 — id provisional del productor (`local_farmer_<uuid>`): el backend
   // lo ancla al productor real al extraer (`farmer_client_aliases`, spec 95).
   clientFarmerId?: string;
+  // Spec 103 — anclas de finca y cultivo de finca del flujo por productor.
+  farmId?: string;
+  farmCropId?: string;
 }
 
 export const createSurvey = (payload: CreateSurveyPayload, opts?: RequestOptions) =>

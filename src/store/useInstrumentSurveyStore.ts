@@ -21,6 +21,16 @@ interface InstrumentSurveyState {
   instrumentId: string | null;
   instrumentName: string;
   campaignSessionId: string | null;
+  // Spec 103 — contexto del flujo por productor (null en campañas).
+  farmerId: string | null;
+  farmId: string | null;
+  farmCropId: string | null;
+  // Spec 104 — borrador de campaña heredado reanudado por el flujo anclado: la
+  // sesión se conserva para la ingesta, pero al salir se vuelve a la ficha.
+  legacyReturnFarmerId: string | null;
+  // Spec 103 (DM7) — registro de productor nuevo desde «Productores»: guarda el
+  // consentimiento digitado antes del S_REG hasta poder anclarlo.
+  registro: { consent: import('../components/consents/ConsentForm').ConsentFormValues | null } | null;
   stepOrder: number | null;
   flattenedQuestions: FlattenedQuestionItem[];
   answers: Record<string, InstrumentDraftAnswer>;
@@ -40,6 +50,9 @@ interface InstrumentSurveyState {
     instrumentName: string;
     sections: InstrumentSection[];
     campaignSessionId?: string;
+    farmerId?: string;
+    farmId?: string;
+    farmCropId?: string;
     stepOrder?: number;
     restoredAnswers?: Record<string, InstrumentDraftAnswer>;
   }) => void;
@@ -73,6 +86,11 @@ export const useInstrumentSurveyStore = create<InstrumentSurveyState>((set, get)
   instrumentId: null,
   instrumentName: '',
   campaignSessionId: null,
+  farmerId: null,
+  farmId: null,
+  farmCropId: null,
+  legacyReturnFarmerId: null,
+  registro: null,
   stepOrder: null,
   flattenedQuestions: [],
   answers: {},
@@ -80,13 +98,21 @@ export const useInstrumentSurveyStore = create<InstrumentSurveyState>((set, get)
   isSubmitting: false,
   savedQuestionId: null,
 
-  initializeSurvey({ surveyId, instrumentId, instrumentName, sections, campaignSessionId, stepOrder, restoredAnswers }) {
+  initializeSurvey({ surveyId, instrumentId, instrumentName, sections, campaignSessionId, farmerId, farmId, farmCropId, stepOrder, restoredAnswers }) {
     const flattenedQuestions = flattenSections(sections);
     set({
       surveyId,
       instrumentId,
       instrumentName,
       campaignSessionId: campaignSessionId ?? null,
+      // Spec 103 — solo el flujo por productor (sin sesión) guarda su contexto.
+      farmerId: campaignSessionId ? null : (farmerId ?? null),
+      farmId: campaignSessionId ? null : (farmId ?? null),
+      farmCropId: campaignSessionId ? null : (farmCropId ?? null),
+      legacyReturnFarmerId: null,
+      // Spec 103 — el modo registro lo fija nuevo.tsx DESPUÉS de inicializar; una
+      // encuesta nueva nunca hereda el de un registro abandonado.
+      registro: null,
       stepOrder: stepOrder ?? null,
       flattenedQuestions,
       answers: restoredAnswers ?? {},
@@ -219,6 +245,11 @@ export const useInstrumentSurveyStore = create<InstrumentSurveyState>((set, get)
       instrumentId: null,
       instrumentName: '',
       campaignSessionId: null,
+      farmerId: null,
+      farmId: null,
+      farmCropId: null,
+      legacyReturnFarmerId: null,
+      registro: null,
       stepOrder: null,
       flattenedQuestions: [],
       answers: {},

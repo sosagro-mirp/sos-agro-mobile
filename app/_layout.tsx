@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { DEFAULT_ENTRY_ROUTE } from "../src/lib/surveyAnchor";
 import { Stack, useRootNavigationState, useRouter } from "expo-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -72,7 +73,8 @@ function AuthGuard() {
         if (action.clearStack && router.canDismiss()) router.dismissAll();
         router.replace("/login");
       } else {
-        router.replace("/campaign");
+        // Spec 103 (DM11): la entrada por defecto es «Productores».
+        router.replace(DEFAULT_ENTRY_ROUTE);
       }
       prevUserRef.current = currId;
       retriesRef.current = 0;

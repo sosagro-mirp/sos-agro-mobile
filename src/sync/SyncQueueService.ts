@@ -38,9 +38,14 @@ import { farmPlotStore } from '../storage/farmPlotStore';
 import { createFarmPlot } from '../api/farmPlots';
 import type { CampaignSessionResponse } from '../types/campaign';
 import { consentRecordStore } from '../storage/consentRecordStore';
+import { sweepRegistrationConsents } from '../lib/registrationConsentSweep';
+import { shouldRefreshCoverageAfterRun } from '../lib/shouldRefreshCoverageAfterRun';
 import { submitConsent } from '../api/consents';
 import { buildConsentSyncPayload, remapConsentSessionId } from './consentSync';
 import { resolveRegistrationFlowCode } from '../lib/instrumentCodeAliases';
+import { isAnchorComplete } from '../lib/surveyAnchor';
+import { resolveConsentAnchorForSync, buildAnchoredConsentPayload } from '../lib/consentAnchor';
+import { coverageCacheStorage } from '../storage/coverageCache';
 
 const MAX_CONSECUTIVE_NETWORK_FAILURES = 5;
 const BACKOFF_BASE_MS = 1000;
@@ -63,6 +68,17 @@ class SyncQueueServiceClass {
 
   private authArgs(entry: { authToken?: string }): [RequestOptions] | [] {
     return entry.authToken ? [{ authToken: entry.authToken }] : [];
+  }
+
+  // Spec 103 (auditoría 80, M1) — pendientes de la cola completa (todos los dueños).
+  // `null` si no se pudo contar: la corrida no refresca la foto y sigue igual.
+  private async countAllPending(): Promise<number | null> {
+    try {
+      const count = await syncQueueStorage.countPending();
+      return typeof count === 'number' ? count : null;
+    } catch {
+      return null;
+    }
   }
 
   private async tokenFor(ownerUserId: string | null | undefined): Promise<string | null> {
@@ -166,6 +182,21 @@ class SyncQueueServiceClass {
         logger.error('[Sync] flushPendingChangeRequests failed, continuing anyway', err);
       }
 
+      // Spec 103 (auditoría 80, M2) — constancias del alta de un productor nuevo que
+      // quedaron sin encolar (registro sin cerrar en la app o S_REG descartado).
+      try {
+        if (canSendAnything) {
+          const swept = await sweepRegistrationConsents();
+          if (swept.enqueued.length > 0 || swept.discarded.length > 0) {
+            logger.info(
+              `[Sync] constancias de alta recuperadas: ${swept.enqueued.length} encoladas, ${swept.discarded.length} descartadas`,
+            );
+          }
+        }
+      } catch (err) {
+        logger.error('[Sync] sweepRegistrationConsents failed, continuing anyway', err);
+      }
+
       // Spec 88 — una entrada por corrida. `resolveCampaignSession()` devuelve a
       // `pending` la entrada que aplaza (spec 81), así que sin esta lista el
       // bucle la recibiría de nuevo en el siguiente `dequeueNextPending()` y
@@ -173,6 +204,10 @@ class SyncQueueServiceClass {
       // congelando la app en la ronda manual del test-088 (y de nuevo en la del
       // test-086, al combinarse con el bucle por dueño).
       const yaAtendidas: string[] = [];
+      // Spec 103 (DM4) — la foto de cobertura solo se refresca si la corrida sacó algo de la cola.
+      // Auditoría 80 (M1): se cuenta directo en la cola y para todos los dueños; el
+      // `pendingCount` del store no se actualiza al encolar y solo cuenta al usuario activo.
+      const pendingBefore = await this.countAllPending();
       for (const { ownerUserId, token } of plan.toProcess) {
         if (this.stopRun) break;
         this.stopOwnerGroup = false;
@@ -218,6 +253,26 @@ class SyncQueueServiceClass {
         }
       } catch (err) {
         logger.error('[Sync] pullResolvedChangeRequests failed, continuing anyway', err);
+      }
+
+      // Spec 103 (DM4) — tras una corrida con envíos, se refresca la foto de
+      // cobertura para que lo aplicado figure «aplicado» desde el servidor.
+      // Mejor esfuerzo: un fallo conserva la foto anterior y no afecta la sync.
+      const pendingAfter = await this.countAllPending();
+      if (
+        shouldRefreshCoverageAfterRun({ attended: yaAtendidas.length, pendingBefore, pendingAfter }) &&
+        !this.stopRun &&
+        this.consecutiveNetworkFailures === 0
+      ) {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { useCachedCampaignsStore } = require('../store/useCachedCampaignsStore') as typeof import('../store/useCachedCampaignsStore');
+          await useCachedCampaignsStore.getState().refreshCoverageSnapshot();
+        } catch (err) {
+          logger.warn(
+            `[Sync] no se pudo refrescar la foto de cobertura: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
       }
     } finally {
       // isProcessing must clear even if the cleanup below throws, or every
@@ -509,6 +564,28 @@ class SyncQueueServiceClass {
 
       if (draft.status === 'synced') {
         await syncQueueStorage.markSynced(entry.id);
+        return;
+      }
+
+      // Spec 103 (DM9) — constancia sin sesión: ancla farmerId o surveyId.
+      if (!draft.sessionId && (draft.farmerId || draft.surveyId)) {
+        const outcome = await resolveConsentAnchorForSync(draft, {
+          backendSurveyIdOf: (localId) => surveyDraftStore.getBackendSurveyId(localId),
+        });
+        if (outcome.kind === 'defer') {
+          // Vuelve a pending sin contar intento; no es un fallo.
+          await syncQueueStorage.resetInFlightToRetryById(entry.id);
+          logger.info(`[Sync] consent entry ${entry.id} deferred: ${outcome.reason}`);
+          return;
+        }
+        const response = await submitConsent(
+          buildAnchoredConsentPayload(draft, outcome.anchor),
+          ...this.authArgs(entry),
+        );
+        await consentRecordStore.markSynced(draft.id);
+        await syncQueueStorage.markSynced(entry.id);
+        logger.info(`[Sync] processed anchored consent entry ${entry.id} → ${response.consentRecordId}`);
+        this.consecutiveNetworkFailures = 0;
         return;
       }
 
@@ -902,10 +979,18 @@ class SyncQueueServiceClass {
           idRealDe: async (doc) => (await farmerCacheStorage.getByDocumentId(doc))?.farmerId ?? null,
         });
 
+    // Spec 103 — anclas de finca y cultivo del flujo por productor. Un contexto
+    // incompleto (cultivo sin finca) no se envía: queda en failed_validation.
+    if (!isAnchorComplete(draft)) {
+      throw new Error(`Contexto de encuesta incompleto (cultivo sin finca) — survey ${entry.surveyId}`);
+    }
+
     const { surveyId: realSurveyId } = await createSurvey(
       {
         instrumentIds: [draft.instrumentId],
         campaignSessionId: entry.campaignSessionId,
+        ...(draft.farmId ? { farmId: draft.farmId } : {}),
+        ...(draft.farmCropId ? { farmCropId: draft.farmCropId } : {}),
         clientSurveyId: entry.surveyId,
         ...(farmerIdParaBackend ? { farmerId: farmerIdParaBackend } : {}),
         ...(clientFarmerId ? { clientFarmerId } : {}),
@@ -1049,6 +1134,17 @@ class SyncQueueServiceClass {
 
     if (localFarmerId) {
       await db.update(surveys).set({ farmerId: r.farmerId }).where(eq(surveys.farmerId, localFarmerId));
+      // Spec 103 — constancias y foto de cobertura siguen al productor real.
+      try {
+        await consentRecordStore.remapFarmer(localFarmerId, r.farmerId);
+        await coverageCacheStorage.remapFarmer(localFarmerId, r.farmerId);
+      } catch (err) {
+        logger.warn(
+          `[Sync] failed to remap provisional farmer ${localFarmerId} in consents/coverage: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
 
       const storeState = useCampaignSessionStore.getState();
       if (storeState.localFarmerId === localFarmerId) {

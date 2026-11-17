@@ -8,7 +8,9 @@ import type { DownloadProgress } from "../store/useCachedCampaignsStore";
  * `resolveTabBarStyle`).
  */
 
-export type DownloadPhaseKind = DownloadProgress["phase"];
+// La fase `coverage` (spec 103) se muestra dentro de la fila «Campañas»: el panel
+// conserva sus tres filas.
+export type DownloadPhaseKind = Exclude<DownloadProgress["phase"], "coverage">;
 export type DownloadPhaseStatus = "done" | "current" | "pending";
 
 export interface DownloadPhaseRow {
@@ -33,7 +35,8 @@ const PHASE_LABELS: Record<DownloadPhaseKind, string> = {
 export function resolveDownloadPhases(progress: DownloadProgress | null): DownloadPhaseRow[] {
   if (!progress) return [];
 
-  const currentIndex = PHASE_ORDER.indexOf(progress.phase);
+  const phase: DownloadPhaseKind = progress.phase === "coverage" ? "campaigns" : progress.phase;
+  const currentIndex = PHASE_ORDER.indexOf(phase);
 
   return PHASE_ORDER.map((kind, index) => {
     const label = PHASE_LABELS[kind];

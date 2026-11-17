@@ -26,6 +26,9 @@ export const surveys = sqliteTable('surveys', {
   // compartida la sync envía cada registro con el token de su dueño; `null` =
   // registro anterior a la migración m0013 sin dueño asignable.
   ownerUserId: text('owner_user_id'),
+  // Spec 103 (m0015) — anclas de finca y cultivo de finca del flujo por productor.
+  farmId: text('farm_id'),
+  farmCropId: text('farm_crop_id'),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
 });
@@ -189,7 +192,10 @@ export const consentDocumentCache = sqliteTable('consent_document_cache', {
 // tabla se remapea junto con él (ver SyncQueueService).
 export const consentRecords = sqliteTable('consent_records', {
   id: text('id').primaryKey(),
-  sessionId: text('session_id').notNull(),
+  // Spec 103 (m0015) — exactamente un ancla: sesión, productor o encuesta.
+  sessionId: text('session_id'),
+  farmerId: text('farmer_id'),
+  surveyId: text('survey_id'),
   consentDocumentId: text('consent_document_id').notNull(),
   respondentName: text('respondent_name'),
   acceptedDataProcessing: integer('accepted_data_processing', { mode: 'boolean' }).notNull(),
@@ -206,4 +212,26 @@ export const consentRecords = sqliteTable('consent_records', {
     .notNull()
     .default('pending'),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+});
+
+// Spec 103 (m0015) — foto de cobertura del servidor para el flujo por productor.
+export const coverageSnapshot = sqliteTable('coverage_snapshot', {
+  id: text('id').primaryKey(), // fila única: 'active'
+  computedAt: text('computed_at').notNull(),
+  downloadedAt: integer('downloaded_at', { mode: 'timestamp' }).notNull(),
+  columns: text('columns').notNull(), // JSON: CoverageColumn[]
+});
+
+export const farmerCoverageCache = sqliteTable('farmer_coverage_cache', {
+  farmerId: text('farmer_id').primaryKey(),
+  name: text('name').notNull(),
+  documentId: text('document_id'),
+  departmentId: text('department_id'),
+  townId: text('town_id'),
+  cropIds: text('crop_ids').notNull(), // JSON string[]
+  farmsCount: integer('farms_count').notNull().default(0),
+  hasPendingConsent: integer('has_pending_consent', { mode: 'boolean' }).notNull().default(false),
+  summary: text('summary').notNull(), // JSON
+  detail: text('detail').notNull(), // JSON: fincas + instrumentos
+  computedAt: text('computed_at').notNull(),
 });

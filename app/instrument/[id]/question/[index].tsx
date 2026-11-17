@@ -19,7 +19,7 @@ export default function QuestionRoute() {
       // original version subscribed to `instrumentId` in a plain useEffect,
       // so completed.tsx's reset() (which clears instrumentId) re-ran this
       // guard on every stale, unfocused question screen at once — each one
-      // raced to router.replace("/(tabs)/campaign") and hijacked the
+      // raced to router.replace("/(tabs)/productores") and hijacked the
       // navigation queue ahead of the real advanceWithinCampaign() push,
       // sending the user to the campaigns tab instead of the next
       // instrument. useFocusEffect only invokes the callback while this
@@ -28,7 +28,7 @@ export default function QuestionRoute() {
       // "Atrás" to a stale, now-focused screen).
       const activeInstrumentId = useInstrumentSurveyStore.getState().instrumentId;
       if (activeInstrumentId !== id) {
-        router.replace("/(tabs)/campaign");
+        router.replace("/(tabs)/productores");
         return;
       }
 
