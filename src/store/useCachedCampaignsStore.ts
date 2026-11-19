@@ -103,6 +103,17 @@ export const useCachedCampaignsStore = create<CachedCampaignsState>((set, get) =
       // Un instrumento de cobertura que falla se omite: no debe impedir actualizar
       // (auditoría 79). Esa unidad queda sin «Aplicar» hasta el próximo refresh.
       const skippedCoverageInstruments: string[] = [];
+      // La foto cuenta como un paso; cada instrumento suma otro, para que la
+      // barra avance en vez de quedarse en 0 % hasta el final.
+      const coverageTotal = extraIds.length + 1;
+      set({
+        downloadProgress: {
+          phase: 'coverage',
+          currentName: 'Descargando instrumentos de cobertura…',
+          done: 1,
+          total: coverageTotal,
+        },
+      });
       for (const instrumentId of extraIds) {
         try {
           instruments.push(await fetchInstrumentRender(instrumentId));
@@ -110,6 +121,11 @@ export const useCachedCampaignsStore = create<CachedCampaignsState>((set, get) =
           skippedCoverageInstruments.push(instrumentId);
           captureError(err, { store: 'useCachedCampaignsStore', action: 'refresh', instrumentId });
         }
+        set((s) => ({
+          downloadProgress: s.downloadProgress
+            ? { ...s.downloadProgress, done: s.downloadProgress.done + 1 }
+            : null,
+        }));
       }
 
       // ── Phase 3: pre-cache S_REG, S1 and S2 (always refresh) ─────────────
